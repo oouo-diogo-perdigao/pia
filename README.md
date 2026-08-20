@@ -24,3 +24,5 @@ Set-ExecutionPolicy -Scope Process Bypass
 Contribuições e desenvolvimento
 - Esse repositório é modular: adicione novos serviços na raiz (por exemplo, um módulo para análise de sentimentos ou um chatbot offline) seguindo o padrão de ter um `server.py`, `install.ps1` e atalhos em `startup/` quando fizer sentido.
 - Antes de abrir PRs, rode os scripts de instalação e garanta que as novas dependências sejam compatíveis com execução local e sejam adicionadas em `requirements.txt` correspondentes.
+
+![O que é a PIA?](./logo.png)
