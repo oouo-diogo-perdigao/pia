@@ -1,0 +1,5 @@
+.venv
+.env
+softwares
+logs
+speech_to_text/models_cache

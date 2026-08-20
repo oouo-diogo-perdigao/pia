@@ -1,0 +1,5 @@
+kokoro>=0.9.4
+sounddevice>=0.5.2
+numpy>=2.0
+python-dotenv>=1.0.0
+torch

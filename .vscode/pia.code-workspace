@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../Open-LLM-VTuber"
+		}
+	],
+	"settings": {
+		"powershell.cwd": "speech_to_text",
+		"postman.settings.dotenv-detection-notification-visibility": false
+	}
+}
