@@ -8,46 +8,42 @@ EndSound := A_ScriptDir "..\..\sounds\end.mp3"
 
 global IsListening := false
 global AnimFrame := 0
+global ConnectionFailures := 0 ; Contador para tratar erros de conexão
 
 ^!d:: {
-    global DictationPort, StartSound, EndSound, IsListening
+    global DictationPort, StartSound, EndSound, IsListening, ConnectionFailures
 
     if (IsListening) {
+        ; Dispara o stop em segundo plano (assíncrono)
+        HttpPostAsync("/stop", "{}")
+
         ; Parar Gravação
         IsListening := false
+        ToolTip("Processando áudio...")
         
         if FileExist(EndSound) {
             SoundPlay(EndSound)
         }
-        
-        ToolTip("Processando áudio...")
-        HttpPost("/stop", "{}")
-        
-        ; NÃO desligamos o timer aqui! 
-        ; O PollTranscription continuará rodando em segundo plano
-        ; até drenar todo o texto que o servidor ainda está transcrevendo.
         return
     }
 
-    ; Iniciar Gravação
-    ToolTip("Iniciando...")
+    ; 1. Dispara a requisição HTTP em paralelo imediatamente
+    HttpPostAsync("/start", "{}")
+
+    ; 2. Atualiza interface e áudio INSTANTANEAMENTE ao apertar a tecla
+    IsListening := true
+    ConnectionFailures := 0 ; Reseta o contador de erros
+    ToolTip("Escutando")
     if FileExist(StartSound) {
         SoundPlay(StartSound)
     }
 
-    resp := HttpPost("/start", "{}")
-    if (resp != "") {
-        IsListening := true
-        ToolTip("Escutando")
-        SetTimer(PollTranscription, 150)
-    } else {
-        ToolTip("Erro ao conectar no servidor!")
-        SetTimer(() => ToolTip(), -2000)
-    }
+    ; 3. Inicia o Polling para checar resposta e capturar áudio
+    SetTimer(PollTranscription, 150)
 }
 
 PollTranscription() {
-    global DictationPort, IsListening, AnimFrame
+    global DictationPort, IsListening, AnimFrame, ConnectionFailures
 
     req := ComObject("WinHttp.WinHttpRequest.5.1")
     try {
@@ -55,6 +51,7 @@ PollTranscription() {
         req.Send()
 
         if (req.Status == 200) {
+            ConnectionFailures := 0 ; Sucesso! Reseta falhas
             body := req.ResponseText
             
             isSpeaking := InStr(body, '"is_speaking": true')
@@ -75,7 +72,7 @@ PollTranscription() {
                 }
             }
 
-            ; 2. Captura e digita qualquer texto retornado (mesmo após parar de escutar)
+            ; 2. Captura e digita qualquer texto retornado
             hasNewText := false
             if RegExMatch(body, '"text_chunks"\s*:\s*\[(.*?)\]', &match) {
                 chunks := match[1]
@@ -88,26 +85,34 @@ PollTranscription() {
                 }
             }
 
-            ; 3. Condição de encerramento do Timer quando pausado
+            ; 3. Encerramento normal quando pausado
             if (!IsListening && !isTranscribing && !hasNewText) {
                 SetTimer(PollTranscription, 0)
                 ToolTip() ; Remove a mensagem da tela
             }
         }
     } catch {
-        ; Silencia exceções de conexão temporárias
+        ; Se o servidor estiver offline, o catch será acionado.
+        ; Se falhar 3 vezes consecutivas (450ms), encerra e avisa o usuário.
+        ConnectionFailures++
+        if (IsListening && ConnectionFailures >= 3) {
+            IsListening := false
+            SetTimer(PollTranscription, 0)
+            ToolTip("Erro ao conectar no servidor!")
+            SetTimer(() => ToolTip(), -2000)
+        }
     }
 }
 
-HttpPost(path, body) {
+; Função para disparar HTTP POST sem bloquear o script (Assíncrono)
+HttpPostAsync(path, body) {
     global DictationPort
     try {
         req := ComObject("WinHttp.WinHttpRequest.5.1")
-        req.Open("POST", "http://127.0.0.1:" DictationPort path, false)
+        req.Open("POST", "http://127.0.0.1:" DictationPort path, true)
         req.SetRequestHeader("Content-Type", "application/json")
         req.Send(body)
-        return req.ResponseText
     } catch {
-        return ""
+        ; Ignora exceções imediatas de disparo
     }
 }

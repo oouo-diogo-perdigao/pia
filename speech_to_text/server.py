@@ -168,11 +168,15 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json(409, {"ok": False, "error": "Já está gravando."})
                     return
 
-                logging.info("[POST /start] Iniciando escuta...")
+                logging.info("[POST /start] Iniciando escuta instantânea...")
                 LAST_USED_TIME = time.time()
-                get_or_load_agent()
+
+                # 1. Inicia a captura do microfone PRIMEIRO (resposta instantânea ao botão)
                 RECORDER.start()
                 STATUS = "recording"
+
+                # 2. Carrega o modelo em segundo plano (não bloqueia a resposta do HTTP)
+                threading.Thread(target=get_or_load_agent, daemon=True).start()
 
             self.send_json(200, {"ok": True})
             return
