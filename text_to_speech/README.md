@@ -13,6 +13,7 @@ Custo de memoria parado < 2 mb
 1. Abra PowerShell nesta pasta.
 2. Execute:
 ```powershell
+cd text_to_speech
 Set-ExecutionPolicy -Scope Process Bypass
 .\install.ps1
 ```

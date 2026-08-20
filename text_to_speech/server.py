@@ -8,6 +8,7 @@ import threading
 import time
 import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import numpy as np
 import sounddevice as sd
@@ -30,10 +31,49 @@ IDLE_TIMEOUT = int(
 
 DEVICE = os.getenv("DEVICE", "cuda" if torch.cuda.is_available() else "cpu").strip()
 
+# ==============================================================================
+# CONFIGURAÇÃO DE LOGS (LOG PRINCIPAL + LOG SECUNDÁRIO DE TEXTOS)
+# ==============================================================================
+log_dir = Path(__file__).resolve().parent / "logs"
+log_dir.mkdir(parents=True, exist_ok=True)
+
+# 1. Configuração do Log Geral da Aplicação
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(
+            log_dir / "tts_agent.log",
+            encoding="utf-8",
+        ),
+    ],
 )
+
+# 2. Logger Exclusivo para os Textos Enviados (TTS)
+tts_text_logger = logging.getLogger("tts_text_logger")
+tts_text_logger.setLevel(logging.INFO)
+tts_text_logger.propagate = False  # Não duplica as mensagens no tts_agent.log
+
+tts_text_handler = logging.FileHandler(
+    log_dir / "tts_texts.log",
+    encoding="utf-8",
+)
+# Formatador limpo: apenas a mensagem, sem prefixos, níveis ou timestamps
+tts_text_handler.setFormatter(logging.Formatter("%(message)s"))
+tts_text_logger.addHandler(tts_text_handler)
+
+
+# Função utilitária para salvar no log secundário
+def log_tts_text(text: str):
+    """Registra o texto enviado no arquivo de log secundário (tts_texts.log)."""
+    if text and text.strip():
+        # Substitui quebras de linha internas para manter cada envio em um único registro no log
+        clean_entry = text.strip().replace("\r\n", " ").replace("\n", " ")
+        tts_text_logger.info(clean_entry)
+
+
+# ==============================================================================
 
 MODEL = None
 PIPELINE = None
@@ -180,41 +220,36 @@ def generate_audio_wav(text, voice, speed):
 
 
 def clean_text(text):
-    # Remove caracteres nulos, que podem aparecer em alguns PDFs.
+    # Remove caracteres nulos
     text = text.replace("\x00", " ")
     # TRATAMENTO DE QUEBRA DE LINHA: Converte parágrafos e quebras simples em pontuação de pausa
     text = re.sub(r"\r\n|\r|\n", ". ", text)
     # Normaliza quebras de linha
     text = re.sub(r"\r\n?", "\n", text)
-    # Remove links Markdown, mantendo apenas o texto visível. # Exemplo: [Google](https://google.com) -> Google
-    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-    # Remove blocos de código Markdown. # Exemplo: ```python ... ``` -> ...
-    text = re.sub(r"```(?:\w+)?\s*([\s\S]*?)```", r"\1", text)
-    # Remove código inline. # Exemplo: `código` -> código
-    text = re.sub(r"`([^`]+)`", r"\1", text)
-    # Remove negrito e itálico Markdown. # **texto** -> texto # __texto__ -> texto # *texto* -> texto # _texto_ -> texto
-    text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
     # Remove links Markdown, mantendo apenas o texto visível.
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    # Remove blocos de código Markdown.
+    text = re.sub(r"```(?:\w+)?\s*([\s\S]*?)```", r"\1", text)
+    # Remove código inline.
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    # Remove negrito e itálico Markdown.
+    text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
     text = re.sub(r"__(.*?)__", r"\1", text)
-    # Remove negrito e itálico Markdown. # **texto** -> texto # __texto__ -> texto # *texto* -> texto # _texto_ -> texto
     text = re.sub(r"(?<!\w)\*(.*?)\*(?!\w)", r"\1", text)
-    # Remove negrito e itálico Markdown. # **texto** -> texto # __texto__ -> texto # *texto* -> texto # _texto_ -> texto
     text = re.sub(r"(?<!\w)_(.*?)_(?!\w)", r"\1", text)
     # Remove cabeçalhos Markdown.
     text = re.sub(r"(?m)^\s{0,3}#{1,6}\s+", "", text)
-    # Remove citações Markdown. # > texto -> texto
+    # Remove citações Markdown.
     text = re.sub(r"(?m)^\s*>\s?", "", text)
-    # Remove marcadores de listas. # - item -> item # * item -> item # + item -> item
+    # Remove marcadores de listas.
     text = re.sub(r"(?m)^\s*[-*+]\s+", "", text)
-    # Remove marcadores de checkbox. # - [ ] tarefa -> tarefa # - [x] tarefa -> tarefa
+    # Remove marcadores de checkbox.
     text = re.sub(r"(?m)^\s*\[[ xX]\]\s*", "", text)
     # Remove linhas horizontais Markdown.
     text = re.sub(r"(?m)^\s*([-*_])(?:\s*\1){2,}\s*$", "", text)
     # Remove espaços repetidos.
     text = re.sub(r"[ \t]+", " ", text)
     # Reduz excesso de linhas vazias.
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
@@ -280,7 +315,11 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json(400, {"ok": False, "error": "Texto vazio."})
                     return
 
-                # Adiciona o trabalho à fila e BLOQUEIA até que a reprodução termine
+                # REGISTRA NO LOG SECUNDÁRIO DE TEXTOS LIDOS
+                log_tts_text(text)
+                logging.info("[SPEAK] Recebido novo texto para leitura local.")
+
+                # Adiciona o trabalho à fila
                 PLAYER.add_job(text, voice, speed)
                 self.send_json(
                     200,
@@ -291,6 +330,7 @@ class Handler(BaseHTTPRequestHandler):
             # ROTA AHK: Parar áudio local
             if self.path == "/stop":
                 PLAYER.stop()
+                logging.info("[STOP] Reprodução interrompida via solicitação.")
                 self.send_json(200, {"ok": True, "status": "stopped"})
                 return
 
@@ -306,6 +346,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(text, str) or not text.strip():
                     self.send_json(400, {"ok": False, "error": "Texto vazio."})
                     return
+
+                # REGISTRA NO LOG SECUNDÁRIO DE TEXTOS LIDOS
+                log_tts_text(text)
+                logging.info("[GENERATE] Recebido novo texto para geração de WAV.")
 
                 wav_data = generate_audio_wav(text, voice, speed)
                 if not wav_data:

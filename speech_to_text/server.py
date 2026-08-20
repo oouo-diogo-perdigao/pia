@@ -43,6 +43,17 @@ logging.basicConfig(
         ),
     ],
 )
+# --- Logger exclusivo para transcrições ---
+transcription_logger = logging.getLogger("transcription_logger")
+transcription_logger.setLevel(logging.INFO)
+transcription_logger.propagate = False  # Impede de duplicar no voice_agent.log
+
+transcription_handler = logging.FileHandler(
+    log_dir / "transcriptions.log", encoding="utf-8"
+)
+# Formato apenas com a mensagem pura, sem data/hora ou level
+transcription_handler.setFormatter(logging.Formatter("%(message)s"))
+transcription_logger.addHandler(transcription_handler)
 
 STATE_LOCK = threading.RLock()
 STATUS = "idle"  # "idle", "recording"
@@ -95,7 +106,12 @@ def worker_transcription():
             text = agent.transcribe_chunk(chunk)
 
             if text:
+                # Grava a mensagem formatada no log geral da aplicação
                 logging.info("[TRANSCRICAO CONCLUIDA]: %s", text)
+
+                # Grava SOMENTE o texto limpo no arquivo transcriptions.log
+                transcription_logger.info(text)
+
                 TRANSCRIBED_TEXTS.put(text)
             else:
                 logging.info("[TRANSCRICAO]: (Sem texto inteligível no chunk)")
