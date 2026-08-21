@@ -6,7 +6,7 @@ scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
 
 ' Define o caminho do Python da .venv e do script server.py
 pythonExe = scriptDir & "\..\.venv\Scripts\python.exe"
-serverScript = scriptDir & "\..\server.py"
+serverScript = scriptDir & "\..\server_stt.py"
 
 ' Executa em segundo plano sem janela (o parâmetro 0 oculta a janela)
 WshShell.Run """" & pythonExe & """ """ & serverScript & """", 0, False

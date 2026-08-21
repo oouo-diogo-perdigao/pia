@@ -26,3 +26,9 @@ Contribuições e desenvolvimento
 - Antes de abrir PRs, rode os scripts de instalação e garanta que as novas dependências sejam compatíveis com execução local e sejam adicionadas em `requirements.txt` correspondentes.
 
 ![O que é a PIA?](./logo.png)
+
+## Rodar local
+
+`.venv\Scripts\Activate.ps1`
+`python server.py`
+
