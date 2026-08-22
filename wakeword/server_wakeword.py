@@ -5,38 +5,92 @@ import pyaudio
 import openwakeword
 from openwakeword.model import Model
 import pygame
-import webbrowser
 import os
 import difflib
+import importlib
+import sys
 
-RATE = 16000
-CHANNELS = 1
-CHUNK = 1280
-THRESHOLD = 0.5
+RATE = int(os.getenv("RATE", 16000))
+CHANNELS = int(os.getenv("CHANNELS", 1))
+CHUNK = int(os.getenv("CHUNK", 1280))
+THRESHOLD = float(os.getenv("THRESHOLD", 0.5))
 
 # URLs dos Serviços
-STT_SERVER_URL = "http://127.0.0.1:8767"  # Servidor STT
-TTS_SERVER_URL = "http://127.0.0.1:8765"  # Endpoint da sua rota TTS
+STT_SERVER_URL = os.getenv("STT_SERVER_URL", "http://127.0.0.1:8767")
+TTS_SERVER_URL = os.getenv("TTS_SERVER_URL", "http://127.0.0.1:8765")
+AGENT_SERVER_URL = os.getenv("AGENT_SERVER_URL", "http://127.0.0.1:8766")
+
+# URLs dos Serviços
 
 StartSound = "..\\sounds\\start.mp3"
 EndSound = "..\\sounds\\end.mp3"
 
 pygame.mixer.init()
 
-# Lista de comandos conhecidos para match por similaridade
-COMMAND_ACTIONS = {
-    "abrir navegador": lambda: webbrowser.open("https://www.google.com"),
-    "abrir bloco de notas": lambda: os.system("notepad.exe"),
-}
+# Dicionário dinâmico global de comandos
+COMMAND_ACTIONS = {}
+
+
+def send_to_agent(prompt_text: str):
+    """Envia a requisição com timeout de leitura mínimo (Fire and Forget)."""
+    try:
+        print(f"\n[AGENT REQUEST]: Disparando requisição -> '{prompt_text}'")
+        # timeout=(timeout_de_conexao, timeout_de_resposta)
+        requests.post(
+            f"{AGENT_SERVER_URL}/process",
+            json={"text": prompt_text},
+            timeout=(0.5, 0.1),  # Aguarda no máximo 100ms pela resposta
+        )
+    except requests.exceptions.ReadTimeout:
+        # Ignora o timeout de leitura já que não queremos esperar pela resposta
+        print("[AGENT]: Texto enviado com sucesso (sem aguardar resposta).")
+    except Exception as e:
+        print(f"[AGENT]: Erro na conexão com o servidor Agent: {e}")
+
+
+def load_commands(folder_name="comandos"):
+    """Carrega ou recarrega dinamicamente os arquivos .py na pasta 'comandos'."""
+    global COMMAND_ACTIONS
+    COMMAND_ACTIONS.clear()
+
+    if os.getcwd() not in sys.path:
+        sys.path.insert(0, os.getcwd())
+
+    if not os.path.exists(folder_name):
+        os.makedirs(folder_name)
+
+    print(f"\n[COMANDOS]: Carregando comandos dinamicamente de '{folder_name}'...")
+
+    for file_name in os.listdir(folder_name):
+        if file_name.endswith(".py") and not file_name.startswith("__"):
+            module_name = f"{folder_name}.{file_name[:-3]}"
+            try:
+                if module_name in sys.modules:
+                    module = importlib.reload(sys.modules[module_name])
+                else:
+                    module = importlib.import_module(module_name)
+
+                if hasattr(module, "COMMAND_NAME") and hasattr(module, "execute"):
+                    cmd_name = module.COMMAND_NAME.lower().strip()
+                    COMMAND_ACTIONS[cmd_name] = module.execute
+                    print(f"  -> Comando carregado: '{cmd_name}' ({file_name})")
+                else:
+                    print(
+                        f"  [ALERTA] Ignorado '{file_name}': falta COMMAND_NAME ou execute()"
+                    )
+            except Exception as e:
+                print(f"  [ERRO] Falha ao carregar '{file_name}': {e}")
+
+    # Adiciona o comando embutido de recarregar a própria lista
+    COMMAND_ACTIONS["recarregar comandos"] = lambda: load_commands(folder_name)
+    print(f"[COMANDOS]: Total de {len(COMMAND_ACTIONS)} comando(s) ativo(s).\n")
 
 
 def speak_tts(text: str):
     """Envia texto para o servidor TTS reproduzir."""
     try:
         payload = {"text": text}
-        # Tenta enviar para a rota TTS (ajuste o formato/payload se o seu endpoint exigir algo diferente)
         requests.post(f"{TTS_SERVER_URL}/speak", json=payload, timeout=5)
-
     except Exception as e:
         print(f"[TTS] Erro ao enviar áudio para o servidor TTS: {e}")
 
@@ -52,51 +106,40 @@ def play_sound(file_path):
 
 
 def process_command(text: str):
-    """
-    Filtra a palavra 'comando' e busca a ação mais similar na lista de comandos.
-    """
+    """Filtra 'comando' para rotinas locais. Se não for comando local, envia ao Agent."""
     text_clean = text.lower().strip()
 
-    # 1. Filtro obrigatorio: Verifica se contem a palavra 'comando'
-    if "comando" not in text_clean:
-        print(f"[IGNORADO]: Frase sem a palavra gatilho 'comando' -> '{text_clean}'")
-        return
+    # 1. Se contiver a palavra 'comando', tenta executar script local
+    if "comando" in text_clean:
+        action_text = text_clean.replace("comando", "").strip()
+        print(f"\n[COMANDO LOCAL DETECTADO]: '{action_text}'")
 
-    # Remove a palavra 'comando' da string para isolar a instrução
-    action_text = text_clean.replace("comando", "").strip()
-    print(f"\n[TEXTO DO COMANDO EXTRAÍDO]: '{action_text}' (Original: '{text_clean}')")
+        best_match = None
+        best_ratio = 0.0
+        cutoff = 0.6
 
-    # 2. Busca por similaridade usando difflib
-    best_match = None
-    best_ratio = 0.0
-    cutoff = 0.6  # Nível de similaridade aceitável (60%)
+        for target_cmd in COMMAND_ACTIONS.keys():
+            ratio = difflib.SequenceMatcher(None, action_text, target_cmd).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_match = target_cmd
 
-    for target_cmd in COMMAND_ACTIONS.keys():
-        ratio = difflib.SequenceMatcher(None, action_text, target_cmd).ratio()
-        if ratio > best_ratio:
-            best_ratio = ratio
-            best_match = target_cmd
+        if best_match and best_ratio >= cutoff:
+            print(f"-> Executando comando ({best_ratio*100:.1f}%): '{best_match}'")
+            COMMAND_ACTIONS[best_match]()
+            return
+        else:
+            print(f"-> Comando local não reconhecido. Repassando ao Agent...")
 
-    if best_match and best_ratio >= cutoff:
-        print(
-            f"-> Ação encontrada por similaridade ({best_ratio*100:.1f}%): '{best_match}'"
-        )
-        COMMAND_ACTIONS[best_match]()
-    else:
-        print(
-            f"-> Comando não reconhecido por similaridade suficiente (Melhor match: {best_ratio*100:.1f}%)."
-        )
+    # 2. Se não for comando local (ou falhar no match), manda para o Agent (Gemini)
+    send_to_agent(text_clean)
 
 
 def start_continuous_session(stream, model):
-    """
-    Mantém o servidor STT gravando e processando comandos continuamente.
-    """
+    """Mantém o servidor STT gravando e processando comandos continuamente."""
     print("\n>>> SESSÃO DE COMANDOS INICIADA (Fale seus comandos...) <<<")
 
     play_sound(StartSound)
-
-    # Limpeza de memória do áudio para evitar falso duplo acionamento
     model.reset()
     time.sleep(0.5)
 
@@ -131,10 +174,20 @@ def start_continuous_session(stream, model):
 
                     for text in chunks:
                         text_lower = text.lower().strip()
+                        words = text_lower.split()
 
-                        # Palavras de encerramento direto
-                        if "finalizar" in text_lower or "encerra" in text_lower:
-                            print("\n[PALAVRA DE PARADA DETECTADA VIA TRANSCRIÇÃO]")
+                        # Regra solicitada: Frase curta (<= 3 palavras) E terminada em "finalizar" ou "encerra"
+                        if (
+                            len(words) <= 3
+                            and words
+                            and (
+                                words[-1] == "finalizar"
+                                or words[-1].startswith("encerra")
+                            )
+                        ):
+                            print(
+                                f"\n[PARADA DETECTADA NO FINAL DA FRASE]: '{text_lower}'"
+                            )
                             return
 
                         # Processa comando via filtro e similaridade
@@ -144,13 +197,13 @@ def start_continuous_session(stream, model):
             except Exception as e:
                 print(f"Erro ao consultar status: {e}")
 
-            # --- B) Checa inatividade de 3 segundos no início sem fala ---
+            # --- B) Checa inatividade de 3 segundos ---
             if not prompted_inactivity and (now - last_speech_time >= 3.0):
                 print("\n[INATIVIDADE DETECTADA] Prompting via TTS...")
                 speak_tts("Em que posso ajudá-lo, mestre?")
-                prompted_inactivity = True  # Dispara apenas uma vez por sessão
+                prompted_inactivity = True
 
-            # --- C) Checa se o usuário falou a Wakeword de novo (Com Cooldown) ---
+            # --- C) Checa Wakeword para cancelar ---
             if now - session_start_time > 2.5:
                 if stream.get_read_available() >= CHUNK:
                     data = stream.read(CHUNK, exception_on_overflow=False)
@@ -176,6 +229,9 @@ def start_continuous_session(stream, model):
 
 
 def main():
+    # Carrega a pasta de comandos na inicialização
+    load_commands("comandos")
+
     print("Baixando/verificando modelos...")
     openwakeword.utils.download_models()
 

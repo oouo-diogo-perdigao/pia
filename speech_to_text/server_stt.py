@@ -15,6 +15,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+PORT = int(os.getenv("PORT", 8767))
+HOST = os.getenv("HOST", "127.0.0.1").strip()
+SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", 16000))
+CHANNELS = int(os.getenv("CHANNELS", 1))
+
 # Configuração de DLLs NVIDIA
 venv_path = site.getsitepackages()[0]
 nvidia_bin_dir = os.path.join(venv_path, "nvidia")
@@ -158,8 +163,8 @@ STT_MANAGER = STTWorkerManager()
 from src.audio_recorder import AudioRecorder
 
 RECORDER = AudioRecorder(
-    sample_rate=int(os.getenv("SAMPLE_RATE", 16000)),
-    channels=int(os.getenv("CHANNELS", 1)),
+    sample_rate=SAMPLE_RATE,
+    channels=CHANNELS,
 )
 
 
@@ -266,9 +271,6 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     mp.set_start_method("spawn", force=True)
-
-    PORT = int(os.getenv("PORT", 8767))
-    HOST = os.getenv("HOST", "127.0.0.1").strip()
 
     logging.info("Servidor STT pronto e ouvindo na porta %d", PORT)
     server = ThreadingHTTPServer((HOST, PORT), Handler)

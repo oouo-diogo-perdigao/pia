@@ -10,6 +10,7 @@ import time
 import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import sys
 
 from dotenv import load_dotenv
 
@@ -199,9 +200,14 @@ class TTSManager:
         with self.lock:
             if self.worker_process is None or not self.worker_process.is_alive():
                 logging.info("[MANAGER] Criando novo Worker Process para TTS...")
-                self.task_queue = mp.Queue()
-                self.result_queue = mp.Queue()
-                self.worker_process = mp.Process(
+
+                # Garante que o processo filho use o mesmo executável Python (venv) do processo pai
+                ctx = mp.get_context("spawn")
+                ctx.set_executable(sys.executable)
+
+                self.task_queue = ctx.Queue()
+                self.result_queue = ctx.Queue()
+                self.worker_process = ctx.Process(
                     target=tts_worker_process,
                     args=(self.task_queue, self.result_queue),
                     daemon=True,
@@ -272,10 +278,13 @@ class AudioPlayer:
         self.lock = threading.RLock()
         self.status = "idle"
         self.worker_thread = None
+        self._stop_event = threading.Event()
 
     def add_job(self, text, voice, speed):
         with self.lock:
+            self._stop_event.clear()
             self.queue.put({"text": text, "voice": voice, "speed": speed})
+            self.status = "playing"
             if self.worker_thread is None or not self.worker_thread.is_alive():
                 self.worker_thread = threading.Thread(
                     target=self._play_loop, daemon=True
@@ -283,49 +292,71 @@ class AudioPlayer:
                 self.worker_thread.start()
 
     def stop(self):
+        import sounddevice as sd
+
         with self.lock:
+            # 1. Sinaliza para interromper o processamento
+            self._stop_event.set()
+
+            # 2. Esvazia a fila de reprodução pendente
             while not self.queue.empty():
                 try:
                     self.queue.get_nowait()
                 except queue.Empty:
                     break
+
+            # 3. Interrompe a saída de som da placa imediatamente
+            try:
+                sd.stop()
+            except Exception:
+                pass
+
             self.status = "idle"
 
     def _play_loop(self):
         import sounddevice as sd
 
-        while True:
+        while not self._stop_event.is_set():
             try:
-                item = self.queue.get(timeout=1.0)
+                item = self.queue.get_nowait()
             except queue.Empty:
+                with self.lock:
+                    self.status = "idle"
                 break
 
             text, voice, speed = item["text"], item["voice"], item["speed"]
-            with self.lock:
-                self.status = "playing"
 
             try:
-                wav_bytes = TTS_MANAGER.generate_wav(text, voice, speed)
-                if wav_bytes:
-                    with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
-                        data = wf.readframes(wf.getnframes())
-                        audio_data = (
-                            (
-                                int.from_bytes(data[i : i + 2], "little", signed=True)
-                                / 32768.0
-                            )
-                            for i in range(0, len(data), 2)
-                        )
-                        import numpy as np
+                # Se pedirem cancelamento antes da geração, aborta
+                if self._stop_event.is_set():
+                    break
 
-                        arr = np.fromiter(audio_data, dtype=np.float32)
-                        sd.play(arr, samplerate=wf.getframerate())
-                        sd.wait()
+                wav_bytes = TTS_MANAGER.generate_wav(text, voice, speed)
+
+                # Se pedirem cancelamento após a geração, aborta sem tocar
+                if self._stop_event.is_set() or not wav_bytes:
+                    continue
+
+                with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
+                    data = wf.readframes(wf.getnframes())
+                    audio_data = (
+                        int.from_bytes(data[i : i + 2], "little", signed=True) / 32768.0
+                        for i in range(0, len(data), 2)
+                    )
+                    import numpy as np
+
+                    arr = np.fromiter(audio_data, dtype=np.float32)
+
+                    # Toca e espera, mas se der cancelamento durante a reprodução, o sd.stop() desbloqueia a linha
+                    sd.play(arr, samplerate=wf.getframerate())
+                    sd.wait()
+
             except Exception:
                 logging.exception("Erro durante a reprodução local.")
             finally:
-                with self.lock:
-                    self.status = "idle"
+                if self.queue.empty() or self._stop_event.is_set():
+                    with self.lock:
+                        self.status = "idle"
 
 
 PLAYER = AudioPlayer()
