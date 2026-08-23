@@ -1,0 +1,250 @@
+openapi: 3.0.3
+info:
+  title: Voice & Audio Services API (STT & TTS)
+  description: |
+    Documentação unificada dos serviços locais de áudio:
+    - **TTS Service** (Text-To-Speech): Porta `8765`
+    - **STT Service** (Speech-To-Text): Porta `8767`
+  version: 1.0.0
+
+# Servidores globais definidos como referência
+servers:
+  - url: http://127.0.0.1:8765
+    description: Servidor TTS (Text-To-Speech)
+  - url: http://127.0.0.1:8767
+    description: Servidor STT (Speech-To-Text)
+
+paths:
+  # ============================================================================
+  # ENDPOINTS DO SERVIÇO TTS (Porta 8765)
+  # ============================================================================
+  /speak:
+    post:
+      tags:
+        - TTS Service
+      summary: Enfileira texto para reprodução de áudio local
+      description: Registra o texto nos logs e envia para o player local (`AudioPlayer`).
+      servers:
+        - url: http://127.0.0.1:8765
+          description: Servidor TTS
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TTSRequest'
+      responses:
+        '200':
+          description: Texto enfileirado com sucesso.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  status:
+                    type: string
+                    example: "queued"
+        '400':
+          description: Texto ausente ou inválido.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+                example:
+                  ok: false
+                  error: "Texto vazio."
+
+  /stop:
+    post:
+      tags:
+        - TTS Service
+        - STT Service
+      summary: Interrompe a leitura local (TTS) ou pausa a gravação (STT)
+      description: |
+        - No **TTS (8765)**: Limpa a fila de reprodução local.
+        - No **STT (8767)**: Pausa a captura do microfone.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: Interrompe leitura no TTS
+        - url: http://127.0.0.1:8767
+          description: Pausa gravação no STT
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Ação executada com sucesso.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+
+  /generate:
+    post:
+      tags:
+        - TTS Service
+      summary: Sintetiza áudio e retorna arquivo WAV
+      description: Processa o texto no Kokoro/PyTorch e devolve o stream de bytes em `audio/wav`.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: Servidor TTS
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TTSRequest'
+      responses:
+        '200':
+          description: Áudio WAV gerado com sucesso.
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Requisição inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ============================================================================
+  # ENDPOINTS DO SERVIÇO STT (Porta 8767)
+  # ============================================================================
+  /start:
+    post:
+      tags:
+        - STT Service
+      summary: Inicia a captura de áudio do microfone
+      description: Ativa o gravador de áudio e inicializa o worker de transcrição de IA.
+      servers:
+        - url: http://127.0.0.1:8767
+          description: Servidor STT
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Gravação iniciada.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '409':
+          description: O serviço já está gravando.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+                example:
+                  ok: false
+                  error: "Já está gravando."
+
+  /status:
+    get:
+      tags:
+        - TTS Service
+        - STT Service
+      summary: Consulta o status do serviço
+      description: |
+        - No **TTS (8765)**: Retorna estado do player e se o modelo está carregado.
+        - No **STT (8767)**: Retorna estado da gravação, VAD e consome a fila de trechos transcritos (`text_chunks`).
+      servers:
+        - url: http://127.0.0.1:8765
+          description: Status do TTS
+        - url: http://127.0.0.1:8767
+          description: Status do STT
+      responses:
+        '200':
+          description: Status retornado com sucesso.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/TTSStatusResponse'
+                  - $ref: '#/components/schemas/STTStatusResponse'
+
+components:
+  schemas:
+    TTSRequest:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          description: Texto a ser sintetizado.
+          example: "Olá! Este é um teste de fala."
+        voice:
+          type: string
+          default: pm_santa
+          example: "pm_santa"
+        speed:
+          type: number
+          format: float
+          default: 1.0
+          example: 1.0
+
+    TTSStatusResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: true
+        status:
+          type: string
+          enum: [idle, playing]
+          example: "idle"
+        model_loaded:
+          type: boolean
+          example: true
+
+    STTStatusResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: true
+        status:
+          type: string
+          enum: [idle, recording]
+          example: "recording"
+        is_speaking:
+          type: boolean
+          example: true
+        is_transcribing:
+          type: boolean
+          example: false
+        text_chunks:
+          type: array
+          items:
+            type: string
+          example: ["Olá mundo", "Testando transcrição"]
+
+    ErrorResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: false
+        error:
+          type: string
+          example: "Descrição do erro."

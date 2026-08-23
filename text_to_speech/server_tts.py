@@ -280,10 +280,13 @@ class AudioPlayer:
         self.worker_thread = None
         self._stop_event = threading.Event()
 
-    def add_job(self, text, voice, speed):
+    def add_job(self, text, voice, speed, device=None):  # <--- Novo parâmetro
         with self.lock:
             self._stop_event.clear()
-            self.queue.put({"text": text, "voice": voice, "speed": speed})
+            # Adiciona 'device' ao item da fila
+            self.queue.put(
+                {"text": text, "voice": voice, "speed": speed, "device": device}
+            )
             self.status = "playing"
             if self.worker_thread is None or not self.worker_thread.is_alive():
                 self.worker_thread = threading.Thread(
@@ -295,17 +298,14 @@ class AudioPlayer:
         import sounddevice as sd
 
         with self.lock:
-            # 1. Sinaliza para interromper o processamento
             self._stop_event.set()
 
-            # 2. Esvazia a fila de reprodução pendente
             while not self.queue.empty():
                 try:
                     self.queue.get_nowait()
                 except queue.Empty:
                     break
 
-            # 3. Interrompe a saída de som da placa imediatamente
             try:
                 sd.stop()
             except Exception:
@@ -324,16 +324,20 @@ class AudioPlayer:
                     self.status = "idle"
                 break
 
-            text, voice, speed = item["text"], item["voice"], item["speed"]
+            # Extrai o 'device' do item
+            text, voice, speed, device = (
+                item["text"],
+                item["voice"],
+                item["speed"],
+                item.get("device"),
+            )
 
             try:
-                # Se pedirem cancelamento antes da geração, aborta
                 if self._stop_event.is_set():
                     break
 
                 wav_bytes = TTS_MANAGER.generate_wav(text, voice, speed)
 
-                # Se pedirem cancelamento após a geração, aborta sem tocar
                 if self._stop_event.is_set() or not wav_bytes:
                     continue
 
@@ -347,8 +351,11 @@ class AudioPlayer:
 
                     arr = np.fromiter(audio_data, dtype=np.float32)
 
-                    # Toca e espera, mas se der cancelamento durante a reprodução, o sd.stop() desbloqueia a linha
-                    sd.play(arr, samplerate=wf.getframerate())
+                    # Resolve o nome/alias para o dispositivo correto
+                    target_device = resolve_output_device(device)
+
+                    # Executa o áudio no dispositivo encontrado (ou no padrão se for None)
+                    sd.play(arr, samplerate=wf.getframerate(), device=target_device)
                     sd.wait()
 
             except Exception:
@@ -396,6 +403,7 @@ class Handler(BaseHTTPRequestHandler):
                 text = payload.get("text", "")
                 voice = payload.get("voice", DEFAULT_VOICE)
                 speed = float(payload.get("speed", DEFAULT_SPEED))
+                device = payload.get("device", None)  # <--- Extrai o novo parâmetro
 
                 if not isinstance(text, str) or not text.strip():
                     self.send_json(400, {"ok": False, "error": "Texto vazio."})
@@ -403,7 +411,7 @@ class Handler(BaseHTTPRequestHandler):
 
                 log_tts_text(text)
                 logging.info("[SPEAK] Novo texto enviado para a fila local.")
-                PLAYER.add_job(text, voice, speed)
+                PLAYER.add_job(text, voice, speed, device=device)  # <--- Passa o device
                 self.send_json(200, {"ok": True, "status": "queued"})
                 return
 
@@ -457,6 +465,46 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         logging.info("%s - %s", self.address_string(), fmt % args)
+
+
+def resolve_output_device(device_param):
+    """
+    Resolve o alias amigável para o nome real do dispositivo de SAÍDA.
+    Se device_param for None ou "default", retorna None (usa o padrão do Windows).
+    """
+    if not device_param or str(device_param).strip().lower() in [
+        "default",
+        "padrao",
+        "padrão",
+    ]:
+        return None
+
+    # Mapeamento de apelidos simples para buscas no nome do dispositivo
+    aliases = {
+        "alexa": "echo dot",
+        "echo": "echo dot",
+        "fone": "h510-pro",
+        "headset": "h510-pro",
+        "caixa": "usb2.0 speaker",
+    }
+
+    # Normaliza a busca
+    search_term = str(device_param).lower()
+    search_term = aliases.get(search_term, search_term)
+
+    import sounddevice as sd
+
+    # Filtra apenas dispositivos que aceitam saída (max_output_channels > 0)
+    devices = sd.query_devices()
+    for idx, dev in enumerate(devices):
+        if dev["max_output_channels"] > 0:
+            if search_term in dev["name"].lower():
+                return (
+                    idx  # Retorna o ID numérico do primeiro dispositivo correspondente
+                )
+
+    # Se não encontrar nada, cai no dispositivo padrão
+    return None
 
 
 def main():

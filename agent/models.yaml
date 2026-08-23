@@ -1,0 +1,36 @@
+model_list:
+  # 1ª Opção: Gemini 2.5 Flash (Gratuito / Nuvem)
+  # - model_name: auto-agent
+  #   litellm_params:
+  #     model: gemini/gemini-2.5-flash
+  #     api_key: os.environ/GEMINI_API_KEY
+
+  # 2ª Opção: Groq Free Tier (Fallback da nuvem)
+  # - model_name: auto-agent
+  #   litellm_params:
+  #     model: groq/llama-3.1-70b-versatile
+  #     api_key: os.environ/GROQ_API_KEY
+
+  # 3ª Opção Local: Qwen 3.8 (Leve e rápido)
+  - model_name: auto-agent
+    litellm_params:
+      model: ollama/qwen3.8
+      api_base: http://localhost:11434
+
+  # 4ª Opção Local: Qwen 3.5 27B (Para respostas mais elaboradas)
+  # - model_name: auto-agent
+  #   litellm_params:
+  #     model: ollama/qwen3.5:27b
+  #     api_base: http://localhost:11434
+
+  # 5ª Opção Local: Qwen 3-VL 8B (Visão/Multimodal)
+  - model_name: auto-agent
+    litellm_params:
+      model: ollama/qwen3-vl:8b
+      api_base: http://localhost:11434
+
+router_settings:
+  fallbacks: [{"auto-agent": ["auto-agent"]}]
+  num_retries: 2
+  allowed_fails: 1
+  cooldown_time: 300 # Tempo de espera de 5 min se o modelo der erro de cota (HTTP 429)
