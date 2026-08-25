@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import multiprocessing as mp
 import os
 import queue
@@ -15,8 +16,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-PORT = int(os.getenv("PORT", 8767))
-HOST = os.getenv("HOST", "127.0.0.1").strip()
+PORT = int(os.getenv("PORT"))
+HOST = os.getenv("HOST").strip()
 SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", 16000))
 CHANNELS = int(os.getenv("CHANNELS", 1))
 
@@ -41,6 +42,12 @@ logging.basicConfig(
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler(log_dir / "voice_agent.log", encoding="utf-8"),
+        RotatingFileHandler(
+            log_dir / "voice_agent.log",
+            maxBytes=10 * 1024 * 1024,  # Limite exato de 10 MB (10.485.760 bytes)
+            backupCount=1,
+            encoding="utf-8",
+        ),
     ],
 )
 

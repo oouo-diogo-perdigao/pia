@@ -1,7 +1,7 @@
 import os
 import requests
 
-TTS_SERVER_URL = os.getenv("TTS_SERVER_URL", "http://127.0.0.1:8765")
+TTS_SERVER_URL = os.getenv("TTS_SERVER_URL")
 
 
 def speak_tts(text: str):

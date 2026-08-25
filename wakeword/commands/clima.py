@@ -7,7 +7,7 @@ from lib.utils import speak_tts
 
 # Variáveis exigidas pelo seu sistema principal
 COMMAND_NAME = "previsao do tempo"
-TTS_SERVER_URL = os.getenv("TTS_SERVER_URL", "http://127.0.0.1:8765")
+TTS_SERVER_URL = os.getenv("TTS_SERVER_URL")
 
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"

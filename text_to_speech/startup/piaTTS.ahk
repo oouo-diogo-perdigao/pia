@@ -5,7 +5,7 @@ Persistent
 ; Configurações da fala
 Voice := "pm_santa"   ; Ex: "pm_santa", "pf_dora", etc.
 Speed := 0.95          ; Ex: 0.85 (lento), 1.0 (normal), 1.25 (rápido)
-
+server := "http://127.0.0.1:8763"
 StartSound := A_ScriptDir "..\..\sounds\start.mp3"
 EndSound := A_ScriptDir "..\..\sounds\end.mp3"
 
@@ -23,7 +23,7 @@ EndSound := A_ScriptDir "..\..\sounds\end.mp3"
     ; Servidor não está rodando.
     ; --------------------------------------------------------
     if (status = "") {
-        ToolTip("Servidor Kokoro TTS não está rodando!")
+        ToolTip("Servidor Kokoro TTS não está rodando! " server)
         SetTimer(() => ToolTip(), -2500)
         return
     }
@@ -77,7 +77,7 @@ EndSound := A_ScriptDir "..\..\sounds\end.mp3"
 GetServerStatus() {
     try {
         req := ComObject("WinHttp.WinHttpRequest.5.1")
-        req.Open("GET", "http://127.0.0.1:8765/status", false)
+        req.Open("GET", server "/status", false)
         req.Send()
 
         if (req.Status != 200)
@@ -99,9 +99,10 @@ GetServerStatus() {
 ; Envia POST para o servidor.
 ; ============================================================
 HttpPost(path, body) {
+    global server
     try {
         req := ComObject("WinHttp.WinHttpRequest.5.1")
-        req.Open("POST", "http://127.0.0.1:8765" path, false)
+        req.Open("POST", server path, false)
         req.SetRequestHeader("Content-Type", "application/json; charset=utf-8")
         req.Send(body)
 

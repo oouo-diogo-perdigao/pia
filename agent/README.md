@@ -199,19 +199,19 @@ Esses fatos entram no contexto das próximas interpretações.
 ### Status
 
 ```http
-GET http://127.0.0.1:8767/status
+GET /status
 ```
 
 ### Iniciar gravação
 
 ```http
-POST http://127.0.0.1:8767/start
+POST /start
 ```
 
 ### Encerrar/processar
 
 ```http
-POST http://127.0.0.1:8767/stop
+POST /stop
 ```
 
 ### Testar sem microfone
@@ -219,7 +219,7 @@ POST http://127.0.0.1:8767/stop
 Também existe um endpoint de desenvolvimento:
 
 ```http
-POST http://127.0.0.1:8767/text
+POST /text
 Content-Type: application/json
 
 {

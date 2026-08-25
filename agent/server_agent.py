@@ -2,24 +2,41 @@ import os
 import json
 import time
 import logging
+from logging.handlers import RotatingFileHandler
 import threading
 import requests
 import pygame
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from litellm import Router
 from dotenv import load_dotenv
 
 load_dotenv()
 
-PORT = int(os.getenv("PORT", 8766))
-HOST = os.getenv("HOST", "127.0.0.1")
+PORT = int(os.getenv("PORT"))
+HOST = os.getenv("HOST")
 
 PROCESSING_SOUND_PATH = os.path.join("..", "sounds", "end.mp3")
 
 pygame.mixer.init()
 
+# Configuração de Logs
+log_dir = Path(__file__).resolve().parent / "logs"
+log_dir.mkdir(parents=True, exist_ok=True)
+
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(log_dir / "agent.log", encoding="utf-8"),
+        RotatingFileHandler(
+            log_dir / "agent.log",
+            maxBytes=10 * 1024 * 1024,  # Limite exato de 10 MB (10.485.760 bytes)
+            backupCount=1,
+            encoding="utf-8",
+        ),
+    ],
 )
 
 # Inicializa o Roteador de LLMs carregando as prioridades e fallbacks do YAML
@@ -47,7 +64,7 @@ def speak_tts(text: str):
     """Envia o texto para o serviço local de TTS."""
     try:
         requests.post(
-            f"{os.getenv('TTS_SERVER_URL', 'http://127.0.0.1:8765')}/speak",
+            f"{os.getenv('TTS_SERVER_URL')}/speak",
             json={"text": text},
             timeout=5,
         )
@@ -69,14 +86,11 @@ class GenericAgent:
             },
             {"role": "user", "content": prompt},
         ]
-
         # O Router tenta o primeiro modelo da lista. Se estourar a cota/erro, faz fallback automático
         response = llm_router.completion(model="auto-agent", messages=messages)
-
         # Log de qual modelo realmente respondeu essa requisição
         used_model = response.get("model", "desconhecido")
         logging.info("[ROUTER] Resposta gerada usando o modelo: %s", used_model)
-
         return response.choices[0].message.content.strip()
 
 
@@ -118,14 +132,11 @@ class InactivityBufferManager:
             with self.lock:
                 if not self.buffer:
                     continue
-
                 elapsed = time.time() - self.last_update_time
                 if elapsed >= self.timeout:
                     full_prompt = " ".join(self.buffer).strip()
                     self.buffer.clear()
-
                     play_sound(PROCESSING_SOUND_PATH)
-
                     threading.Thread(
                         target=self._execute_agent, args=(full_prompt,), daemon=True
                     ).start()
@@ -144,7 +155,7 @@ BUFFER_MANAGER = InactivityBufferManager(inactivity_timeout=3.0)
 
 
 # ============================================================================
-# SERVIDOR HTTP (Porta 8766)
+# SERVIDOR HTTP
 # ============================================================================
 class AgentHandler(BaseHTTPRequestHandler):
     def send_json(self, code: int, payload: dict) -> None:
@@ -159,25 +170,21 @@ class AgentHandler(BaseHTTPRequestHandler):
         if self.path == "/process":
             content_length = int(self.headers.get("Content-Length", 0))
             raw_body = self.rfile.read(content_length).decode("utf-8")
-
             try:
                 data = json.loads(raw_body)
                 user_text = data.get("text", "").strip()
-
                 if not user_text:
                     self.send_json(400, {"ok": False, "error": "Texto ausente."})
                     return
-
                 BUFFER_MANAGER.add_text(user_text)
                 self.send_json(200, {"ok": True, "status": "buffered"})
-
             except Exception as e:
                 logging.error("[HTTP ERRO]: %s", e)
                 self.send_json(500, {"ok": False, "error": str(e)})
             return
-
         self.send_json(404, {"ok": False, "error": "Endpoint não encontrado."})
 
+    # Override para suprimir logs de requisições HTTP padrão
     def log_message(self, fmt, *args) -> None:
         pass
 

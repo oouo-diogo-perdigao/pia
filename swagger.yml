@@ -3,20 +3,20 @@ info:
   title: Voice & Audio Services API (STT & TTS)
   description: |
     Documentação unificada dos serviços locais de áudio:
-    - **TTS Service** (Text-To-Speech): Porta `8765`
-    - **STT Service** (Speech-To-Text): Porta `8767`
+    - **TTS Service** (Text-To-Speech): Porta `8763`
+    - **STT Service** (Speech-To-Text): Porta `8762`
   version: 1.0.0
 
 # Servidores globais definidos como referência
 servers:
-  - url: http://127.0.0.1:8765
+  - url: http://127.0.0.1:8763
     description: Servidor TTS (Text-To-Speech)
-  - url: http://127.0.0.1:8767
+  - url: http://127.0.0.1:8762
     description: Servidor STT (Speech-To-Text)
 
 paths:
   # ============================================================================
-  # ENDPOINTS DO SERVIÇO TTS (Porta 8765)
+  # ENDPOINTS DO SERVIÇO TTS (Porta 8763)
   # ============================================================================
   /speak:
     post:
@@ -25,7 +25,7 @@ paths:
       summary: Enfileira texto para reprodução de áudio local
       description: Registra o texto nos logs e envia para o player local (`AudioPlayer`).
       servers:
-        - url: http://127.0.0.1:8765
+        - url: http://127.0.0.1:8763
           description: Servidor TTS
       requestBody:
         required: true
@@ -64,12 +64,12 @@ paths:
         - STT Service
       summary: Interrompe a leitura local (TTS) ou pausa a gravação (STT)
       description: |
-        - No **TTS (8765)**: Limpa a fila de reprodução local.
-        - No **STT (8767)**: Pausa a captura do microfone.
+        - No **TTS (8763)**: Limpa a fila de reprodução local.
+        - No **STT (8762)**: Pausa a captura do microfone.
       servers:
-        - url: http://127.0.0.1:8765
+        - url: http://127.0.0.1:8763
           description: Interrompe leitura no TTS
-        - url: http://127.0.0.1:8767
+        - url: http://127.0.0.1:8762
           description: Pausa gravação no STT
       requestBody:
         required: false
@@ -96,7 +96,7 @@ paths:
       summary: Sintetiza áudio e retorna arquivo WAV
       description: Processa o texto no Kokoro/PyTorch e devolve o stream de bytes em `audio/wav`.
       servers:
-        - url: http://127.0.0.1:8765
+        - url: http://127.0.0.1:8763
           description: Servidor TTS
       requestBody:
         required: true
@@ -120,7 +120,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
 
   # ============================================================================
-  # ENDPOINTS DO SERVIÇO STT (Porta 8767)
+  # ENDPOINTS DO SERVIÇO STT (Porta 3)
   # ============================================================================
   /start:
     post:
@@ -129,7 +129,7 @@ paths:
       summary: Inicia a captura de áudio do microfone
       description: Ativa o gravador de áudio e inicializa o worker de transcrição de IA.
       servers:
-        - url: http://127.0.0.1:8767
+        - url: http://127.0.0.1:8762
           description: Servidor STT
       requestBody:
         required: false
@@ -165,12 +165,12 @@ paths:
         - STT Service
       summary: Consulta o status do serviço
       description: |
-        - No **TTS (8765)**: Retorna estado do player e se o modelo está carregado.
-        - No **STT (8767)**: Retorna estado da gravação, VAD e consome a fila de trechos transcritos (`text_chunks`).
+        - No **TTS (8763)**: Retorna estado do player e se o modelo está carregado.
+        - No **STT (8762)**: Retorna estado da gravação, VAD e consome a fila de trechos transcritos (`text_chunks`).
       servers:
-        - url: http://127.0.0.1:8765
+        - url: http://127.0.0.1:8763
           description: Status do TTS
-        - url: http://127.0.0.1:8767
+        - url: http://127.0.0.1:8762
           description: Status do STT
       responses:
         '200':

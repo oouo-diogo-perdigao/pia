@@ -28,7 +28,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 
 ## **5. Endpoints da API Local**
-O servidor responde no host e porta configurados via `.env` (padrão `127.0.0.1:8767`):
+O servidor responde no host e porta configurados via `.env`:
 
 * `POST /start`: Inicia a captura de áudio pelo microfone.
 * `POST /stop`: Interrompe a gravação e processa o trecho final.

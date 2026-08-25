@@ -6,10 +6,10 @@ Persistent
 ; ÚNICO COMANDO: Ctrl + Alt + T
 ; Funciona exatamente como falar a palavra de comando (Wakeword)
 ; ============================================================
-^!t:: {
+^!p:: {
     try {
         req := ComObject("WinHttp.WinHttpRequest.5.1")
-        req.Open("POST", "http://127.0.0.1:8768/trigger", false)
+        req.Open("POST", "http://127.0.0.1:8760/trigger", false)
         req.Send("{}")
 
         if (req.Status = 200) {
@@ -20,7 +20,7 @@ Persistent
             SetTimer(() => ToolTip(), -2000)
         }
     } catch as err {
-        ToolTip("Servidor Wakeword não está rodando na porta 8768")
+        ToolTip("Servidor Wakeword não está rodando na porta 8760")
         SetTimer(() => ToolTip(), -2000)
     }
 }

@@ -2,6 +2,7 @@ import difflib
 import importlib
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import queue
 import re
@@ -27,16 +28,16 @@ from lib.utils import speak_tts
 load_dotenv()
 
 HOST = os.getenv("HOST", "127.0.0.1").strip()
-PORT = int(os.getenv("WAKEWORD_PORT", "8768"))
+PORT = int(os.getenv("PORT"))
 
 RATE = int(os.getenv("RATE", "16000"))
 CHANNELS = int(os.getenv("CHANNELS", "1"))
 CHUNK = int(os.getenv("CHUNK", "1280"))
 THRESHOLD = float(os.getenv("THRESHOLD", "0.5"))
 
-STT_SERVER_URL = os.getenv("STT_SERVER_URL", "http://127.0.0.1:8767")
-TTS_SERVER_URL = os.getenv("TTS_SERVER_URL", "http://127.0.0.1:8765")
-AGENT_SERVER_URL = os.getenv("AGENT_SERVER_URL", "http://127.0.0.1:866")
+STT_SERVER_URL = os.getenv("STT_SERVER_URL")
+TTS_SERVER_URL = os.getenv("TTS_SERVER_URL")
+AGENT_SERVER_URL = os.getenv("AGENT_SERVER_URL")
 
 START_SOUND = os.path.join(os.path.dirname(__file__), "..", "sounds", "start.mp3")
 END_SOUND = os.path.join(os.path.dirname(__file__), "..", "sounds", "end.mp3")
@@ -53,6 +54,12 @@ logging.basicConfig(
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler(log_dir / "wakeword_agent.log", encoding="utf-8"),
+        RotatingFileHandler(
+            log_dir / "wakeword_agent.log",
+            maxBytes=10 * 1024 * 1024,  # Limite exato de 10 MB (10.485.760 bytes)
+            backupCount=1,
+            encoding="utf-8",
+        ),
     ],
 )
 
