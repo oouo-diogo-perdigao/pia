@@ -22,67 +22,46 @@ logging.getLogger("kokoro").setLevel(logging.ERROR)
 # WORKER (ISOLADO): O PyTorch, NumPy e Kokoro só existem AQUI
 # ==============================================================================
 def tts_worker_process(task_queue, result_queue):
-    """Processo separado responsável por carregar o Kokoro/PyTorch e gerar os áudios."""
+    """Processo separado responsável por carregar o Kokoro ONNX e gerar os áudios."""
     import numpy as np
-    import torch
-    from kokoro import KModel, KPipeline
+    from kokoro_onnx import Kokoro
 
-    device = os.getenv("DEVICE", "cuda" if torch.cuda.is_available() else "cpu").strip()
-    logging.info("[WORKER] Inicializando PyTorch e Kokoro no dispositivo: %s", device)
+    from kokoro_onnx import Kokoro
 
-    from huggingface_hub import snapshot_download
-
-    repo_id = "hexgrad/Kokoro-82M"
     model_dir = os.getenv("MODEL_DIR", "./models_cache/Kokoro-82M").strip()
+    os.makedirs(model_dir, exist_ok=True)
 
-    # 1. Define o modo 100% offline antes de qualquer chamada do HF
-    os.environ["HF_HUB_OFFLINE"] = "1"
-    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    onnx_path = os.path.join(model_dir, "kokoro-v1.0.onnx")
+    voices_path = os.path.join(model_dir, "voices-v1.0.bin")
 
-    config_path = os.path.join(model_dir, "config.json")
-    model_path = os.path.join(model_dir, "kokoro-v1_0.pth")
+    import urllib.request
 
-    # 2. Tenta checar/baixar arquivos online apenas se o modelo ainda não existir na pasta
-    if not os.path.exists(model_path):
-        os.environ["HF_HUB_OFFLINE"] = "0"
-        try:
-            logging.info(
-                "[WORKER] Modelo não encontrado localmente. Baixando em: %s", model_dir
-            )
-            snapshot_download(repo_id=repo_id, local_dir=model_dir)
-        except Exception as e:
-            logging.error("[WORKER] Falha ao baixar o modelo da rede: %s", e)
-        finally:
-            os.environ["HF_HUB_OFFLINE"] = "1"
+    if not os.path.exists(onnx_path):
+        logging.info("[WORKER] Baixando o modelo kokoro-v1.0.onnx...")
+        onnx_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
+        urllib.request.urlretrieve(onnx_url, onnx_path)
+        logging.info("[WORKER] Download do modelo ONNX concluído.")
 
-    # 3. Carrega o modelo sem vincular ao repo_id online do HF
-    model = (
-        KModel(repo_id=repo_id, config=config_path, model=model_path).to(device).eval()
-    )
-    pipeline = KPipeline(lang_code="p", model=model, repo_id=repo_id)
+    if not os.path.exists(voices_path):
+        logging.info("[WORKER] Baixando o arquivo de vozes voices-v1.0.bin...")
+        voices_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
+        urllib.request.urlretrieve(voices_url, voices_path)
+        logging.info("[WORKER] Download das vozes concluído.")
 
-    # 4. Pré-carrega as vozes locais da pasta no dicionário interno do pipeline
-    voices_dir = os.path.join(model_dir, "voices")
-    if os.path.exists(voices_dir):
-        for vfile in os.listdir(voices_dir):
-            if vfile.endswith(".pt"):
-                vname = vfile[:-3]
-                vpath = os.path.join(voices_dir, vfile)
-                pipeline.voices[vname] = torch.load(vpath, weights_only=True)
+    logging.info("[WORKER] Inicializando Kokoro via ONNX Runtime (Ultra Leve)...")
+    kokoro = Kokoro(onnx_path, voices_path)
 
-    logging.info("[WORKER] Modelo carregado e pronto.")
+    logging.info("[WORKER] Modelo ONNX carregado e pronto.")
 
     last_used = time.monotonic()
 
     while True:
         try:
-            # Aguarda tarefas na fila com timeout curto para checar inatividade
             task = task_queue.get(timeout=1.0)
         except queue.Empty:
             if time.monotonic() - last_used >= IDLE_TIMEOUT:
                 logging.info(
-                    "[WORKER] Timeout de inatividade atingido (%ds). Encerrando worker...",
-                    IDLE_TIMEOUT,
+                    "[WORKER] Timeout de inatividade atingido. Encerrando worker..."
                 )
                 break
             continue
@@ -108,29 +87,21 @@ def tts_worker_process(task_queue, result_queue):
             try:
                 logging.info("[WORKER] Iniciando processamento de texto para áudio...")
                 cleaned = clean_text(text)
-                chunks = split_text(cleaned)
-                audio_segments = []
 
-                for chunk in chunks:
-                    generator = pipeline(
-                        chunk, voice=voice, speed=speed, split_pattern=r"\n+"
-                    )
-                    for _, _, audio in generator:
-                        audio_data = np.asarray(audio, dtype=np.float32)
-                        audio_segments.append(audio_data)
+                # O kokoro-onnx lida internamente com o chunking e retorna amostras de áudio e sample_rate
+                samples, sample_rate = kokoro.create(
+                    cleaned, voice=voice, speed=speed, lang="pt-br"
+                )
 
-                if audio_segments:
+                if len(samples) > 0:
                     logging.info("[WORKER] Processamento terminado.")
-                    full_audio = np.concatenate(audio_segments)
-                    audio_pcm16 = (
-                        (full_audio * 32767).clip(-32768, 32767).astype(np.int16)
-                    )
+                    audio_pcm16 = (samples * 32767).clip(-32768, 32767).astype(np.int16)
 
                     buffer = io.BytesIO()
                     with wave.open(buffer, "wb") as wf:
                         wf.setnchannels(1)
                         wf.setsampwidth(2)
-                        wf.setframerate(SAMPLE_RATE)
+                        wf.setframerate(sample_rate)
                         wf.writeframes(audio_pcm16.tobytes())
 
                     result_queue.put(
@@ -142,23 +113,15 @@ def tts_worker_process(task_queue, result_queue):
                     )
                 else:
                     result_queue.put(
-                        {
-                            "req_id": req_id,
-                            "ok": False,
-                            "error": "Sem áudio gerado.",
-                        }
+                        {"req_id": req_id, "ok": False, "error": "Sem áudio gerado."}
                     )
             except Exception as e:
                 logging.exception("[WORKER] Erro na geração de áudio.")
                 result_queue.put({"req_id": req_id, "ok": False, "error": str(e)})
 
     # Limpeza final ao morrer
-    del pipeline, model
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    logging.info(
-        "[WORKER] Processo filho finalizado. Memória RAM e VRAM totalmente liberadas pelo SO."
-    )
+    del kokoro
+    logging.info("[WORKER] Processo filho finalizado. Memória RAM totalmente liberada.")
 
 
 # ==============================================================================
