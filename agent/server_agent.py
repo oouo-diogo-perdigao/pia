@@ -6,6 +6,9 @@ from logging.handlers import RotatingFileHandler
 import threading
 import requests
 import pygame
+
+# Inicializa o Roteador de LLMs carregando as prioridades e fallbacks do YAML
+import yaml
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from litellm import Router
@@ -39,9 +42,14 @@ logging.basicConfig(
     ],
 )
 
-# Inicializa o Roteador de LLMs carregando as prioridades e fallbacks do YAML
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "models.yaml")
-llm_router = Router(config_path=CONFIG_PATH)
+with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    config_data = yaml.safe_load(f)
+
+llm_router = Router(
+    model_list=config_data.get("model_list", []),
+    **config_data.get("router_settings", {}),
+)
 
 
 def play_sound(file_path: str):

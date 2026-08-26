@@ -37,6 +37,8 @@ if (-not (Test-Path ".env")) {
 Write-Host "Instalando dependências do requirements.txt..." -ForegroundColor Yellow
 & $Pip install -r requirements.txt
 
+& $Pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
 Write-Host "" 
 Write-Host "Instalação concluída." -ForegroundColor Green
 Write-Host "1. Abra .env e informe GEMINI_API_KEY." -ForegroundColor Cyan

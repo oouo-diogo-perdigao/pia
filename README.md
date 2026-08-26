@@ -29,6 +29,7 @@ Contribuições e desenvolvimento
 
 ## Serviços
 # Servidor do Wake Word (WW) PORT=8760
+![O que é a PIA?](./pia.svg)
 
 # Servidor do Agent (AGENT) PORT=8761
 

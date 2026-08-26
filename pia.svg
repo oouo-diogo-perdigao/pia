@@ -1,0 +1,288 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="506" height="512" viewBox="0 0 506 512">
+  <defs>
+    <!-- GRADIENTE DO SÍMBOLO: mistura ciano, azul e roxo no anel principal. -->
+    <linearGradient id="logoCores" x1="20%" y1="12%" x2="80%" y2="88%">
+      <stop offset="0%" stop-color="#25e8ff"/>
+      <stop offset="48%" stop-color="#2378ff"/>
+      <stop offset="100%" stop-color="#8e2dff"/>
+    </linearGradient>
+
+		<!-- CENTRO: deixa o miolo circular escuro, sem depender de formas irregulares. -->
+    <radialGradient id="rostoCor" cx="50%" cy="45%" r="72%">
+      <stop offset="0%" stop-color="#071521"/>
+      <stop offset="100%" stop-color="#03080f"/>
+    </radialGradient>
+
+    <!-- FUNDO: cria a atmosfera escura azulada que destaca os elementos luminosos. -->
+    <radialGradient id="bg" cx="50%" cy="45%" r="72%">
+      <stop offset="0%" stop-color="#08162b"/>
+      <stop offset="58%" stop-color="#040d1f"/>
+      <stop offset="100%" stop-color="#020611"/>
+    </radialGradient>
+
+		<!-- OLHO AZUL: gradiente vertical para brilho sem perder a cor base. -->
+    <linearGradient id="eyeBlue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#43f5ff"/>
+      <stop offset="100%" stop-color="#21a8ff"/>
+    </linearGradient>
+
+    <!-- OLHO ROXO: equivalente ao olho azul, mas em violeta/magenta. -->
+    <linearGradient id="eyePurple" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#d66bff"/>
+      <stop offset="100%" stop-color="#7a36ff"/>
+    </linearGradient>
+
+		<!-- BRILHO SUAVE: usado nos olhos para simular emissão de luz. -->
+		<filter id="eyeGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+		<!-- ÓRBITAS: gradiente discreto para as linhas circulares padronizadas. -->
+    <linearGradient id="orbitGrad" x1="10%" y1="15%" x2="90%" y2="85%">
+      <stop offset="0%" stop-color="#20dfff" stop-opacity="0.55"/>
+      <stop offset="50%" stop-color="#4b63ff" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#c34fff" stop-opacity="0.55"/>
+    </linearGradient>
+
+		<!-- GRADIENTE DE SOMBRA TRANSLÚCIDA -->
+    <linearGradient id="shadowFade" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#000000" stop-opacity="0.0"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.6"/>
+    </linearGradient>
+
+		<!-- CAUDA ESTRELA 1 (#8ba2ff) -->
+    <linearGradient id="tail1" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#8ba2ff" stop-opacity="1.0"/>
+      <stop offset="40%" stop-color="#8ba2ff" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#8ba2ff" stop-opacity="0.0"/>
+    </linearGradient>
+
+    <!-- CAUDA ESTRELAS 2, 3 e 4 (Tons roxos/magenta) -->
+    <linearGradient id="tailPurple" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#d860ff" stop-opacity="1.0"/>
+      <stop offset="40%" stop-color="#b049ff" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#9748ff" stop-opacity="0.0"/>
+    </linearGradient>
+
+    <!-- CAUDA ESTRELA 5 (#ba4dff) -->
+    <linearGradient id="tail5" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ba4dff" stop-opacity="1.0"/>
+      <stop offset="40%" stop-color="#ba4dff" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#ba4dff" stop-opacity="0.0"/>
+    </linearGradient>
+
+    <!-- CAUDA ESTRELA 6 (Nova cor ajustada para ciano/azul claro brilhante) -->
+    <linearGradient id="tail6" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#43f5ff" stop-opacity="1.0"/>
+      <stop offset="40%" stop-color="#21a8ff" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#21a8ff" stop-opacity="0.0"/>
+    </linearGradient>
+
+    <!-- CAUDA ESTRELA 7 (Tons azuis ciano) -->
+    <linearGradient id="tailBlueDT" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#20ddff" stop-opacity="1.0"/>
+      <stop offset="40%" stop-color="#19cfff" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#19cfff" stop-opacity="0.0"/>
+    </linearGradient>
+
+		<!-- CAUDA ESTRELA 8 (Tons azuis ciano) -->
+    <linearGradient id="tailBlueTD" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#20ddff" stop-opacity="1.0"/>
+      <stop offset="40%" stop-color="#19cfff" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#19cfff" stop-opacity="0.0"/>
+    </linearGradient>
+
+    <!-- BRILHO AJUSTADO (Um pouco mais intenso, mas suave) -->
+    <filter id="starGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="3.2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+	<style>
+    @keyframes rotateClockwise {
+      from {
+        transform: rotate(0deg);
+      }
+      to {
+        transform: rotate(360deg);
+      }
+    }
+    @keyframes rotateAntiClockwise {
+      from {
+        transform: rotate(360deg);
+      }
+      to {
+        transform: rotate(0deg);
+      }
+    }
+
+    .rotating-group-clockwise {
+      /* Ajusta a origem da rotação para o centro exato do SVG (253 256) */
+      transform-origin: 253px 256px;
+      animation: rotateClockwise 300s linear infinite;
+    }
+    .rotating-group-anti-clockwise {
+      /* Ajusta a origem da rotação para o centro exato do SVG (253 256) */
+      transform-origin: 253px 256px;
+      animation: rotateAntiClockwise 60s linear infinite;
+    }
+		
+		@keyframes blink {
+      0%, 90%, 100% {
+        transform: scaleY(1);
+      }
+      95% {
+        transform: scaleY(0.1);
+      }
+    }
+
+    .blinking-eyes {
+      /* Define o eixo da escala bem no centro horizontal e vertical dos olhos (221 + 20 = 241 no Y) */
+      transform-origin: 241px 245.5px;
+      animation: blink 600s infinite;
+    }
+
+		@keyframes lookAround {
+      0%, 98%, 100% {
+        transform: translateX(0px); /* Olhando para frente (centro) */
+      }
+      98.5% {
+        transform: translateX(-20px); /* Olha rápido para a esquerda */
+      }
+      99% {
+        transform: translateX(20px);  /* Olha rápido para a direita */
+      }
+      99.5% {
+        transform: translateX(0px);  /* Volta para o centro */
+      }
+    }
+
+    .looking-eyes {
+      /* Ponto de origem central dos olhos */
+      transform-origin: 241px 245.5px;
+      /* Repete a cada 3 segundos, mantendo a logo olhando pra frente a maior parte do tempo */
+      animation: lookAround 250s infinite ease-in-out;
+    }
+
+		/* Nova animação de pulsação (estilo caixa de som / zoom in-out) */
+    @keyframes soundPulse {
+      0%, 100% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.12);
+      }
+    }
+
+    /* Ativada via JavaScript quando a PIA estiver falando */
+    body.speaking svg {
+      animation: soundPulse 0.4s ease-in-out infinite;
+      transform-origin: 253px 256px;
+    }
+  </style>
+
+	<!-- FUNDO PRINCIPAL -->
+  <!-- <rect width="506" height="512" fill="url(#bg)"/> -->
+
+	<!-- ÓRBITAS COMPLETAS -->
+  <g fill="none" stroke-linecap="round">
+    <circle cx="253" cy="256" r="242" stroke="url(#orbitGrad)" stroke-opacity="0.28" stroke-width="1.8"/>
+    <circle cx="253" cy="256" r="219" stroke="url(#orbitGrad)" stroke-opacity="0.14" stroke-width="1.6"/>
+    <circle cx="253" cy="256" r="196" stroke="url(#orbitGrad)" stroke-opacity="0.22" stroke-width="2" stroke-dasharray="7 9"/>
+  </g>
+
+	<!-- ÓRBITAS PARCIAIS -->
+  <g opacity="0.95" fill="none" stroke-linecap="round">
+		<!-- GRUPO EM ROTAÇÃO (Estrelas 2, 3, 4 e 7) -->
+    <g class="rotating-group-anti-clockwise">
+			<!-- Estrela 2 -->
+			<path d="M 445 150 A 230 230 0 0 1 445 363" stroke="url(#tailPurple)" stroke-width="2.0"/>
+			<!-- Estrela 3 -->
+			<path d="M 445 363 A 250 250 0 0 1 400 419" stroke="url(#tailPurple)" stroke-width="1.8"/>
+			<!-- Estrela 4 -->
+			<path d="M 247 478 A 250 250 0 0 0 400 419" stroke="url(#tailPurple)" stroke-width="1.8"/>
+			<!-- Estrela 7 -->
+			<path d="M 56 352 A 220 220 0 0 1 77 126" stroke="url(#tailBlueDT)" stroke-width="1.8"/>
+		</g>
+
+		<!-- GRUPO EM ROTAÇÃO (Estrelas 1, 5, 6 e 8) -->
+    <g class="rotating-group-clockwise">
+			<!-- Estrela 1 -->
+			<path d="M 140 40 A 250 250 0 0 1 300 19" stroke="url(#tail1)" stroke-width="1.8"/>
+			<!-- Estrela 5 -->
+			<path d="M 247 498 A 250 250 0 0 0 347 478" stroke="url(#tail5)" stroke-width="2.0"/>
+			<!-- Estrela 6 -->
+			<path d="M 80 426 A 250 250 0 0 0 247 498" stroke="url(#tail6)" stroke-width="1.8"/>
+			<!-- Estrela 8 -->
+			<path d="M 33 156 A 250 250 0 0 0 31 352" stroke="url(#tailBlueTD)" stroke-width="1.8"/>
+		</g>
+  </g>
+
+	<!-- ESTRELAS -->
+  <g filter="url(#starGlow)">
+		<!-- GRUPO EM ROTAÇÃO (Estrelas 2, 3, 4 e 7) -->
+    <g class="rotating-group-anti-clockwise">
+			<!-- Estrela 2 Orbita 2-->
+			<circle cx="445" cy="150" r="5.3" fill="#d860ff" opacity="1"/>
+			<!-- Estrela 3 Orbita 2-->
+			<circle cx="445" cy="363" r="5.2" fill="#d04fff" opacity="1"/>
+			<!-- Estrela 4 Orbita 2-->
+			<circle cx="400" cy="419" r="4.3" fill="#9748ff" opacity="1"/>
+			<!-- Estrela 7 Orbita 2-->
+			<circle cx="56" cy="352" r="4.8" fill="#20ddff" opacity="1"/>
+		</g>
+
+		<!-- GRUPO EM ROTAÇÃO (Estrelas 1, 5, 6 e 8) -->
+    <g class="rotating-group-clockwise">
+			<!-- Estrela 1 Orbita 1-->
+			<circle cx="300" cy="19" r="5.8" fill="#8ba2ff" opacity="1"/>
+			<!-- Estrela 5 Orbita 1-->
+			<circle cx="247" cy="498" r="4.6" fill="#ba4dff" opacity="1"/>
+			<!-- Estrela 6 Orbita 1 (Mudada de branco para ciano/azul brilhante) -->
+			<circle cx="80" cy="426" r="4.2" fill="#43f5ff" opacity="1"/>
+			<!-- Estrela 8 Orbita 1-->
+			<circle cx="33" cy="156" r="4.8" fill="#19cfff" opacity="1"/>
+		</g>
+  </g>
+  
+	<!-- Corpo Personalizado -->
+	<path fill="url(#logoCores)" fill-rule="evenodd"
+	d="M 100 415 
+		L 100 250
+		A 150 150 0 1 1 400 250
+		A 150 150 0 0 1 250 400
+		A 150 150 0 0 1 180 382
+		A 040 040 0 0 1 220 330
+		A 070 070 0 0 1 211 327
+		A 30 30 0 0 1 185 333
+		A 50 50 0 0 1 150 305
+		L 150 350
+		A 40 60 0 0 1 100 415
+		Z" />
+
+	<!-- Efeitinho de entrar, meio sombra -->
+	<path fill="url(#shadowFade)" filter="url(#eyeGlow)" fill-rule="evenodd"
+		d="M 150 290 
+			L 173 290
+			A 070 070 0 0 0 211 327
+			A 30 30 0 0 1 185 333
+			A 50 50 0 0 1 150 305
+			Z" />
+
+	<!-- Rosto -->
+  <circle cx="250" cy="250" r="80" fill="url(#rostoCor)"/>
+
+	<g class="blinking-eyes looking-eyes">
+		<rect x="209" y="225" width="24" height="41" rx="12" fill="url(#eyePurple)" filter="url(#eyeGlow)"/>
+		<rect x="259" y="225" width="24" height="41" rx="12" fill="url(#eyeBlue)" filter="url(#eyeGlow)"/>
+	</g>
+</svg>

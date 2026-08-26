@@ -1,8 +1,13 @@
+from __future__ import annotations  # Ativa a avaliação adiada de tipagem
 import queue
 import threading
 import wave
 import logging
 import io
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from TTSManager import TTSManager
 
 
 def resolve_output_device(device_param):
@@ -49,7 +54,7 @@ def resolve_output_device(device_param):
 # PLAYER AUDIO LOCAL PARA AHK (Roda usando sounddevice isoladamente)
 # ==============================================================================
 class AudioPlayer:
-    def __init__(self, tts_manager):
+    def __init__(self, tts_manager: TTSManager):
         self.tts_manager = tts_manager
         self.queue = queue.Queue()
         self.lock = threading.RLock()
@@ -57,12 +62,19 @@ class AudioPlayer:
         self.worker_thread = None
         self._stop_event = threading.Event()
 
-    def add_job(self, text, voice, speed, device=None):  # <--- Novo parâmetro
+    def add_job(
+        self, text, voice, speed, device=None, style=None
+    ):  # <--- Adicionado style
         with self.lock:
             self._stop_event.clear()
-            # Adiciona 'device' ao item da fila
             self.queue.put(
-                {"text": text, "voice": voice, "speed": speed, "device": device}
+                {
+                    "text": text,
+                    "voice": voice,
+                    "speed": speed,
+                    "device": device,
+                    "style": style,  # <--- Guarda o estilo na fila
+                }
             )
             self.status = "playing"
             if self.worker_thread is None or not self.worker_thread.is_alive():
@@ -101,19 +113,23 @@ class AudioPlayer:
                     self.status = "idle"
                 break
 
-            # Extrai o 'device' do item
-            text, voice, speed, device = (
+            # Extrai os parâmetros do item, incluindo o estilo
+            text, voice, speed, device, style = (
                 item["text"],
                 item["voice"],
                 item["speed"],
                 item.get("device"),
+                item.get("style"),
             )
 
             try:
                 if self._stop_event.is_set():
                     break
 
-                wav_bytes = self.tts_manager.generate_wav(text, voice, speed)
+                # Passa o style para o manager decidir qual engine acionar
+                wav_bytes = self.tts_manager.generate_wav(
+                    text, voice, speed, style=style
+                )
 
                 if self._stop_event.is_set() or not wav_bytes:
                     continue

@@ -1,6 +1,10 @@
 import os
 import requests
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 TTS_SERVER_URL = os.getenv("TTS_SERVER_URL")
 
 

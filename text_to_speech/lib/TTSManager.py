@@ -22,36 +22,11 @@ logging.getLogger("kokoro").setLevel(logging.ERROR)
 # WORKER (ISOLADO): O PyTorch, NumPy e Kokoro só existem AQUI
 # ==============================================================================
 def tts_worker_process(task_queue, result_queue):
-    """Processo separado responsável por carregar o Kokoro ONNX e gerar os áudios."""
     import numpy as np
-    from kokoro_onnx import Kokoro
 
-    from kokoro_onnx import Kokoro
-
-    model_dir = os.getenv("MODEL_DIR", "./models_cache/Kokoro-82M").strip()
-    os.makedirs(model_dir, exist_ok=True)
-
-    onnx_path = os.path.join(model_dir, "kokoro-v1.0.onnx")
-    voices_path = os.path.join(model_dir, "voices-v1.0.bin")
-
-    import urllib.request
-
-    if not os.path.exists(onnx_path):
-        logging.info("[WORKER] Baixando o modelo kokoro-v1.0.onnx...")
-        onnx_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
-        urllib.request.urlretrieve(onnx_url, onnx_path)
-        logging.info("[WORKER] Download do modelo ONNX concluído.")
-
-    if not os.path.exists(voices_path):
-        logging.info("[WORKER] Baixando o arquivo de vozes voices-v1.0.bin...")
-        voices_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
-        urllib.request.urlretrieve(voices_url, voices_path)
-        logging.info("[WORKER] Download das vozes concluído.")
-
-    logging.info("[WORKER] Inicializando Kokoro via ONNX Runtime (Ultra Leve)...")
-    kokoro = Kokoro(onnx_path, voices_path)
-
-    logging.info("[WORKER] Modelo ONNX carregado e pronto.")
+    # Variáveis dos modelos começam vazias (não consomem memória até serem chamados)
+    kokoro = None
+    qwen_model = None
 
     last_used = time.monotonic()
 
@@ -66,15 +41,10 @@ def tts_worker_process(task_queue, result_queue):
                 break
             continue
         except (KeyboardInterrupt, EOFError):
-            logging.info(
-                "[WORKER] Interrupção de teclado recebida. Encerrando worker suavemente..."
-            )
             break
 
         cmd = task.get("cmd")
-
         if cmd == "SHUTDOWN":
-            logging.info("[WORKER] Recebido comando de encerramento manual.")
             break
 
         if cmd == "GENERATE":
@@ -83,15 +53,68 @@ def tts_worker_process(task_queue, result_queue):
             text = task["text"]
             voice = task["voice"]
             speed = task["speed"]
+            style = task.get("style")
 
             try:
-                logging.info("[WORKER] Iniciando processamento de texto para áudio...")
                 cleaned = clean_text(text)
+                samples = None
+                sample_rate = 24000
 
-                # O kokoro-onnx lida internamente com o chunking e retorna amostras de áudio e sample_rate
-                samples, sample_rate = kokoro.create(
-                    cleaned, voice=voice, speed=speed, lang="pt-br"
-                )
+                if style:
+                    # --- CAMINHO QWEN-TTS (Carrega apenas se houver style) ---
+                    logging.info(
+                        f"[WORKER] Usando Qwen-TTS com instrução de estilo: '{style}'"
+                    )
+                    if qwen_model is None:
+                        import torch
+                        from qwen_tts import Qwen3TTSModel
+
+                        logging.info(
+                            "[WORKER] Carregando Qwen3-TTS (1.7B) na GPU (RTX 3080)..."
+                        )
+                        qwen_model = Qwen3TTSModel.from_pretrained(
+                            "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+                            torch_dtype=torch.float16,
+                            device_map="cuda",
+                        )
+
+                    wavs, sample_rate = qwen_model.generate_custom_voice(
+                        text=cleaned,
+                        language="Portuguese",
+                        speaker=voice if voice else "Ryan",
+                        instruct=style,
+                    )
+                    samples = wavs[0]
+                else:
+                    # --- CAMINHO KOKORO (Carrega apenas se NÃO houver style) ---
+                    if kokoro is None:
+                        from kokoro_onnx import Kokoro
+
+                        model_dir = os.getenv(
+                            "MODEL_DIR", "./models_cache/Kokoro-82M"
+                        ).strip()
+                        os.makedirs(model_dir, exist_ok=True)
+                        onnx_path = os.path.join(model_dir, "kokoro-v1.0.onnx")
+                        voices_path = os.path.join(model_dir, "voices-v1.0.bin")
+
+                        import urllib.request
+
+                        if not os.path.exists(onnx_path):
+                            onnx_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
+                            urllib.request.urlretrieve(onnx_url, onnx_path)
+                        if not os.path.exists(voices_path):
+                            voices_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
+                            urllib.request.urlretrieve(voices_url, voices_path)
+
+                        logging.info(
+                            "[WORKER] Inicializando Kokoro via ONNX Runtime sob demanda..."
+                        )
+                        kokoro = Kokoro(onnx_path, voices_path)
+
+                    logging.info("[WORKER] Usando Kokoro (Modo Padrão)...")
+                    samples, sample_rate = kokoro.create(
+                        cleaned, voice=voice, speed=speed, lang="pt-br"
+                    )
 
                 if len(samples) > 0:
                     logging.info("[WORKER] Processamento terminado.")
@@ -119,9 +142,11 @@ def tts_worker_process(task_queue, result_queue):
                 logging.exception("[WORKER] Erro na geração de áudio.")
                 result_queue.put({"req_id": req_id, "ok": False, "error": str(e)})
 
-    # Limpeza final ao morrer
-    del kokoro
-    logging.info("[WORKER] Processo filho finalizado. Memória RAM totalmente liberada.")
+    if kokoro:
+        del kokoro
+    if qwen_model:
+        del qwen_model
+    logging.info("[WORKER] Processo filho finalizado.")
 
 
 # ==============================================================================
@@ -196,7 +221,7 @@ class TTSManager:
                 )
                 self.worker_process.start()
 
-    def generate_wav(self, text, voice, speed, timeout=60):
+    def generate_wav(self, text, voice, speed, style=None, timeout=180):
         self._ensure_worker_running()
 
         with self.lock:
@@ -210,6 +235,7 @@ class TTSManager:
                 "text": text,
                 "voice": voice,
                 "speed": speed,
+                "style": style,  # <--- Repassa o style para o worker
             }
         )
 

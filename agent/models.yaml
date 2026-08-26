@@ -30,7 +30,7 @@ model_list:
       api_base: http://localhost:11434
 
 router_settings:
-  fallbacks: [{"auto-agent": ["auto-agent"]}]
+  fallbacks: []
   num_retries: 2
   allowed_fails: 1
   cooldown_time: 300 # Tempo de espera de 5 min se o modelo der erro de cota (HTTP 429)
