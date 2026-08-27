@@ -144,6 +144,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(500, {"ok": False, "error": str(exc)})
 
     def do_GET(self):
+        if self.path == "/warmup":
+            logging.info("[WARMUP] Aquecendo Worker do TTS antecipadamente...")
+            TTS_MANAGER.ensure_worker_running()
+            self.send_json(200, {"ok": True, "status": "warmed_up"})
+            return
+
         if self.path == "/status":
             with PLAYER.lock:
                 status = PLAYER.status

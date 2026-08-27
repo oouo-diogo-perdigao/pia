@@ -14,7 +14,7 @@ model_list:
   # 3ª Opção Local: Qwen 3.8 (Leve e rápido)
   - model_name: auto-agent
     litellm_params:
-      model: ollama/qwen3.8
+      model: ollama/qwen3:8b
       api_base: http://localhost:11434
 
   # 4ª Opção Local: Qwen 3.5 27B (Para respostas mais elaboradas)

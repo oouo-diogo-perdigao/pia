@@ -180,6 +180,9 @@ def start_continuous_session(stream, model):
 
     logging.info(">>> SESSÃO DE COMANDOS INICIADA <<<")
 
+    # Aquece os serviços de IA estritamente no momento do comando
+    warm_up_services()
+
     try:
         from commands import modo_ditado
     except ImportError:
@@ -550,21 +553,42 @@ def audio_listening_loop():
         audio.terminate()
 
 
+def warm_up_services():
+    """Faz chamadas iniciais para pré-carregar os modelos de STT, TTS e Agent na memória."""
+
+    def _ping(url, name):
+        try:
+            logging.info(f"[WAKEWORD] Pré-aquecendo o servidor {name}...")
+            requests.get(url)
+        except Exception as e:
+            logging.warning(f"[WAKEWORD] Não foi possível pré-aquecer o {name}: {e}")
+
+    threading.Thread(
+        target=lambda: _ping(f"{STT_SERVER_URL}/warmup", "STT"), daemon=True
+    ).start()
+    threading.Thread(
+        target=lambda: _ping(f"{TTS_SERVER_URL}/warmup", "TTS"), daemon=True
+    ).start()
+    threading.Thread(
+        target=lambda: _ping(f"{AGENT_SERVER_URL}/warmup", "Agent"), daemon=True
+    ).start()
+
+
 # ==============================================================================
 # MAIN ENGINE
 # ==============================================================================
 def main():
     load_commands("commands")
 
-    # 1. Inicia o Servidor HTTP em background
+    # Inicia o Servidor HTTP em background
     http_thread = threading.Thread(target=run_http_server, daemon=True)
     http_thread.start()
 
-    # 2. Inicia o loop de escuta do microfone/wakeword em background
+    # Inicia o loop de escuta do microfone/wakeword em background
     audio_thread = threading.Thread(target=audio_listening_loop, daemon=True)
     audio_thread.start()
 
-    # 3. Roda o QApplication na THREAD PRINCIPAL (exigência do PyQt para evitar warnings e bugs)
+    # Roda o QApplication na THREAD PRINCIPAL (exigência do PyQt para evitar warnings e bugs)
     run_overlay_app()
 
 

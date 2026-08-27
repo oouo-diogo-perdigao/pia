@@ -6,6 +6,8 @@ from logging.handlers import RotatingFileHandler
 import threading
 import requests
 import pygame
+import warnings  # <--- Adicionado aqui
+import litellm  # <--- Adicionado aqui
 
 # Inicializa o Roteador de LLMs carregando as prioridades e fallbacks do YAML
 import yaml
@@ -15,6 +17,11 @@ from litellm import Router
 from dotenv import load_dotenv
 
 load_dotenv()
+
+os.environ["LITELLM_LOG"] = "ERROR"
+# Suprime os avisos internos do LiteLLM sobre custos de modelos
+litellm.suppress_debug_info = True
+warnings.filterwarnings("ignore", category=UserWarning, module="litellm")
 
 PORT = int(os.getenv("PORT"))
 HOST = os.getenv("HOST")
@@ -190,6 +197,34 @@ class AgentHandler(BaseHTTPRequestHandler):
                 logging.error("[HTTP ERRO]: %s", e)
                 self.send_json(500, {"ok": False, "error": str(e)})
             return
+        self.send_json(404, {"ok": False, "error": "Endpoint não encontrado."})
+
+    def do_GET(self) -> None:
+        if self.path == "/warmup":
+            logging.info("[WARMUP] Aquecendo conexões do Agent/LiteLLM...")
+
+            # Função para disparar a mesma estrutura de prompt em background e aquecer o modelo correto
+            def _warmup_llm():
+                try:
+                    messages = [
+                        {
+                            "role": "system",
+                            "content": "Você é um assistente de voz prestativo e sucinto. Responda de forma direta em português.",
+                        },
+                        {"role": "user", "content": "olá"},
+                    ]
+                    llm_router.completion(
+                        model="auto-agent", messages=messages, max_tokens=5
+                    )
+                    logging.info("[WARMUP] Modelo de IA aquecido com sucesso!")
+                except Exception as e:
+                    logging.warning("[WARMUP] Aviso ao aquecer o modelo: %s", e)
+
+            threading.Thread(target=_warmup_llm, daemon=True).start()
+
+            self.send_json(200, {"ok": True, "status": "warmed_up"})
+            return
+
         self.send_json(404, {"ok": False, "error": "Endpoint não encontrado."})
 
     # Override para suprimir logs de requisições HTTP padrão

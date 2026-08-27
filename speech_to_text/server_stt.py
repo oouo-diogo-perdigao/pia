@@ -220,6 +220,14 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
+        if self.path == "/warmup":
+            logging.info("[GET /warmup] Aquecendo Worker STT antecipadamente...")
+            threading.Thread(
+                target=STT_MANAGER.ensure_worker_running, daemon=True
+            ).start()
+            self.send_json(200, {"ok": True, "status": "warming_up"})
+            return
+
         if self.path == "/status":
             with STATE_LOCK:
                 new_text = []

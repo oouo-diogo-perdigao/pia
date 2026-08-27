@@ -203,7 +203,7 @@ class TTSManager:
         self.result_queue = None
         self.req_counter = 0
 
-    def _ensure_worker_running(self):
+    def ensure_worker_running(self):
         with self.lock:
             if self.worker_process is None or not self.worker_process.is_alive():
                 logging.info("[MANAGER] Criando novo Worker Process para TTS...")
@@ -222,7 +222,7 @@ class TTSManager:
                 self.worker_process.start()
 
     def generate_wav(self, text, voice, speed, style=None, timeout=180):
-        self._ensure_worker_running()
+        self.ensure_worker_running()
 
         with self.lock:
             self.req_counter += 1
