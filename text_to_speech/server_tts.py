@@ -10,7 +10,8 @@ from lib.TTSManager import TTSManager
 
 from dotenv import load_dotenv
 
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
 
 HOST = os.getenv("HOST").strip()
 PORT = int(os.getenv("PORT"))

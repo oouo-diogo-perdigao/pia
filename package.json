@@ -5,7 +5,7 @@
 	"scripts": {
 		"tts": "uv run --directory .\\text_to_speech server_tts.py",
 		"stt": "uv run --directory .\\speech_to_text server_stt.py",
-		"wakeword": "uv run --directory .\\wakeword server_wakeword.py",
+		"wakeword": "uv run --directory .\\wakeword python -m wakeword.server",
 		"agent": "uv run --directory .\\agent server_agent.py"
 	}
 }

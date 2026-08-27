@@ -7,7 +7,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from faster_whisper import WhisperModel, download_model
 
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
 
 
 class VoiceAgent:

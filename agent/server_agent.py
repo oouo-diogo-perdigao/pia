@@ -16,7 +16,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from litellm import Router
 from dotenv import load_dotenv
 
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
 
 os.environ["LITELLM_LOG"] = "ERROR"
 # Suprime os avisos internos do LiteLLM sobre custos de modelos

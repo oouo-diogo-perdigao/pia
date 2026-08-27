@@ -6,17 +6,16 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-ENV_FILE = ROOT_DIR / ".env"
-load_dotenv(ENV_FILE)
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 
 @dataclass(frozen=True)
 class Settings:
-    root_dir: Path = ROOT_DIR
-    memory_file: Path = ROOT_DIR / "data" / "memory.json"
-    learning_dir: Path = ROOT_DIR / "learning_requests"
-    log_dir: Path = ROOT_DIR / "logs"
+    root_dir: Path = BASE_DIR
+    memory_file: Path = BASE_DIR / "data" / "memory.json"
+    learning_dir: Path = BASE_DIR / "learning_requests"
+    log_dir: Path = BASE_DIR / "logs"
 
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "").strip()
     gemini_stt_model: str = os.getenv(
