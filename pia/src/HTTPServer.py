@@ -8,7 +8,7 @@ from .config import HOST, PORT, logging
 from .overlay import get_overlay, get_state_machine
 
 
-class Handler(BaseHTTPRequestHandler):
+class HTTPServer(BaseHTTPRequestHandler):
     def send_cors_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
@@ -118,9 +118,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def run_http_server():
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
-    logging.info(f"Servidor HTTP Wakeword rodando em http://{HOST}:{PORT}")
-    server.serve_forever()
+    logging.info(f"Servidor HTTP Wakeword (PIA) rodando em http://{HOST}:{PORT}")
+    server = ThreadingHTTPServer((HOST, PORT), HTTPServer)
 
     try:
         server.serve_forever()
@@ -131,3 +130,6 @@ def run_http_server():
             server.server_close()
         except Exception:
             pass
+        import os
+
+        os._exit(0)

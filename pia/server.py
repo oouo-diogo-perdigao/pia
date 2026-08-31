@@ -3,9 +3,9 @@
 import threading
 
 from src.commands_loader import load_commands
-from src.http_server import run_http_server
+from src.HTTPServer import run_http_server
 from src.thread_wakeword import audio_listening_loop
-from src.overlay import run_overlay_app
+from src.PiaOverlay import run_overlay_app
 
 
 def main() -> None:

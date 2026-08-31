@@ -6,7 +6,7 @@ import threading
 from .config import HOST, PORT, logging
 from pathlib import Path
 
-from .app_state import get_app_state
+from .AppState import get_app_state
 
 MODELS_DIR = Path(__file__).parent.parent / "models_cache"
 
@@ -18,7 +18,7 @@ APP = get_app_state(models_dir=MODELS_DIR)
 # ==============================================================================
 # SERVIDOR HTTP LEVE
 # ==============================================================================
-class Handler(BaseHTTPRequestHandler):
+class HTTPServer(BaseHTTPRequestHandler):
     def send_json(self, code: int, payload: dict) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
@@ -86,14 +86,13 @@ class Handler(BaseHTTPRequestHandler):
 
 def run_http_server():
     logging.info(f"Servidor HTTP STT rodando em http://{HOST}:{PORT}")
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    server = ThreadingHTTPServer((HOST, PORT), HTTPServer)
 
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         logging.info("Encerrando servidor...")
     finally:
-        # ensure app state shutdown
         try:
             APP.shutdown()
         except Exception:
@@ -102,3 +101,6 @@ def run_http_server():
             server.server_close()
         except Exception:
             pass
+        import os
+
+        os._exit(0)

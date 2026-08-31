@@ -8,7 +8,7 @@ import warnings
 from ..config import logging
 from dotenv import load_dotenv
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 # Inicializa o Roteador de LLMs carregando as prioridades e fallbacks do YAML
@@ -18,9 +18,14 @@ litellm.suppress_debug_info = True
 warnings.filterwarnings("ignore", category=UserWarning, module="litellm")
 
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "models.yaml")
-with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-    config_data = yaml.safe_load(f)
+CONFIG_PATH = BASE_DIR / "models.yaml"
+
+config_data = {}
+if CONFIG_PATH.exists():
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        config_data = yaml.safe_load(f) or {}
+else:
+    logging.warning("[ROUTER] Arquivo 'models.yaml' não encontrado em: %s", CONFIG_PATH)
 
 
 llm_router = Router(

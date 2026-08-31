@@ -11,7 +11,7 @@ import threading
 import queue
 from pathlib import Path
 
-from .thread_audio_recorder import AudioRecorder, worker_audio_bridge
+from .AudioRecorder import AudioRecorder, worker_audio_bridge
 from .STTWorkerManager import STTWorkerManager
 from .config import logging
 

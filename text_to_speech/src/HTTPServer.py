@@ -13,7 +13,7 @@ TTS_MANAGER = TTSManager(PLAYER)
 # ==============================================================================
 # SERVIDOR HTTP
 # ==============================================================================
-class Handler(BaseHTTPRequestHandler):
+class HTTPServer(BaseHTTPRequestHandler):
     def send_cors_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
@@ -154,8 +154,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def run_http_server():
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
-    logging.info("Servidor HTTP leve iniciado em http://%s:%d", HOST, PORT)
+    logging.info("Servidor HTTP TTS rodando em http://%s:%d", HOST, PORT)
+    server = ThreadingHTTPServer((HOST, PORT), HTTPServer)
 
     try:
         server.serve_forever()
@@ -168,3 +168,6 @@ def run_http_server():
             server.server_close()
         except Exception:
             pass
+        import os
+
+        os._exit(0)

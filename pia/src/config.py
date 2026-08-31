@@ -24,7 +24,7 @@ STT_SERVER_URL = os.getenv("STT_SERVER_URL")
 TTS_SERVER_URL = os.getenv("TTS_SERVER_URL")
 AGENT_SERVER_URL = os.getenv("AGENT_SERVER_URL")
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 START_SOUND = str(BASE_DIR.parent / "sounds" / "start.mp3")
 END_SOUND = str(BASE_DIR.parent / "sounds" / "end.mp3")
 

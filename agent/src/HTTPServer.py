@@ -11,7 +11,7 @@ BUFFER_MANAGER = InactivityBufferManager(inactivity_timeout=3.0)
 # ============================================================================
 # SERVIDOR HTTP
 # ============================================================================
-class Handler(BaseHTTPRequestHandler):
+class HTTPServer(BaseHTTPRequestHandler):
     def send_json(self, code: int, payload: dict) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
@@ -58,7 +58,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def run_http_server():
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    server = ThreadingHTTPServer((HOST, PORT), HTTPServer)
     logging.info("Servidor HTTP leve iniciado em http://%s:%d", HOST, PORT)
 
     try:

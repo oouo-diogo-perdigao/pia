@@ -68,7 +68,7 @@ def stt_worker_process(
 ):
     """Processo isolado para transcrição. O encerramento deste processo devolve 100% da RAM/VRAM ao SO."""
     # Importações pesadas acontecem APENAS dentro do processo filho
-    from src.agent import VoiceAgent
+    from src.VoiceAgent import VoiceAgent
 
     logging.info("[WORKER STT] Inicializando modelo de IA no processo filho...")
     agent = VoiceAgent(models_dir)
@@ -80,7 +80,7 @@ def stt_worker_process(
         try:
             # Aguarda novo chunk de áudio para transcrição
             item = audio_chunk_queue.get(timeout=1.0)
-        except queue.Empty:
+        except (queue.Empty, KeyboardInterrupt):
             if time.monotonic() - last_used >= UNLOAD_TIMEOUT_SECONDS:
                 logging.info(
                     "[WORKER STT] Inatividade de %ds atingida. Finalizando processo e liberando memória...",

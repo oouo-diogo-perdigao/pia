@@ -1,4 +1,4 @@
-from src.http_server import run_http_server
+from src.HTTPServer import run_http_server
 
 
 def main():

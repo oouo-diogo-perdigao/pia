@@ -5,7 +5,7 @@ import pygame
 import requests
 
 from .config import logging, TTS_SERVER_URL
-from .agents import AgentManager
+from .agents.AgentManager import AgentManager
 
 # Initialize audio mixer once (safe to call multiple times)
 try:

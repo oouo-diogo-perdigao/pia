@@ -1,5 +1,5 @@
 from __future__ import annotations
-from src.http_server import run_http_server
+from src.HTTPServer import run_http_server
 
 
 def main() -> None:
