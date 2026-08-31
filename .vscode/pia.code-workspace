@@ -10,6 +10,9 @@
 	"settings": {
 		"powershell.cwd": "speech_to_text",
 		"postman.settings.dotenv-detection-notification-visibility": false,
-		"svg.preview.background": "editor"
+		"svg.preview.background": "editor",
+		"cSpell.words": [
+			"litellm"
+		]
 	}
 }

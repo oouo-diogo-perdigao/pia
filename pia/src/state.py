@@ -1,5 +1,7 @@
 """Shared runtime state and helper utilities for the PIA engine (src)."""
 
+import threading
+
 from threading import Event, Lock
 import time
 import os
@@ -20,16 +22,20 @@ except Exception:
 
 
 def play_sound(file_path: str) -> None:
-    """Play a short sound file using pygame.
+    """Reproduz som de feedback sem bloquear a thread.
 
     Args:
         file_path: Path to the audio file.
     """
-    try:
-        if os.path.exists(file_path):
-            pygame.mixer.music.load(file_path)
-            pygame.mixer.music.play()
-            while pygame.mixer.music.get_busy():
-                time.sleep(0.05)
-    except Exception as e:
-        logging.error(f"[AUDIO] Error playing sound ({file_path}): {e}")
+
+    def _play():
+        try:
+            if os.path.exists(file_path):
+                pygame.mixer.music.load(file_path)
+                pygame.mixer.music.play()
+                while pygame.mixer.music.get_busy():
+                    time.sleep(0.05)
+        except Exception as e:
+            logging.error("[SOUND] Erro ao tocar som: %s", e)
+
+    threading.Thread(target=_play, daemon=True).start()

@@ -19,11 +19,9 @@ DEFAULT_VOICE = os.getenv("DEFAULT_VOICE", "pm_santa")
 DEFAULT_SPEED = float(os.getenv("DEFAULT_SPEED", "0.95"))
 
 IDLE_TIMEOUT = int(os.getenv("IDLE_TIMEOUT", "600"))
-SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "24000").strip())
 DEVICE = os.getenv("DEVICE", "cuda")
 MODEL_DIR = os.getenv("MODEL_DIR", "./models_cache/Kokoro-82M").strip()
 
-PIA_SERVER_URL = os.getenv("PIA_SERVER_URL")
 
 # Logging setup
 log_dir = BASE_DIR / "logs"

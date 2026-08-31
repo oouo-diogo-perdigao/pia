@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .app_state import get_app_state
 
-MODELS_DIR = Path(__file__).parent / "models_cache"
+MODELS_DIR = Path(__file__).parent.parent / "models_cache"
 
 # Lazily retrieve app state (created on first use). Caller can pass models_dir
 # to get_app_state if needed.
@@ -46,7 +46,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(
                     200,
                     {
-                        "ok": True,
                         "status": APP.status,
                         "is_speaking": bool(APP.recorder.is_speaking),
                         "is_transcribing": bool(APP.is_transcribing_event.is_set()),
@@ -55,26 +54,25 @@ class Handler(BaseHTTPRequestHandler):
                 )
             return
 
-        self.send_json(404, {"ok": False, "error": "Endpoint inexistente."})
-
-    def do_POST(self) -> None:
-        global STATUS
-
         if self.path == "/start":
+            logging.info("[GET /start] Iniciando gravação e subindo Worker STT...")
             with APP.state_lock:
                 if APP.status == "recording":
                     self.send_json(409, {"ok": False, "error": "Já está gravando."})
                     return
 
-                logging.info("[POST /start] Iniciando gravação e subindo Worker STT...")
                 APP.start_recording()
 
             self.send_json(200, {"ok": True})
             return
 
+        self.send_json(404, {"ok": False, "error": "Endpoint inexistente."})
+
+    def do_POST(self) -> None:
+        global STATUS
         if self.path == "/stop":
+            logging.info("[POST /stop] Pausando gravação.")
             with APP.state_lock:
-                logging.info("[POST /stop] Pausando gravação.")
                 APP.stop_recording()
 
             self.send_json(200, {"ok": True})
@@ -100,4 +98,7 @@ def run_http_server():
             APP.shutdown()
         except Exception:
             pass
-        server.server_close()
+        try:
+            server.server_close()
+        except Exception:
+            pass

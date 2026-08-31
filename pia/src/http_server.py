@@ -121,3 +121,13 @@ def run_http_server():
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     logging.info(f"Servidor HTTP Wakeword rodando em http://{HOST}:{PORT}")
     server.serve_forever()
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        logging.info("Encerrando servidor...")
+    finally:
+        try:
+            server.server_close()
+        except Exception:
+            pass

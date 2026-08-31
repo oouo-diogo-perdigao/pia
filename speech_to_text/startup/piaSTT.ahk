@@ -31,7 +31,9 @@ global ConnectionFailures := 0 ; Contador para tratar erros de conexão
     }
 
     ; 1. Dispara a requisição HTTP em paralelo imediatamente
-    HttpPostAsync("/start", "{}")
+		req := ComObject("WinHttp.WinHttpRequest.5.1")
+    req.Open("GET", "http://127.0.0.1:" DictationPort "/start", false)
+		req.Send()
 
     ; 2. Atualiza interface e áudio INSTANTANEAMENTE ao apertar a tecla
     IsListening := true

@@ -8,10 +8,13 @@ import re
 import wave
 import io
 import warnings
-from .config import logging, IDLE_TIMEOUT, SAMPLE_RATE, MODEL_DIR
+from .config import logging, IDLE_TIMEOUT, MODEL_DIR
 
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
+
+MODELS_KOKORO = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.onnx"
+MODELS_VOICES = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin"
 
 
 # ==============================================================================
@@ -20,10 +23,8 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 def tts_worker_process(task_queue, result_queue):
     import numpy as np
 
-    # Variáveis dos modelos começam vazias (não consomem memória até serem chamados)
     kokoro = None
     qwen_model = None
-
     last_used = time.monotonic()
 
     while True:
@@ -31,9 +32,18 @@ def tts_worker_process(task_queue, result_queue):
             task = task_queue.get(timeout=1.0)
         except queue.Empty:
             if time.monotonic() - last_used >= IDLE_TIMEOUT:
-                logging.info(
-                    "[WORKER] Timeout de inatividade atingido. Encerrando worker..."
-                )
+                if kokoro is not None or qwen_model is not None:
+                    logging.info(
+                        "[WORKER] Timeout de 10 minutos atingido. Descarregando modelos da memória..."
+                    )
+                    if kokoro:
+                        del kokoro
+                        kokoro = None
+                        logging.info("[WORKER] Modelo Kokoro descarregado.")
+                    if qwen_model:
+                        del qwen_model
+                        qwen_model = None
+                        logging.info("[WORKER] Modelo Qwen3-TTS descarregado.")
                 break
             continue
         except (KeyboardInterrupt, EOFError):
@@ -50,27 +60,28 @@ def tts_worker_process(task_queue, result_queue):
             voice = task["voice"]
             speed = task["speed"]
             style = task.get("style")
+            job_name = task.get("job_name", "")
 
             try:
                 samples = None
 
                 if style:
-                    # --- CAMINHO QWEN-TTS (Carrega apenas se houver style) ---
                     logging.info(
-                        f"[WORKER] Usando Qwen-TTS com instrução de estilo: '{style}'"
+                        f"[WORKER] [{job_name}] Iniciando processamento com Qwen-TTS (estilo: '{style}')..."
                     )
                     if qwen_model is None:
                         import torch
                         from qwen_tts import Qwen3TTSModel
 
                         logging.info(
-                            "[WORKER] Carregando Qwen3-TTS (1.7B) na GPU (RTX 3080)..."
+                            "[WORKER] Carregando Qwen3-TTS na memória (GPU)..."
                         )
                         qwen_model = Qwen3TTSModel.from_pretrained(
                             "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
                             torch_dtype=torch.float16,
                             device_map="cuda",
                         )
+                        logging.info("[WORKER] Qwen3-TTS carregado com sucesso.")
 
                     wavs, SAMPLE_RATE = qwen_model.generate_custom_voice(
                         text=text,
@@ -80,7 +91,9 @@ def tts_worker_process(task_queue, result_queue):
                     )
                     samples = wavs[0]
                 else:
-                    # --- CAMINHO KOKORO (Carrega apenas se NÃO houver style) ---
+                    logging.info(
+                        f"[WORKER] [{job_name}] Iniciando processamento com Kokoro..."
+                    )
                     if kokoro is None:
                         from kokoro_onnx import Kokoro
 
@@ -88,27 +101,38 @@ def tts_worker_process(task_queue, result_queue):
                         onnx_path = os.path.join(MODEL_DIR, "kokoro-v1.0.onnx")
                         voices_path = os.path.join(MODEL_DIR, "voices-v1.0.bin")
 
-                        import urllib.request
+                        if os.path.exists(onnx_path) and os.path.exists(voices_path):
+                            logging.info(
+                                "[WORKER] Arquivos do modelo Kokoro já estão baixados no disco."
+                            )
+                        else:
+                            import urllib.request
 
-                        if not os.path.exists(onnx_path):
-                            onnx_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
-                            urllib.request.urlretrieve(onnx_url, onnx_path)
-                        if not os.path.exists(voices_path):
-                            voices_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
-                            urllib.request.urlretrieve(voices_url, voices_path)
+                            logging.info(
+                                "[WORKER] Baixando arquivos do modelo Kokoro para o disco..."
+                            )
+                            if not os.path.exists(onnx_path):
+                                urllib.request.urlretrieve(MODELS_KOKORO, onnx_path)
+                            if not os.path.exists(voices_path):
+                                urllib.request.urlretrieve(MODELS_VOICES, voices_path)
+                            logging.info(
+                                "[WORKER] Download dos arquivos do Kokoro concluído com sucesso."
+                            )
 
                         logging.info(
-                            "[WORKER] Inicializando Kokoro via ONNX Runtime sob demanda..."
+                            "[WORKER] Carregando Kokoro via ONNX Runtime na memória..."
                         )
                         kokoro = Kokoro(onnx_path, voices_path)
+                        logging.info("[WORKER] Kokoro carregado com sucesso.")
 
-                    logging.info("[WORKER] Usando Kokoro (Modo Padrão)...")
                     samples, SAMPLE_RATE = kokoro.create(
                         text, voice=voice, speed=speed, lang="pt-br"
                     )
 
                 if len(samples) > 0:
-                    logging.info("[WORKER] Processamento terminado.")
+                    logging.info(
+                        f"[WORKER] [{job_name}] Processamento terminado com sucesso."
+                    )
                     audio_pcm16 = (samples * 32767).clip(-32768, 32767).astype(np.int16)
 
                     buffer = io.BytesIO()
@@ -130,14 +154,14 @@ def tts_worker_process(task_queue, result_queue):
                         {"req_id": req_id, "ok": False, "error": "Sem áudio gerado."}
                     )
             except Exception as e:
-                logging.exception("[WORKER] Erro na geração de áudio.")
+                logging.exception(f"[WORKER] [{job_name}] Erro na geração de áudio.")
                 result_queue.put({"req_id": req_id, "ok": False, "error": str(e)})
 
     if kokoro:
         del kokoro
     if qwen_model:
         del qwen_model
-    logging.info("[WORKER] Processo filho finalizado.")
+    logging.info("[WORKER] Processo filho e modelos descarregados.")
 
 
 def split_text(text, max_chars=420):
@@ -163,12 +187,74 @@ def split_text(text, max_chars=420):
 # GERENCIADOR DO WORKER NO SERVIDOR PRINCIPAL
 # ==============================================================================
 class TTSManager:
-    def __init__(self):
+    def __init__(self, audio_player=None):
         self.lock = threading.Lock()
         self.worker_process = None
         self.task_queue = None
         self.result_queue = None
         self.req_counter = 0
+
+        self.audio_player = audio_player
+        self.tts_job_queue = queue.Queue()
+        self.tts_thread = None
+        self._stop_event = threading.Event()
+
+    def add_tts_job(self, text, voice, speed, style=None, device=None, job_name=None):
+        with self.lock:
+            self._stop_event.clear()
+            self.tts_job_queue.put(
+                {
+                    "text": text,
+                    "voice": voice,
+                    "speed": speed,
+                    "style": style,
+                    "device": device,
+                    "job_name": job_name,
+                }
+            )
+            if self.tts_thread is None or not self.tts_thread.is_alive():
+                self.tts_thread = threading.Thread(
+                    target=self._tts_consumer_loop, daemon=True
+                )
+                self.tts_thread.start()
+
+    def stop_tts_queue(self):
+        self._stop_event.set()
+        with self.lock:
+            while not self.tts_job_queue.empty():
+                try:
+                    self.tts_job_queue.get_nowait()
+                except queue.Empty:
+                    break
+
+    def _tts_consumer_loop(self):
+        while not self._stop_event.is_set():
+            try:
+                job = self.tts_job_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+            if self._stop_event.is_set():
+                break
+
+            try:
+                text = job["text"]
+                voice = job["voice"]
+                speed = job["speed"]
+                style = job["style"]
+                device = job["device"]
+                job_name = job["job_name"]
+
+                # Gera o WAV da parte atual usando o processo worker isolado
+                wav_bytes = self.generate_wav(
+                    text, voice, speed, style=style, job_name=job_name
+                )
+
+                if not self._stop_event.is_set() and self.audio_player and wav_bytes:
+                    # Envia o áudio concluído para a fila do AudioPlayer
+                    self.audio_player.add_audio_job(job_name, wav_bytes, device=device)
+            except Exception:
+                logging.exception("[TTSManager] Erro processando parte na fila do TTS.")
 
     def ensure_worker_running(self):
         with self.lock:
@@ -188,7 +274,7 @@ class TTSManager:
                 )
                 self.worker_process.start()
 
-    def generate_wav(self, text, voice, speed, style=None, timeout=180):
+    def generate_wav(self, text, voice, speed, style=None, timeout=180, job_name=None):
         self.ensure_worker_running()
 
         with self.lock:
@@ -202,7 +288,8 @@ class TTSManager:
                 "text": text,
                 "voice": voice,
                 "speed": speed,
-                "style": style,  # <--- Repassa o style para o worker
+                "style": style,
+                "job_name": job_name,
             }
         )
 
