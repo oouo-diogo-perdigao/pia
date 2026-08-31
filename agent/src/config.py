@@ -56,3 +56,22 @@ if not logger.handlers:
     )
     rotating_handler.setFormatter(formatter)
     logger.addHandler(rotating_handler)
+
+# Crie um logger dedicado para os textos emitidos (no topo do arquivo ou logo após as importações)
+logger_llm = logging.getLogger("logger_llm")
+logger_llm.setLevel(logging.INFO)
+logger_llm.propagate = False  # Evita que suba para o log geral
+
+if not logger_llm.handlers:
+    # Handler dedicado e separado para entradas e saídas da LLM
+    logger_llm = logging.getLogger("llm_trace")
+    logger_llm.setLevel(logging.INFO)
+    logger_llm.propagate = False
+    llm_rotating_handler = RotatingFileHandler(
+        log_dir / "llm_interactions.log",
+        maxBytes=10 * 1024 * 1024,
+        backupCount=2,
+        encoding="utf-8",
+    )
+    llm_rotating_handler.setFormatter(formatter)
+    logger_llm.addHandler(llm_rotating_handler)

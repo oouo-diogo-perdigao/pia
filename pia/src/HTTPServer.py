@@ -5,7 +5,7 @@ import json
 from .state import TRIGGER_EVENT, LOCK
 from .config import HOST, PORT, logging
 
-from .overlay import get_overlay, get_state_machine
+from .PiaOverlay import get_overlay, get_state_machine
 
 
 class HTTPServer(BaseHTTPRequestHandler):

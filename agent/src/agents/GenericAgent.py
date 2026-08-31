@@ -44,7 +44,7 @@ class GenericAgent:
         messages = [
             {
                 "role": "system",
-                "content": "Você é um assistente de voz prestativo e sucinto. Responda de forma direta em português.",
+                "content": "Você é uma assistente inteligente, prestativa e sucinta. Responda de forma direta em português.",
             },
             {"role": "user", "content": prompt},
         ]
