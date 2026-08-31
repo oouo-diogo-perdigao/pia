@@ -3,9 +3,9 @@
 	"version": "1.0.0",
 	"description": "",
 	"scripts": {
-		"tts": "uv run --directory .\\text_to_speech server_tts.py",
-		"stt": "uv run --directory .\\speech_to_text server_stt.py",
-		"wakeword": "uv run --directory .\\wakeword python -m wakeword.server",
-		"agent": "uv run --directory .\\agent server_agent.py"
+		"pia": "uv run --directory .\\pia python -m server",
+		"stt": "uv run --directory .\\speech_to_text python -m server",
+		"tts": "uv run --directory .\\text_to_speech python -m server",
+		"agent": "uv run --directory .\\agent python -m server"
 	}
 }

@@ -7,9 +7,9 @@ scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
 ' Define o diretório de trabalho dois níveis acima (onde está o package.json)
 targetDir = fso.GetAbsolutePathName(scriptDir & "\..\..\")
 
-' Executa o comando npm run agent no diretório alvo sem exibir janela (0)
+' Executa o comando npm run pia no diretório alvo sem exibir janela (0)
 WshShell.CurrentDirectory = targetDir
-WshShell.Run "cmd.exe /c npm run agent", 0, False
+WshShell.Run "cmd.exe /c npm run pia", 0, False
 
 Set WshShell = Nothing
 Set fso = Nothing

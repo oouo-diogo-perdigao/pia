@@ -6,6 +6,16 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from faster_whisper import WhisperModel, download_model
+from .config import (
+    logging,
+    STT_MODEL,
+    STT_DEVICE,
+    STT_COMPUTE_TYPE,
+    STT_CPU_THREADS,
+    STT_BEAM_SIZE,
+    STT_BEST_OF,
+    STT_TEMPERATURE,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
@@ -13,20 +23,16 @@ load_dotenv(BASE_DIR / ".env")
 
 class VoiceAgent:
     def __init__(self, models_dir: Path):
-        self.model_size = os.getenv("STT_MODEL", "large-v3-turbo")
-        self.device = os.getenv("STT_DEVICE", "cpu")
-        self.compute_type = os.getenv("STT_COMPUTE_TYPE", "int8")
-        self.cpu_threads = int(os.getenv("STT_CPU_THREADS", "6"))
         self.models_dir = models_dir
 
-        logging.info("[STT] Carregando modelo %s...", self.model_size)
-        model_path = download_model(self.model_size, output_dir=str(self.models_dir))
+        logging.info("[STT] Carregando modelo %s...", STT_MODEL)
+        model_path = download_model(STT_MODEL, output_dir=str(self.models_dir))
 
         self.model = WhisperModel(
             model_path,
-            device=self.device,
-            compute_type=self.compute_type,
-            cpu_threads=self.cpu_threads,
+            device=STT_DEVICE,
+            compute_type=STT_COMPUTE_TYPE,
+            cpu_threads=STT_CPU_THREADS,
         )
         logging.info("[STT] Modelo pronto na RAM.")
 
@@ -46,9 +52,9 @@ class VoiceAgent:
         segments, _ = self.model.transcribe(
             audio_stream,
             language="pt",
-            beam_size=int(os.getenv("STT_BEAM_SIZE", 5)),
-            best_of=int(os.getenv("STT_BEST_OF", 5)),
-            temperature=float(os.getenv("STT_TEMPERATURE", 0.0)),
+            beam_size=STT_BEAM_SIZE,
+            best_of=STT_BEST_OF,
+            temperature=STT_TEMPERATURE,
             condition_on_previous_text=False,
             vad_filter=False,
             vad_parameters=dict(min_silence_duration_ms=500),

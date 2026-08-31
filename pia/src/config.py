@@ -15,24 +15,18 @@ load_dotenv(BASE_DIR / ".env")
 HOST = os.getenv("HOST", "127.0.0.1").strip()
 PORT = int(os.getenv("PORT"))
 
-USER_NAME = os.getenv("USER_NAME", "Diogo").strip() or "Diogo"
+RATE = int(os.getenv("RATE", "16000"))
+CHANNELS = int(os.getenv("CHANNELS", "1"))
+CHUNK = int(os.getenv("CHUNK", "1280"))
+THRESHOLD = float(os.getenv("THRESHOLD", "0.5"))
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_STT_MODEL = os.getenv("GEMINI_STT_MODEL", "gemini-3.5-flash-lite").strip()
-GEMINI_AGENT_MODEL = os.getenv("GEMINI_AGENT_MODEL", "gemini-3.5-flash-lite").strip()
-VSCODE_COMMAND = os.getenv("VSCODE_COMMAND", "code").strip() or "code"
-DEFAULT_LOCATION = os.getenv(
-    "DEFAULT_LOCATION", "Belo Horizonte, Minas Gerais, Brasil"
-).strip()
+STT_SERVER_URL = os.getenv("STT_SERVER_URL")
+TTS_SERVER_URL = os.getenv("TTS_SERVER_URL")
+AGENT_SERVER_URL = os.getenv("AGENT_SERVER_URL")
 
-TTS_SERVER_URL = os.getenv("TTS_SERVER_URL", "http://localhost:8763").strip()
-
-ROOT_DIR = BASE_DIR
-MEMORY_FILE = BASE_DIR / "data" / "memory.json"
-LEARNING_DIR = BASE_DIR / "learning_requests"
-
-sample_rate: int = 16_000
-channels: int = 1
+BASE_DIR = Path(__file__).resolve().parent
+START_SOUND = str(BASE_DIR.parent / "sounds" / "start.mp3")
+END_SOUND = str(BASE_DIR.parent / "sounds" / "end.mp3")
 
 # Logging setup
 log_dir = BASE_DIR / "logs"
@@ -49,7 +43,7 @@ if not logger.handlers:
     logger.addHandler(stream_handler)
 
     rotating_handler = RotatingFileHandler(
-        log_dir / "agent.log",
+        log_dir / "pia.log",
         maxBytes=10 * 1024 * 1024,  # Limite exato de 10 MB (10.485.760 bytes)
         backupCount=1,
         encoding="utf-8",
