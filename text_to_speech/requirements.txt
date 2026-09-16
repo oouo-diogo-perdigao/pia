@@ -1,5 +1,9 @@
-kokoro>=0.9.4
-sounddevice>=0.5.2
-numpy>=2.0
-python-dotenv>=1.0.0
-torch
+# Servidor e Utilidades
+python-dotenv==1.2.3
+numpy==2.5.2
+sounddevice==0.5.6
+
+# TTS & ONNX Engine (Substitui PyTorch)
+kokoro-onnx==0.6.1
+onnxruntime==1.29.0
+espeakng-loader==0.2.4

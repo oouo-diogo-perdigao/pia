@@ -2,7 +2,7 @@
 #SingleInstance Force
 Persistent
 
-DictationPort := 8767
+DictationPort := 8762
 StartSound := A_ScriptDir "..\..\sounds\start.mp3"
 EndSound := A_ScriptDir "..\..\sounds\end.mp3"
 
@@ -10,6 +10,9 @@ global IsListening := false
 global AnimFrame := 0
 global ConnectionFailures := 0 ; Contador para tratar erros de conexão
 
+; ============================================================
+; ÚNICO COMANDO: Ctrl + Alt + D
+; ============================================================
 ^!d:: {
     global DictationPort, StartSound, EndSound, IsListening, ConnectionFailures
 

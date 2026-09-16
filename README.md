@@ -26,3 +26,26 @@ Contribuições e desenvolvimento
 - Antes de abrir PRs, rode os scripts de instalação e garanta que as novas dependências sejam compatíveis com execução local e sejam adicionadas em `requirements.txt` correspondentes.
 
 ![O que é a PIA?](./logo.png)
+
+## Serviços
+# Servidor do Wake Word (WW) PORT=8760
+
+# Servidor do Agent (AGENT) PORT=8761
+
+# Servidor de Speech to Text (STT) PORT=8762
+* `POST /start`: Inicia a captura de áudio pelo microfone.
+* `POST /stop`: Interrompe a gravação e processa o trecho final.
+* `GET /status`: Retorna o estado atual da gravação, transcrição e entrega os blocos de texto processados.
+
+### Servidor de Text to Speech (TTS) PORT=8763
+* `POST /speak`: Adiciona o texto enviado à fila de síntese para reprodução direta nas caixas de som locais em segundo plano.
+* `POST /stop`: Interrompe a reprodução de áudio em andamento e limpa a fila de processamento local.
+* `POST /generate`: Sintetiza o texto enviado e retorna o áudio em formato nativo `audio/wav` no corpo da resposta HTTP (ideal para SillyTavern e clientes web).
+* `GET /status`: Retorna o estado atual da aplicação, indicando se o player está reproduzindo áudio, o dispositivo em uso (`cuda`/`cpu`) e se o modelo Kokoro está carregado em memória.
+
+
+## Rodar local
+
+`.venv\Scripts\Activate.ps1`
+`python server.py`
+

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "profile": {
+    "name": "Diogo",
+    "default_location": "Belo Horizonte, Minas Gerais, Brasil"
+  },
+  "facts": [],
+  "learned_actions": [],
+  "pending_learning": null
+}

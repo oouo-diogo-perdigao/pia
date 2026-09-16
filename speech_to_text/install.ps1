@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
-Write-Host "=== PIA TTS ===" -ForegroundColor Cyan
+Write-Host "=== PIA STT ===" -ForegroundColor Cyan
 
 # 1. Verificar instalação do Python no sistema
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {

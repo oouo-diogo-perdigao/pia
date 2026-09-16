@@ -26,10 +26,10 @@ Set-ExecutionPolicy -Scope Process Bypass
 O instalador usa PyTorch 2.11.0 com CUDA 12.8. O script verifica `torch.cuda.is_available()` e usa a GPU automaticamente.
 
 ## Segurança
-O servidor HTTP escuta somente em `127.0.0.1:8765`; ele não fica exposto na rede.
+O servidor HTTP escuta somente local ele não fica exposto na rede.
 
 ## **Endpoints da API Local**
-O servidor responde no host e porta configurados via `.env` (padrão `127.0.0.1:8765`):
+O servidor responde no host e porta configurados via `.env`:
 
 * `POST /speak`: Adiciona o texto enviado à fila de síntese para reprodução direta nas caixas de som locais em segundo plano.
 * `POST /stop`: Interrompe a reprodução de áudio em andamento e limpa a fila de processamento local.
