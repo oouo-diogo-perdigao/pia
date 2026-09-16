@@ -1,0 +1,39 @@
+services:
+  comfyui:
+    image: yanwk/comfyui-boot:cu126-slim
+    container_name: comfyui
+    ports:
+      - "8188:8188"
+    env_file:
+      - .env
+    environment:
+      - CLI_ARGS=--highvram --listen 0.0.0.0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./models_cache:/home/user/ComfyUI/models/checkpoints
+    # command: >
+    #   bash -c "
+    #   if [ ! -f /home/user/ComfyUI/models/checkpoints/flux1-schnell.safetensors ]; then
+    #     echo 'Baixando o modelo FLUX.1 Schnell...' &&
+    #     wget --header=\"Authorization: Bearer $$HF_TOKEN\" -O /home/user/ComfyUI/models/checkpoints/flux1-schnell.safetensors https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors;
+    #   fi &&
+    #   exec /home/user/venv/bin/python main.py --highvram --listen 0.0.0.0
+    #   "
+    restart: unless-stopped
+
+  # image_api:
+  #   build: ./openai_image_gateway
+  #   container_name: openai-image-gateway
+  #   ports:
+  #     - "8764:8764"
+  #   env_file:
+  #     - .env
+  #   depends_on:
+  #     - comfyui
+  #   restart: unless-stopped

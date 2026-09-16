@@ -35,3 +35,7 @@ O servidor responde no host e porta configurados via `.env`:
 * `POST /stop`: Interrompe a reprodução de áudio em andamento e limpa a fila de processamento local.
 * `POST /generate`: Sintetiza o texto enviado e retorna o áudio em formato nativo `audio/wav` no corpo da resposta HTTP (ideal para SillyTavern e clientes web).
 * `GET /status`: Retorna o estado atual da aplicação, indicando se o player está reproduzindo áudio, o dispositivo em uso (`cuda`/`cpu`) e se o modelo Kokoro está carregado em memória.
+
+Padrão OpenAI:
+- `POST /v1/audio/speech`
+- `GET /v1/models`

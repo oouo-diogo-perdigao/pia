@@ -1,0 +1,80 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "STT Service",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": [
+        "run",
+        "--directory",
+        "${workspaceFolder}/speech_to_text",
+        "python",
+        "-m",
+        "watchfiles",
+        "python -m server"
+      ],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "TTS Service",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": [
+        "run",
+        "--directory",
+        "${workspaceFolder}/text_to_speech",
+        "python",
+        "-m",
+        "watchfiles",
+        "python -m server"
+      ],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Agent Service",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": [
+        "run",
+        "--directory",
+        "${workspaceFolder}/agent",
+        "python",
+        "-m",
+        "watchfiles",
+        "python -m server"
+      ],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Pia Principal",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": [
+        "run",
+        "--directory",
+        "${workspaceFolder}/pia",
+        "python",
+        "-m",
+        "watchfiles",
+        "python -m server"
+      ],
+      "console": "integratedTerminal"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Iniciar Todos os Serviços (F5)",
+      "configurations": [
+        "STT Service",
+        "TTS Service",
+        "Agent Service",
+        "Pia Principal"
+      ]
+    }
+  ]
+}

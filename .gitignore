@@ -2,6 +2,13 @@
 .env
 softwares
 logs
-speech_to_text/models_cache
-text_to_speech/models_cache
+
+*/models_cache
+
+open-webui/open-webui_data
 __pycache__
+
+node_modules
+pnpm-lock.yaml
+npm-debug.log
+uv.lock
