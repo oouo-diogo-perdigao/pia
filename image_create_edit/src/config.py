@@ -15,17 +15,9 @@ load_dotenv(BASE_DIR / ".env")
 HOST = os.getenv("HOST", "127.0.0.1").strip()
 PORT = int(os.getenv("PORT"))
 
-DEFAULT_VOICE = os.getenv("DEFAULT_VOICE", "pm_santa")
-DEFAULT_SPEED = float(os.getenv("DEFAULT_SPEED", "0.95"))
-
-IDLE_TIMEOUT = int(os.getenv("IDLE_TIMEOUT", "600"))
-DEVICE = os.getenv("DEVICE", "cuda")
-MODEL_DIR = os.getenv("MODEL_DIR", "./models_cache/Kokoro-82M").strip()
-
 # Se vazio, o endpoint OpenAI-compatible fica sem autenticação. Isso é útil
 # em localhost. Se exposto na rede, defina OPENAI_COMPAT_API_KEY no ambiente.
 OPENAI_COMPAT_API_KEY = os.getenv("OPENAI_COMPAT_API_KEY", "").strip()
-
 
 # Logging setup
 log_dir = BASE_DIR / "logs"
@@ -49,25 +41,3 @@ if not logger.handlers:
     )
     rotating_handler.setFormatter(formatter)
     logger.addHandler(rotating_handler)
-
-
-# Crie um logger dedicado para os textos emitidos (no topo do arquivo ou logo após as importações)
-logger_tts = logging.getLogger("logger_tts")
-logger_tts.setLevel(logging.INFO)
-logger_tts.propagate = False  # Evita que suba para o log geral
-
-if not logger_tts.handlers:
-    formatter_tts = logging.Formatter("%(asctime)s\n%(message)s")
-
-    stream_handler_tts = logging.StreamHandler()
-    stream_handler_tts.setFormatter(formatter_tts)
-    logger_tts.addHandler(stream_handler_tts)
-
-    file_handler_tts = RotatingFileHandler(
-        log_dir / "emited.log",
-        maxBytes=10 * 1024 * 1024,
-        backupCount=1,
-        encoding="utf-8",
-    )
-    file_handler_tts.setFormatter(formatter_tts)
-    logger_tts.addHandler(file_handler_tts)

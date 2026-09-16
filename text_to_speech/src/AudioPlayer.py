@@ -2,8 +2,8 @@ from __future__ import annotations  # Ativa a avaliação adiada de tipagem
 import queue
 import threading
 import wave
-import logging
 import io
+from .config import logging
 
 
 # ==============================================================================

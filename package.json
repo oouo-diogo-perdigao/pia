@@ -6,6 +6,9 @@
 		"pia": "uv run --directory .\\pia python -m server",
 		"stt": "uv run --directory .\\speech_to_text python -m server",
 		"tts": "uv run --directory .\\text_to_speech python -m server",
-		"agent": "uv run --directory .\\agent python -m server"
+		"agent": "uv run --directory .\\agent python -m server",
+		"ice-up": "docker compose -f .\\image_create_edit\\docker-compose.yml up --build",
+		"ice-down": "docker compose -f .\\image_create_edit\\docker-compose.yml down",
+		"ice": "uv run --directory .\\image_create_edit python -m server"
 	}
 }

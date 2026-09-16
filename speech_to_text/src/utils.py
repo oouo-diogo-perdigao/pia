@@ -1,4 +1,4 @@
-import logging
+from .config import logging
 import threading
 from pathlib import Path
 

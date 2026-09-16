@@ -27,8 +27,9 @@ OPENAI_COMPAT_MAX_UPLOAD_BYTES = int(
     os.getenv("OPENAI_COMPAT_MAX_UPLOAD_BYTES", 100 * 1024 * 1024)
 )
 
-START_SOUND = str(BASE_DIR.parent.parent / "sounds" / "start.mp3")
-END_SOUND = str(BASE_DIR.parent.parent / "sounds" / "end.mp3")
+BASE_DIR = Path(__file__).resolve().parent
+START_SOUND = str(BASE_DIR.parent / "sounds" / "start.mp3")
+END_SOUND = str(BASE_DIR.parent / "sounds" / "end.mp3")
 
 STT_MODEL = os.getenv("STT_MODEL", "large-v3-turbo")
 STT_DEVICE = os.getenv("STT_DEVICE", "cpu")
@@ -54,29 +55,9 @@ if not logger.handlers:
 
     rotating_handler = RotatingFileHandler(
         log_dir / "stt.log",
-        maxBytes=10 * 1024 * 1024,  # Limite exato de 10 MB (10.485.760 bytes)
+        maxBytes=10 * 1024 * 1024,
         backupCount=1,
         encoding="utf-8",
     )
     rotating_handler.setFormatter(formatter)
     logger.addHandler(rotating_handler)
-
-# Crie um logger dedicado para os textos emitidos (no topo do arquivo ou logo após as importações)
-logger_stt = logging.getLogger("logger_stt")
-logger_stt.setLevel(logging.INFO)
-logger_stt.propagate = False  # Evita que suba para o log geral
-
-if not logger_stt.handlers:
-    formatter_stt = logging.Formatter("%(asctime)s\n%(message)s")
-
-    stream_handler_stt = logging.StreamHandler()
-    stream_handler_stt.setFormatter(formatter_stt)
-    logger_stt.addHandler(stream_handler_stt)
-    file_handler_stt = RotatingFileHandler(
-        log_dir / "emited.log",
-        maxBytes=10 * 1024 * 1024,
-        backupCount=1,
-        encoding="utf-8",
-    )
-    file_handler_stt.setFormatter(formatter_stt)
-    logger_stt.addHandler(file_handler_stt)

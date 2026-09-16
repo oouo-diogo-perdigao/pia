@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import io
-import logging
 import warnings
 from pathlib import Path
-from dotenv import load_dotenv
+
 from faster_whisper import WhisperModel, download_model
+
 from .config import (
     logging,
+    logger_stt,
     STT_MODEL,
     STT_DEVICE,
     STT_COMPUTE_TYPE,
@@ -16,9 +17,6 @@ from .config import (
     STT_BEST_OF,
     STT_TEMPERATURE,
 )
-
-BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env")
 
 warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub")
 
@@ -45,23 +43,49 @@ class VoiceAgent:
         download_model(model_size, output_dir=str(models_dir))
         logging.info("[MODELO] Arquivos confirmados no disco.")
 
-    def transcribe_chunk(self, wav_bytes: bytes) -> str:
-        if not wav_bytes:
+    def transcribe_chunk(
+        self,
+        audio_bytes: bytes,
+        *,
+        language: str | None = "pt",
+        prompt: str | None = None,
+        temperature: float | None = None,
+    ) -> str:
+        """Transcribe an in-memory audio file.
+
+        ``audio_bytes`` may contain WAV, MP3, WebM and other formats supported by
+        PyAV/faster-whisper.  The recorder path keeps Portuguese as its default,
+        while the OpenAI-compatible HTTP path may pass ``language=None`` to let
+        Whisper detect the language automatically.
+        """
+        if not audio_bytes:
             return ""
 
-        audio_stream = io.BytesIO(wav_bytes)
+        audio_stream = io.BytesIO(audio_bytes)
 
-        segments, _ = self.model.transcribe(
-            audio_stream,
-            language="pt",
-            beam_size=STT_BEAM_SIZE,
-            best_of=STT_BEST_OF,
-            temperature=STT_TEMPERATURE,
-            condition_on_previous_text=False,
-            vad_filter=False,
-            vad_parameters=dict(min_silence_duration_ms=500),
+        transcription_temperature = (
+            STT_TEMPERATURE if temperature is None else float(temperature)
         )
+
+        transcribe_kwargs = {
+            "language": language or None,
+            "beam_size": STT_BEAM_SIZE,
+            "best_of": STT_BEST_OF,
+            "temperature": transcription_temperature,
+            "condition_on_previous_text": False,
+            "vad_filter": False,
+            "vad_parameters": {"min_silence_duration_ms": 500},
+        }
+
+        if prompt:
+            transcribe_kwargs["initial_prompt"] = prompt
+
+        segments, _ = self.model.transcribe(audio_stream, **transcribe_kwargs)
 
         text = [segment.text for segment in segments]
         res = " ".join(text).strip()
+
+        if res:
+            logger_stt.info(res)
+
         return res

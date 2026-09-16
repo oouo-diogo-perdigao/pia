@@ -190,6 +190,9 @@ def split_text(text, max_chars=420):
 class TTSManager:
     def __init__(self, audio_player=None):
         self.lock = threading.Lock()
+        # O worker processa uma geração por vez. Serializar generate_wav evita
+        # que duas threads concorrentes disputem a mesma result_queue.
+        self.generation_lock = threading.Lock()
         self.worker_process = None
         self.task_queue = None
         self.result_queue = None
@@ -276,45 +279,52 @@ class TTSManager:
                 self.worker_process.start()
 
     def generate_wav(self, text, voice, speed, style=None, timeout=180, job_name=None):
-        self.ensure_worker_running()
+        # O worker/modelo é sequencial; manter uma única requisição síncrona em voo
+        # torna a correlação req_id -> resultado determinística para HTTP concorrente.
+        with self.generation_lock:
+            self.ensure_worker_running()
 
-        with self.lock:
-            self.req_counter += 1
-            req_id = self.req_counter
+            with self.lock:
+                self.req_counter += 1
+                req_id = self.req_counter
 
-        self.task_queue.put(
-            {
-                "cmd": "GENERATE",
-                "req_id": req_id,
-                "text": text,
-                "voice": voice,
-                "speed": speed,
-                "style": style,
-                "job_name": job_name,
-            }
-        )
+            self.task_queue.put(
+                {
+                    "cmd": "GENERATE",
+                    "req_id": req_id,
+                    "text": text,
+                    "voice": voice,
+                    "speed": speed,
+                    "style": style,
+                    "job_name": job_name,
+                }
+            )
 
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            try:
-                res = self.result_queue.get(timeout=0.5)
-                if res.get("req_id") == req_id:
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                try:
+                    res = self.result_queue.get(timeout=0.5)
+                    if res.get("req_id") != req_id:
+                        logging.warning(
+                            "[MANAGER] Resultado inesperado req_id=%s; aguardado=%s.",
+                            res.get("req_id"),
+                            req_id,
+                        )
+                        continue
+
                     if res["ok"]:
                         return res["wav_data"]
                     raise Exception(res.get("error", "Erro desconhecido"))
-                else:
-                    # Devolve pra fila se for resposta de outra requisição concorrente
-                    self.result_queue.put(res)
-            except queue.Empty:
-                # Checa se o worker morreu inesperadamente
-                if not self.worker_process.is_alive():
-                    raise Exception(
-                        "O processo do modelo foi encerrado inesperadamente."
-                    )
+                except queue.Empty:
+                    # Checa se o worker morreu inesperadamente
+                    if not self.worker_process.is_alive():
+                        raise Exception(
+                            "O processo do modelo foi encerrado inesperadamente."
+                        )
 
-        raise TimeoutError(
-            "Tempo limite excedido aguardando resposta da geração de áudio."
-        )
+            raise TimeoutError(
+                "Tempo limite excedido aguardando resposta da geração de áudio."
+            )
 
     def stop_worker(self):
         with self.lock:

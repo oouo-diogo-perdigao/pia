@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import os
 import subprocess
 import time
@@ -10,7 +9,7 @@ from urllib.parse import urlparse
 
 import pyautogui
 
-from .config import Settings, DEFAULT_LOCATION
+from .config import Settings, DEFAULT_LOCATION, logging
 from .memory import MemoryStore
 from .weather import get_weather
 

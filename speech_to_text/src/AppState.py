@@ -8,7 +8,7 @@ from pathlib import Path
 from .AudioRecorder import AudioRecorder, worker_audio_bridge
 from .STTWorkerManager import STTWorkerManager
 from .config import logging
-from utils import play_sound_async, insert_text_at_cursor
+from .utils import play_sound_async, insert_text_at_cursor
 from enum import Enum
 
 SOUNDS_DIR = Path(__file__).parent / ".." / ".." / "sounds"
