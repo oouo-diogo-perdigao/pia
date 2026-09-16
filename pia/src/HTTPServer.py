@@ -117,7 +117,7 @@ class HTTPServer(BaseHTTPRequestHandler):
         self.send_json(200, {"ok": True, "state": path})
 
 
-def run_http_server():
+def run_pia_server():
     logging.info(f"Servidor HTTP Wakeword (PIA) rodando em http://{HOST}:{PORT}")
     server = ThreadingHTTPServer((HOST, PORT), HTTPServer)
 

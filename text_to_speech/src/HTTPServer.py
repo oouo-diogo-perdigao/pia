@@ -548,7 +548,7 @@ class HTTPServer(BaseHTTPRequestHandler):
         logging.info("%s - %s", self.address_string(), fmt % args)
 
 
-def run_stt_server():
+def run_tts_server():
     logging.info("Servidor HTTP TTS rodando em http://%s:%d", HOST, PORT)
     logging.info("Endpoint OpenAI TTS: http://%s:%s/v1/audio/speech", HOST, PORT)
     server = ThreadingHTTPServer((HOST, PORT), HTTPServer)

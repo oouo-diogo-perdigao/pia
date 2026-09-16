@@ -7,7 +7,7 @@ services:
     env_file:
       - .env
     environment:
-      - CLI_ARGS=--highvram --listen 0.0.0.0
+      - CLI_ARGS=--listen 0.0.0.0
     deploy:
       resources:
         reservations:
@@ -16,7 +16,7 @@ services:
               count: all
               capabilities: [gpu]
     volumes:
-      - ./models_cache:/home/user/ComfyUI/models/checkpoints
+      - ./models_cache:/root/ComfyUI/models/checkpoints
     # command: >
     #   bash -c "
     #   if [ ! -f /home/user/ComfyUI/models/checkpoints/flux1-schnell.safetensors ]; then

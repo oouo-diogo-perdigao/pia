@@ -575,7 +575,7 @@ class HTTPServer(BaseHTTPRequestHandler):
 # ==============================================================================
 # INICIALIZAÇÃO DO SERVIDOR
 # ==============================================================================
-def run_http_server():
+def run_stt_server():
     logging.info("Servidor HTTP STT rodando em http://%s:%s", HOST, PORT)
     logging.info(
         "Endpoint OpenAI STT: http://%s:%s/v1/audio/transcriptions", HOST, PORT

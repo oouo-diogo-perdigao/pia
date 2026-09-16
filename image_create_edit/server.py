@@ -1,8 +1,8 @@
-from src.HTTPServer import run_stt_server
+from src.HTTPServer import run_image_server
 
 
 def main():
-    run_stt_server()
+    run_image_server()
 
 
 if __name__ == "__main__":
