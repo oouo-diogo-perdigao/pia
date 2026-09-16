@@ -1,92 +1,189 @@
-"""Simple HTTP server that exposes /trigger, /start, /stop and /status endpoints (src)."""
+"""Simple HTTP server that exposes /trigger, /start, /stop and /status endpoints."""
 
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-import threading
-from .config import HOST, PORT, logging
-from pathlib import Path
+import logging
+import os
+import queue
+import sys
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .AppState import get_app_state
+from .config import HOST, PORT
+from .AppState import get_app_state, STTState
 
-MODELS_DIR = Path(__file__).parent.parent / "models_cache"
-
-# Lazily retrieve app state (created on first use). Caller can pass models_dir
-# to get_app_state if needed.
-APP = get_app_state(models_dir=MODELS_DIR)
+APP = get_app_state()
 
 
 # ==============================================================================
-# SERVIDOR HTTP LEVE
+# SERVIDOR HTTP COM TRATAMENTO DE CONEXÕES ENCERRADAS
+# ==============================================================================
+class STTThreadingHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def handle_error(self, request, client_address) -> None:
+        exc_type, exc_value, _ = sys.exc_info()
+
+        ignored_errors = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)
+
+        if exc_type and issubclass(exc_type, ignored_errors):
+            logging.info(
+                "[HTTP] Cliente desconectado: %s (%s)", client_address[0], exc_value
+            )
+            return
+
+        super().handle_error(request, client_address)
+
+
+# ==============================================================================
+# HANDLER HTTP
 # ==============================================================================
 class HTTPServer(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.0"
+
     def send_json(self, code: int, payload: dict) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(body)
+
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+
+            self.wfile.write(body)
+            self.wfile.flush()
+
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            logging.debug("[HTTP] Cliente desconectou antes de receber a resposta.")
 
     def do_GET(self) -> None:
+
+        # ==========================================================================
+        # WARMUP
+        # ==========================================================================
         if self.path == "/warmup":
             logging.info("[GET /warmup] Aquecendo Worker STT antecipadamente...")
-            threading.Thread(
-                target=APP.stt_manager.ensure_worker_running, daemon=True
-            ).start()
-            self.send_json(200, {"ok": True, "status": "warming_up"})
+            APP.warmup()
+            self.send_json(200, APP.get_status_payload())
+            return
+
+        # ==========================================================================
+        # START / STATUS e/ou STREAM / STOP
+        # ==========================================================================
+        if self.path == "/start":
+            logging.info("[GET /start] Iniciando gravação...")
+            APP.start()
+            self.send_json(
+                200 if APP.status == STTState.RECORDING else 409,
+                APP.get_status_payload(),
+            )
             return
 
         if self.path == "/status":
-            with APP.state_lock:
-                new_text = []
-                while not APP.transcribed_texts.empty():
-                    new_text.append(APP.transcribed_texts.get())
+            logging.info("[GET /status] Verificando status do Worker STT...")
 
-                self.send_json(
-                    200,
-                    {
-                        "status": APP.status,
-                        "is_speaking": bool(APP.recorder.is_speaking),
-                        "is_transcribing": bool(APP.is_transcribing_event.is_set()),
-                        "text_chunks": new_text,
-                    },
-                )
+            payload = APP.get_status_payload()
+            text_chunks = APP.get_status_queue()
+
+            self.send_json(
+                200,
+                {
+                    **payload,
+                    "text_chunks": text_chunks,
+                },
+            )
             return
 
-        if self.path == "/start":
-            logging.info("[GET /start] Iniciando gravação e subindo Worker STT...")
-            with APP.state_lock:
-                if APP.status == "recording":
-                    self.send_json(409, {"ok": False, "error": "Já está gravando."})
-                    return
+        if self.path == "/status/stream":
+            logging.info(
+                "[GET /status/stream] Iniciando stream SSE para status do Worker STT..."
+            )
 
-                APP.start_recording()
+            client_queue = APP.add_stream_queue()
 
-            self.send_json(200, {"ok": True})
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+                self.wfile.flush()
+
+                last_payload_signature = None
+
+                while True:
+                    payload = APP.get_status_payload()
+                    text_chunks = APP.get_stream_queue(client_queue)
+
+                    current_signature = (
+                        payload["status"],
+                        payload["is_speaking"],
+                        payload["is_transcribing"],
+                    )
+
+                    if current_signature != last_payload_signature or text_chunks:
+                        last_payload_signature = current_signature
+                        message = (
+                            f"data: {json.dumps({**payload, 'text_chunks': text_chunks}, ensure_ascii=False)}\n\n"
+                        ).encode("utf-8")
+
+                        self.wfile.write(message)
+                        self.wfile.flush()
+
+                    time.sleep(0.1)
+
+            except (
+                ConnectionResetError,
+                ConnectionAbortedError,
+                BrokenPipeError,
+                ConnectionError,
+            ):
+                logging.info("[SSE /status/stream] Cliente desconectado.")
+
+            finally:
+                APP.remove_stream_queue(client_queue)
+
             return
 
-        self.send_json(404, {"ok": False, "error": "Endpoint inexistente."})
-
-    def do_POST(self) -> None:
-        global STATUS
         if self.path == "/stop":
-            logging.info("[POST /stop] Pausando gravação.")
-            with APP.state_lock:
-                APP.stop_recording()
-
-            self.send_json(200, {"ok": True})
+            logging.info("[GET /stop] Pausando gravação.")
+            APP.stop()
+            self.send_json(200, APP.get_status_payload())
             return
 
+        # ==========================================================================
+        # INSERT START / STOP
+        # ==========================================================================
+        if self.path == "/insert/start":
+            logging.info("[GET /insert/start] Ativando inserção no cursor...")
+            APP.start_cursor_insert()
+            self.send_json(200, APP.get_status_payload())
+            return
+
+        if self.path == "/insert/stop":
+            logging.info("[GET /insert/stop] Desativando inserção no cursor...")
+            APP.stop_cursor_insert()
+            self.send_json(200, APP.get_status_payload())
+            return
+
+        # ==========================================================================
+        # NOT FOUND
+        # ==========================================================================
         self.send_json(404, {"ok": False, "error": "Endpoint inexistente."})
 
     def log_message(self, fmt, *args) -> None:
         pass
 
 
+# ==============================================================================
+# INICIALIZAÇÃO DO SERVIDOR
+# ==============================================================================
 def run_http_server():
     logging.info(f"Servidor HTTP STT rodando em http://{HOST}:{PORT}")
-    server = ThreadingHTTPServer((HOST, PORT), HTTPServer)
+    server = STTThreadingHTTPServer((HOST, PORT), HTTPServer)
 
     try:
         server.serve_forever()
@@ -96,11 +193,13 @@ def run_http_server():
         try:
             APP.shutdown()
         except Exception:
+            logging.exception("Erro durante shutdown da aplicação.")
+        try:
+            server.shutdown()
+        except Exception:
             pass
         try:
             server.server_close()
         except Exception:
             pass
-        import os
-
         os._exit(0)

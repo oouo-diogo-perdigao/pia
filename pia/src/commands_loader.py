@@ -79,12 +79,14 @@ def process_command(text: str, fallback: Callable[[str], None]) -> None:
                 best_match = target_cmd
 
         if best_match and best_ratio >= cutoff:
-            logging.info(
-                f"-> Executando comando ({best_ratio*100:.1f}%): '{best_match}'"
-            )
+            msg = f"[COMANDO EXECUTADO]: '{best_match}' (Correspondência: {best_ratio*100:.1f}%)"
+            print(f"\n>>> {msg} <<<\n")
+            logging.info(msg)
             COMMAND_ACTIONS[best_match]()
             return
         else:
-            logging.info("-> Comando local não reconhecido. Repassando ao Agent...")
+            msg = f"[COMANDO DESCONHECIDO]: '{action_text}' - Repassando ao Agent..."
+            print(f"\n>>> {msg} <<<\n")
+            logging.info(msg)
 
     fallback(text_clean)

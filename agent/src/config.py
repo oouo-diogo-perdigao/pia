@@ -25,7 +25,7 @@ DEFAULT_LOCATION = os.getenv(
     "DEFAULT_LOCATION", "Belo Horizonte, Minas Gerais, Brasil"
 ).strip()
 
-TTS_SERVER_URL = os.getenv("TTS_SERVER_URL", "http://localhost:8763").strip()
+TTS_SERVER_URL = os.getenv("TTS_SERVER_URL").strip()
 
 ROOT_DIR = BASE_DIR
 MEMORY_FILE = BASE_DIR / "data" / "memory.json"

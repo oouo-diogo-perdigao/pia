@@ -69,6 +69,7 @@ def tts_worker_process(task_queue, result_queue):
                     logging.info(
                         f"[WORKER] [{job_name}] Iniciando processamento com Qwen-TTS (estilo: '{style}')..."
                     )
+                    logging.info(f"[WORKER] [{job_name}] Texto: {text}")
                     if qwen_model is None:
                         import torch
                         from qwen_tts import Qwen3TTSModel

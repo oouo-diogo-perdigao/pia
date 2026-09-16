@@ -40,11 +40,7 @@ def play_sound(file_path: str) -> None:
 def speak_tts(text: str):
     """Envia o texto para o serviço local de TTS."""
     try:
-        requests.post(
-            f"{TTS_SERVER_URL}/speak",
-            json={"text": text},
-            timeout=5,
-        )
+        requests.post(f"{TTS_SERVER_URL}/speak", json={"text": text})
     except Exception as e:
         logging.error("[TTS ERRO] Falha ao enviar para o TTS: %s", e)
 

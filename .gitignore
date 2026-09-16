@@ -9,3 +9,4 @@ __pycache__
 node_modules
 pnpm-lock.yaml
 npm-debug.log
+uv.lock

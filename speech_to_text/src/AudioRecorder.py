@@ -7,6 +7,8 @@ import numpy as np
 import sounddevice as sd
 import os
 import site
+from threading import Event
+
 
 from .config import SAMPLE_RATE, CHANNELS, logging
 
@@ -67,7 +69,7 @@ class AudioRecorder:
                 if len(concat_data) >= int(self.sample_rate * 0.8):
                     chunk_rms = float(np.sqrt(np.mean(concat_data**2)))
                     logging.info(
-                        "[AUDIO] Frase concluída (RMS: %.4f). Enviando para transcrição...",
+                        "[TRANSCRICAO ENTRADA] (RMS: %.4f)",
                         chunk_rms,
                     )
                     self.audio_queue.put(self._to_wav(concat_data))
@@ -142,8 +144,8 @@ def worker_audio_bridge(
     recorder: AudioRecorder,
     stt_manager,
     transcribed_texts: queue.Queue,
-    is_transcribing_event: threading.Event,
-    stop_event: threading.Event,
+    is_transcribing_event: Event,
+    stop_event: Event,
 ):
     """Read audio chunks from the recorder and forward them to the STT manager.
 

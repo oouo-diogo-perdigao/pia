@@ -1,12 +1,16 @@
-"""PyQt overlay to show a small animated SVG while session is active (src)."""
+import os
+import sys
+import threading
+from pathlib import Path
+from .config import TTS_SERVER_URL
 
-from PyQt6.QtCore import Qt, QTimer, QMetaObject, Q_ARG
+"""PyQt overlay to show a small animated SVG while session is active (src)."""
+from PyQt6.QtCore import Qt, QTimer, QMetaObject, Q_ARG, QObject, pyqtSignal, pyqtSlot
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QApplication, QWidget
-import sys
-from pathlib import Path
 
-WINDOW_SIZE = 100  # Tamanho do overlay em pixels
+# WINDOW_SIZE = 100  # Tamanho do overlay em pixels
+WINDOW_SIZE = 500  # Tamanho do overlay em pixels
 
 
 class PiaOverlay(QWidget):
@@ -16,7 +20,7 @@ class PiaOverlay(QWidget):
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.SubWindow
-            | Qt.WindowType.WindowTransparentForInput
+            # | Qt.WindowType.WindowTransparentForInput
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.resize(WINDOW_SIZE, WINDOW_SIZE)
@@ -29,10 +33,22 @@ class PiaOverlay(QWidget):
         self.view.page().setBackgroundColor(Qt.GlobalColor.transparent)
         self.view.setHtml(svg_content)
         self.view.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        # Faz o QWebEngineView ignorar os cliques do mouse para que o overlay principal receba
+        self.view.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.view.installEventFilter(self)
 
         self._is_speaking = False
         self._is_thinking = False
         self._has_pending_tasks = False
+        self._streaming_started = False
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Dispara o stream JS assim que a janela é exibida pela primeira vez
+        if not self._streaming_started:
+            self._streaming_started = True
+            self.view.page().runJavaScript("startStreaming();")
 
     def set_speaking(self, speaking: bool):
         self._is_speaking = speaking
@@ -80,6 +96,70 @@ class PiaOverlay(QWidget):
             or self._has_pending_tasks
         )
 
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            print("[PIA] Botão esquerdo clicado: encerrando sessão e fechando overlay.")
+            from . import state as _state
+
+            with _state.LOCK:
+                _state.SESSION_ACTIVE = False
+            self.close()
+        else:
+            # O clique esquerdo é ignorado pelo widget, fazendo com que atravesse para o que está abaixo
+            event.ignore()
+
+    def eventFilter(self, obj, event):
+        if obj == self.view and event.type() == event.Type.MouseButtonPress:
+            if event.button() == Qt.MouseButton.LeftButton:
+                print(
+                    "[PIA] Botão esquerdo clicado: encerrando sessão e fechando overlay."
+                )
+                from . import state as _state
+
+                with _state.LOCK:
+                    _state.SESSION_ACTIVE = False
+                self.close()
+                return True
+            else:
+                event.ignore()
+        return super().eventFilter(obj, event)
+
+    def set_inner_orbit_fast(self, fast: bool):
+        # print log to indicate the inner orbit movement state change
+        print(f"[PIA] Inner orbit fast: {fast}")
+        val = "running" if fast else "paused"
+        self.view.page().runJavaScript(
+            f"document.querySelector('.animation-orbit-clockwise').style.animationPlayState = '{val}';"
+        )
+
+    def set_outer_orbit_fast(self, fast: bool):
+        # print log to indicate the outer orbit movement state change
+        print(f"[PIA] Outer orbit fast: {fast}")
+        val = "running" if fast else "paused"
+        self.view.page().runJavaScript(
+            f"document.querySelector('.animation-orbit-anti-clockwise').style.animationPlayState = '{val}';"
+        )
+
+    def set_eyes_moving(self, moving: bool):
+        # print log to indicate the eyes movement state change
+        print(f"[PIA] Eyes moving: {moving}")
+        val = "running" if moving else "paused"
+        self.view.page().runJavaScript(
+            f"document.querySelector('.animation-looking-eyes').style.animationPlayState = '{val}';"
+        )
+
+    def blink(self):
+        # print log to indicate the blink action
+        print("[PIA] Triggering blink animation")
+        self.view.page().runJavaScript("""
+            var eyes = document.querySelector('.animation-blinking-eyes');
+            if (eyes) {
+                eyes.style.animation = 'none';
+                void eyes.offsetHeight;
+                eyes.style.animation = 'blink 1.5s linear infinite';
+            }
+            """)
+
 
 # Máquina de estados baseada em contadores para gerenciar múltiplos processos da Pia
 class PiaStateMachine:
@@ -111,7 +191,6 @@ class PiaStateMachine:
             return
         overlay.set_inner_orbit_fast(self.counters["thinking"] > 0)
         overlay.set_outer_orbit_fast(self.counters["processing"] > 0)
-        overlay.set_mouth_moving(self.counters["speaking"] > 0)
         overlay.set_eyes_moving(self.counters["listening"] > 0)
 
 
@@ -159,6 +238,45 @@ def run_overlay_app():
         transform-origin: center center;
     }}
 </style>
+<script>
+    let eventSource = null;
+    let stopRequested = false;
+
+    function startStreaming() {{
+        if (eventSource) return; // Evita múltiplas instâncias
+        
+        eventSource = new EventSource("{TTS_SERVER_URL}/status/stream");
+
+        eventSource.onmessage = function(event) {{
+            const data = JSON.parse(event.data);
+            const mouth = document.querySelector('.enable-mouth');
+            const talking = document.querySelector('.animation-talking');
+            
+            if (!talking.dataset.listenerAdded) {{
+                talking.dataset.listenerAdded = "true";
+                talking.addEventListener('animationiteration', () => {{
+                    if (stopRequested) {{
+                        mouth.style.opacity = "0";
+                        talking.style.animationPlayState = "paused";
+                        stopRequested = false;
+                    }}
+                }});
+            }}
+
+            if (data.status === "playing") {{
+                stopRequested = false;
+                mouth.style.opacity = "1";
+                talking.style.animationPlayState = "running";
+            }} else {{
+                stopRequested = true;
+            }}
+        }};
+
+        eventSource.onerror = function(err) {{
+            console.error("Erro na conexão SSE:", err);
+        }};
+    }}
+</script>
 </head>
 <body>{svg_raw}</body>
 </html>
@@ -168,6 +286,9 @@ def run_overlay_app():
             "<html><body><h3>Arquivo pia.svg não encontrado</h3></body></html>"
         )
 
+    # Habilita a inspeção remota na porta 9222
+    # os.environ["QTWEBENGINE_REMOTE_DEBUGGING"] = "9222"
+
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
@@ -176,12 +297,15 @@ def run_overlay_app():
     _GLOBAL_OVERLAY = overlay
 
     def check_visibility():
-        if overlay.should_stay_visible():
-            if not overlay.isVisible():
-                overlay.show()
-        else:
-            if overlay.isVisible():
-                overlay.hide()
+        try:
+            if overlay.should_stay_visible():
+                if not overlay.isVisible():
+                    overlay.show()
+            else:
+                if overlay.isVisible():
+                    overlay.hide()
+        except KeyboardInterrupt:
+            pass
 
     timer = QTimer()
     timer.timeout.connect(check_visibility)

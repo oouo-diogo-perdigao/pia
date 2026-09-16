@@ -219,7 +219,7 @@
       transform-origin: 250px 250px;
       /* animation: blink 600s infinite; */
 			animation-name: blink;
-			animation-duration: 1.5s;
+			animation-duration: 1.2s;
 			animation-timing-function: linear;
 			animation-iteration-count: infinite;
 			animation-play-state: paused;
@@ -258,7 +258,7 @@
 
 		.animation-talking {
       animation-name: waveTalk;
-      animation-duration: 0.5s;
+      animation-duration: 0.3s;
       animation-timing-function: ease-in-out;
       animation-iteration-count: infinite;
       animation-play-state: paused;

@@ -1,0 +1,23 @@
+[project]
+name = "agent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Diogo Passos Perdigão Britto", email = "diogopbritto@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "dotenv>=0.9.9",
+    "litellm>=1.100.0",
+    "pygame>=2.6.1",
+    "pyyaml>=6.0.3",
+    "requests>=2.34.2",
+]
+
+[project.scripts]
+agent = "agent:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"

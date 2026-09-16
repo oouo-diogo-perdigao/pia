@@ -127,6 +127,34 @@ class HTTPServer(BaseHTTPRequestHandler):
             )
             return
 
+        # Abordagem Server-Sent Events (SSE)
+        if self.path == "/status/stream":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_cors_headers()
+            self.end_headers()
+
+            last_status = None
+            try:
+                import time
+
+                while True:
+                    with PLAYER.lock:
+                        current_status = PLAYER.status
+
+                    if current_status != last_status:
+                        payload = json.dumps({"status": current_status})
+                        self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
+                        self.wfile.flush()
+                        last_status = current_status
+
+                    time.sleep(0.1)
+            except Exception:
+                pass
+            return
+
         if self.path == "/help":
             import os
 
@@ -153,7 +181,7 @@ class HTTPServer(BaseHTTPRequestHandler):
         logging.info("%s - %s", self.address_string(), fmt % args)
 
 
-def run_http_server():
+def run_stt_server():
     logging.info("Servidor HTTP TTS rodando em http://%s:%d", HOST, PORT)
     server = ThreadingHTTPServer((HOST, PORT), HTTPServer)
 

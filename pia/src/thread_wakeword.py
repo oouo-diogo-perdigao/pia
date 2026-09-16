@@ -42,7 +42,7 @@ def _start_continuous_session(stream, model) -> None:
         stream.read(CHUNK, exception_on_overflow=False)
 
     try:
-        requests.post(f"{STT_SERVER_URL}/start", timeout=2)
+        requests.get(f"{STT_SERVER_URL}/start", timeout=2)
     except Exception as e:
         logging.error(f"Erro ao conectar ao servidor STT: {e}")
         with _state.LOCK:
@@ -101,7 +101,7 @@ def _start_continuous_session(stream, model) -> None:
                 and (now - last_speech_time >= 3.0)
             ):
                 logging.info("[INATIVIDADE] Invocando prompt TTS...")
-                from lib.utils import speak_tts
+                from .lib.utils import speak_tts
 
                 speak_tts("Em que posso ajudá-lo, mestre?")
 
@@ -126,7 +126,7 @@ def _start_continuous_session(stream, model) -> None:
         except Exception:
             pass
 
-        if modo_ditado:
+        if modo_ditado and getattr(modo_ditado, "dictation_active", False):
             modo_ditado.disable_dictation()
 
         play_sound(END_SOUND)

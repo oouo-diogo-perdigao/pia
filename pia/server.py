@@ -21,7 +21,7 @@ def main() -> None:
     load_commands("commands")
 
     # Start overlay as a daemon thread so the HTTP server can run in main.
-    overlay_thread = threading.Thread(target=run_overlay_app, daemon=True)
+    overlay_thread = threading.Thread(target=run_http_server, daemon=True)
     overlay_thread.start()
 
     # Audio listening should continue in background as before.
@@ -30,7 +30,7 @@ def main() -> None:
 
     # Run the HTTP server in the main thread (blocking). This makes the
     # process lifecycle controlled by the HTTP server.
-    run_http_server()
+    run_overlay_app()
 
 
 if __name__ == "__main__":

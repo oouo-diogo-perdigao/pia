@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import logging
-import os
+import warnings
 from pathlib import Path
 from dotenv import load_dotenv
 from faster_whisper import WhisperModel, download_model
@@ -19,6 +19,8 @@ from .config import (
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
+
+warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub")
 
 
 class VoiceAgent:
