@@ -26,14 +26,3 @@ services:
     #   exec /home/user/venv/bin/python main.py --highvram --listen 0.0.0.0
     #   "
     restart: unless-stopped
-
-  # image_api:
-  #   build: ./openai_image_gateway
-  #   container_name: openai-image-gateway
-  #   ports:
-  #     - "8764:8764"
-  #   env_file:
-  #     - .env
-  #   depends_on:
-  #     - comfyui
-  #   restart: unless-stopped

@@ -1,11 +1,12 @@
 ## Endpoints
-
 - `GET /v1/models`
 - `POST /v1/images/generations`
 - `POST /v1/images/edits`
 - `POST /v1/images/variations`
 - `GET /health`
 - `GET /v1/images/files/<arquivo>` para `response_format=url`
+
+Para o modelo `sd_xl_base_1.0.safetensors` imagens menores que 1024x1024 geram imagens ruins.
 
 ## Ciclo de memória
 
@@ -33,6 +34,16 @@ Seu volume atual atende esse layout:
 ```yaml
 - ./models_cache:/home/user/ComfyUI/models/checkpoints
 ```
+
+## Download do modelo
+# command: >
+#   bash -c "
+#   if [ ! -f /home/user/ComfyUI/models/checkpoints/flux1-schnell.safetensors ]; then
+#     echo 'Baixando o modelo FLUX.1 Schnell...' &&
+#     wget --header=\"Authorization: Bearer $$HF_TOKEN\" -O /home/user/ComfyUI/models/checkpoints/flux1-schnell.safetensors https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors;
+#   fi &&
+#   exec /home/user/venv/bin/python main.py --highvram --listen 0.0.0.0
+#   "
 
 ### Split/full
 

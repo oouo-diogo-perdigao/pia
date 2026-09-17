@@ -8,7 +8,7 @@ import uuid
 
 from .ComfyUIClient import ComfyUIClient
 from .WorkflowFactory import build_generation_workflow, build_edit_workflow
-from .image_config import (
+from .config import (
     COMFYUI_AUTO_FREE,
     COMFYUI_SERIALIZE_JOBS,
     IMAGE_DEFAULT_SIZE,
@@ -39,13 +39,17 @@ class _NullLock:
 
 def decode_data_url(value: str) -> tuple[bytes, str]:
     if not isinstance(value, str) or not value.startswith("data:") or "," not in value:
-        raise OpenAIImageRequestError("A imagem JSON deve ser uma data URL base64.", param="image")
+        raise OpenAIImageRequestError(
+            "A imagem JSON deve ser uma data URL base64.", param="image"
+        )
     header, encoded = value.split(",", 1)
     content_type = header[5:].split(";", 1)[0] or "image/png"
     try:
         data = base64.b64decode(encoded, validate=True)
     except Exception as exc:
-        raise OpenAIImageRequestError("Base64 de imagem inválido.", param="image") from exc
+        raise OpenAIImageRequestError(
+            "Base64 de imagem inválido.", param="image"
+        ) from exc
     return data, content_type
 
 
@@ -55,7 +59,9 @@ class ImageManager:
         self._job_lock = threading.Lock()
 
     @staticmethod
-    def parse_size(size: str | None, *, preserve_on_auto: bool = False) -> tuple[int, int]:
+    def parse_size(
+        size: str | None, *, preserve_on_auto: bool = False
+    ) -> tuple[int, int]:
         size = (size or IMAGE_DEFAULT_SIZE).strip().lower()
         if size in {"auto", ""}:
             if preserve_on_auto:
@@ -83,19 +89,25 @@ class ImageManager:
         except (TypeError, ValueError) as exc:
             raise OpenAIImageRequestError("n deve ser inteiro.", param="n") from exc
         if not 1 <= n <= IMAGE_MAX_N:
-            raise OpenAIImageRequestError(f"n deve estar entre 1 e {IMAGE_MAX_N}.", param="n")
+            raise OpenAIImageRequestError(
+                f"n deve estar entre 1 e {IMAGE_MAX_N}.", param="n"
+            )
         return n
 
     @staticmethod
     def validate_prompt(prompt) -> str:
         if not isinstance(prompt, str) or not prompt.strip():
-            raise OpenAIImageRequestError("O campo prompt é obrigatório.", param="prompt")
+            raise OpenAIImageRequestError(
+                "O campo prompt é obrigatório.", param="prompt"
+            )
         return prompt.strip()
 
     @staticmethod
     def validate_upload(data: bytes, *, param: str) -> None:
         if not data:
-            raise OpenAIImageRequestError(f"O arquivo '{param}' está vazio.", param=param)
+            raise OpenAIImageRequestError(
+                f"O arquivo '{param}' está vazio.", param=param
+            )
         if len(data) > IMAGE_MAX_UPLOAD_BYTES:
             raise OpenAIImageRequestError(
                 f"O arquivo '{param}' excede o limite de {IMAGE_MAX_UPLOAD_BYTES} bytes.",
@@ -128,14 +140,19 @@ class ImageManager:
         )
         logging.info(
             "[IMAGE] generation prompt_chars=%d size=%dx%d n=%d",
-            len(prompt), width, height, n,
+            len(prompt),
+            width,
+            height,
+            n,
         )
         return self._run_and_free(lambda: self.client.run_workflow(workflow))
 
     def edit(self, *, fields: dict, image: dict, mask: dict | None) -> list[bytes]:
         prompt = self.validate_prompt(fields.get("prompt"))
         n = self.validate_n(fields.get("n", 1))
-        width, height = self.parse_size(fields.get("size") or "auto", preserve_on_auto=True)
+        width, height = self.parse_size(
+            fields.get("size") or "auto", preserve_on_auto=True
+        )
 
         image_data = image["data"]
         image_type = image.get("content_type") or "image/png"
@@ -175,13 +192,18 @@ class ImageManager:
 
         logging.info(
             "[IMAGE] edit prompt_chars=%d size=%s n=%d masked=%s",
-            len(prompt), f"{width}x{height}" if width and height else "original", n, bool(mask),
+            len(prompt),
+            f"{width}x{height}" if width and height else "original",
+            n,
+            bool(mask),
         )
         return self._run_and_free(job)
 
     def variation(self, *, fields: dict, image: dict) -> list[bytes]:
         n = self.validate_n(fields.get("n", 1))
-        width, height = self.parse_size(fields.get("size") or "auto", preserve_on_auto=True)
+        width, height = self.parse_size(
+            fields.get("size") or "auto", preserve_on_auto=True
+        )
         image_data = image["data"]
         image_type = image.get("content_type") or "image/png"
         self.validate_upload(image_data, param="image")
@@ -207,7 +229,8 @@ class ImageManager:
 
         logging.info(
             "[IMAGE] variation size=%s n=%d",
-            f"{width}x{height}" if width and height else "original", n,
+            f"{width}x{height}" if width and height else "original",
+            n,
         )
         return self._run_and_free(job)
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 
-from .image_config import (
+from .config import (
     COMFYUI_MODEL_LAYOUT,
     COMFYUI_CHECKPOINT,
     COMFYUI_UNET,
@@ -52,57 +52,91 @@ def _model_nodes():
         }
         return nodes, ["10", 0], ["11", 0], ["12", 0]
 
-    raise WorkflowConfigurationError("COMFYUI_MODEL_LAYOUT deve ser 'checkpoint' ou 'split'.")
+    raise WorkflowConfigurationError(
+        "COMFYUI_MODEL_LAYOUT deve ser 'checkpoint' ou 'split'."
+    )
 
 
 def _conditioning_nodes(prompt: str, clip_ref):
     if COMFYUI_MODEL_LAYOUT == "checkpoint":
-        return {
-            "20": _node("CLIPTextEncode", text=prompt, clip=clip_ref),
-            "21": _node("CLIPTextEncode", text="", clip=clip_ref),
-        }, ["20", 0], ["21", 0]
+        return (
+            {
+                "20": _node("CLIPTextEncode", text=prompt, clip=clip_ref),
+                "21": _node("CLIPTextEncode", text="", clip=clip_ref),
+            },
+            ["20", 0],
+            ["21", 0],
+        )
 
-    return {
-        "20": _node(
-            "CLIPTextEncodeFlux",
-            clip=clip_ref,
-            clip_l=prompt,
-            t5xxl=prompt,
-            guidance=IMAGE_FLUX_GUIDANCE,
-        ),
-        "21": _node("ConditioningZeroOut", conditioning=["20", 0]),
-    }, ["20", 0], ["21", 0]
+    return (
+        {
+            "20": _node(
+                "CLIPTextEncodeFlux",
+                clip=clip_ref,
+                clip_l=prompt,
+                t5xxl=prompt,
+                guidance=IMAGE_FLUX_GUIDANCE,
+            ),
+            "21": _node("ConditioningZeroOut", conditioning=["20", 0]),
+        },
+        ["20", 0],
+        ["21", 0],
+    )
 
 
-def build_generation_workflow(*, prompt: str, width: int, height: int, n: int,
-                              seed: int | None = None, steps: int | None = None) -> dict:
+def build_generation_workflow(
+    *,
+    prompt: str,
+    width: int,
+    height: int,
+    n: int,
+    seed: int | None = None,
+    steps: int | None = None,
+) -> dict:
     nodes, model_ref, clip_ref, vae_ref = _model_nodes()
     conditioning, positive_ref, negative_ref = _conditioning_nodes(prompt, clip_ref)
     nodes.update(conditioning)
-    nodes.update({
-        "30": _node("EmptySD3LatentImage", width=width, height=height, batch_size=n),
-        "40": _node(
-            "KSampler",
-            model=model_ref,
-            seed=_seed(seed),
-            steps=int(steps or IMAGE_STEPS),
-            cfg=IMAGE_CFG,
-            sampler_name=IMAGE_SAMPLER,
-            scheduler=IMAGE_SCHEDULER,
-            positive=positive_ref,
-            negative=negative_ref,
-            latent_image=["30", 0],
-            denoise=1.0,
-        ),
-        "50": _node("VAEDecode", samples=["40", 0], vae=vae_ref),
-        "60": _node("SaveImage", images=["50", 0], filename_prefix="openai_gateway/generation"),
-    })
+    nodes.update(
+        {
+            "30": _node(
+                "EmptySD3LatentImage", width=width, height=height, batch_size=n
+            ),
+            "40": _node(
+                "KSampler",
+                model=model_ref,
+                seed=_seed(seed),
+                steps=int(steps or IMAGE_STEPS),
+                cfg=IMAGE_CFG,
+                sampler_name=IMAGE_SAMPLER,
+                scheduler=IMAGE_SCHEDULER,
+                positive=positive_ref,
+                negative=negative_ref,
+                latent_image=["30", 0],
+                denoise=1.0,
+            ),
+            "50": _node("VAEDecode", samples=["40", 0], vae=vae_ref),
+            "60": _node(
+                "SaveImage",
+                images=["50", 0],
+                filename_prefix="openai_gateway/generation",
+            ),
+        }
+    )
     return nodes
 
 
-def build_edit_workflow(*, prompt: str, image_name: str, mask_name: str | None,
-                        width: int, height: int, n: int, denoise: float,
-                        seed: int | None = None, steps: int | None = None) -> dict:
+def build_edit_workflow(
+    *,
+    prompt: str,
+    image_name: str,
+    mask_name: str | None,
+    width: int,
+    height: int,
+    n: int,
+    denoise: float,
+    seed: int | None = None,
+    steps: int | None = None,
+) -> dict:
     nodes, model_ref, clip_ref, vae_ref = _model_nodes()
     conditioning, positive_ref, negative_ref = _conditioning_nodes(prompt, clip_ref)
     nodes.update(conditioning)
@@ -135,21 +169,25 @@ def build_edit_workflow(*, prompt: str, image_name: str, mask_name: str | None,
         nodes["34"] = _node("RepeatLatentBatch", samples=latent_ref, amount=n)
         latent_ref = ["34", 0]
 
-    nodes.update({
-        "40": _node(
-            "KSampler",
-            model=model_ref,
-            seed=_seed(seed),
-            steps=int(steps or IMAGE_STEPS),
-            cfg=IMAGE_CFG,
-            sampler_name=IMAGE_SAMPLER,
-            scheduler=IMAGE_SCHEDULER,
-            positive=positive_ref,
-            negative=negative_ref,
-            latent_image=latent_ref,
-            denoise=float(denoise),
-        ),
-        "50": _node("VAEDecode", samples=["40", 0], vae=vae_ref),
-        "60": _node("SaveImage", images=["50", 0], filename_prefix="openai_gateway/edit"),
-    })
+    nodes.update(
+        {
+            "40": _node(
+                "KSampler",
+                model=model_ref,
+                seed=_seed(seed),
+                steps=int(steps or IMAGE_STEPS),
+                cfg=IMAGE_CFG,
+                sampler_name=IMAGE_SAMPLER,
+                scheduler=IMAGE_SCHEDULER,
+                positive=positive_ref,
+                negative=negative_ref,
+                latent_image=latent_ref,
+                denoise=float(denoise),
+            ),
+            "50": _node("VAEDecode", samples=["40", 0], vae=vae_ref),
+            "60": _node(
+                "SaveImage", images=["50", 0], filename_prefix="openai_gateway/edit"
+            ),
+        }
+    )
     return nodes

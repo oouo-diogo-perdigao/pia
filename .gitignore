@@ -4,6 +4,7 @@ softwares
 logs
 
 */models_cache
+*/cache
 
 open-webui/open-webui_data
 __pycache__

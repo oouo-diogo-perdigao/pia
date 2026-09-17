@@ -8,7 +8,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
-from .image_config import (
+from .config import (
     COMFYUI_URL,
     COMFYUI_TIMEOUT_SECONDS,
     COMFYUI_POLL_INTERVAL_SECONDS,
@@ -56,7 +56,9 @@ class ComfyUIClient:
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=timeout or COMFYUI_TIMEOUT_SECONDS) as response:
+            with urllib.request.urlopen(
+                req, timeout=timeout or COMFYUI_TIMEOUT_SECONDS
+            ) as response:
                 data = response.read()
                 if not expect_json:
                     return data, dict(response.headers.items())
@@ -95,13 +97,15 @@ class ComfyUIClient:
         node_errors = response.get("node_errors") or {}
         if node_errors:
             raise ComfyUIError(
-                "ComfyUI rejeitou o workflow: " + json.dumps(node_errors, ensure_ascii=False)
+                "ComfyUI rejeitou o workflow: "
+                + json.dumps(node_errors, ensure_ascii=False)
             )
 
         prompt_id = response.get("prompt_id")
         if not prompt_id:
             raise ComfyUIError(
-                "ComfyUI não devolveu prompt_id: " + json.dumps(response, ensure_ascii=False)
+                "ComfyUI não devolveu prompt_id: "
+                + json.dumps(response, ensure_ascii=False)
             )
         return str(prompt_id)
 
@@ -124,7 +128,9 @@ class ComfyUIClient:
                 if outputs or status.get("completed"):
                     return entry
             time.sleep(COMFYUI_POLL_INTERVAL_SECONDS)
-        raise TimeoutError(f"Tempo limite excedido aguardando o prompt {prompt_id} no ComfyUI.")
+        raise TimeoutError(
+            f"Tempo limite excedido aguardando o prompt {prompt_id} no ComfyUI."
+        )
 
     @staticmethod
     def output_image_refs(history_entry: dict) -> list[dict]:
@@ -134,7 +140,9 @@ class ComfyUIClient:
                 if item.get("filename"):
                     refs.append(item)
         if not refs:
-            raise ComfyUIError("O workflow terminou, mas nenhum nó de saída retornou imagem.")
+            raise ComfyUIError(
+                "O workflow terminou, mas nenhum nó de saída retornou imagem."
+            )
         return refs
 
     def download_image(self, ref: dict) -> bytes:
@@ -152,14 +160,24 @@ class ComfyUIClient:
         prompt_id = self.submit_prompt(workflow)
         logging.info("[COMFYUI] Workflow enviado: prompt_id=%s", prompt_id)
         history_entry = self.wait_for_prompt(prompt_id)
-        images = [self.download_image(ref) for ref in self.output_image_refs(history_entry)]
-        logging.info("[COMFYUI] Workflow concluído: prompt_id=%s imagens=%d", prompt_id, len(images))
+        images = [
+            self.download_image(ref) for ref in self.output_image_refs(history_entry)
+        ]
+        logging.info(
+            "[COMFYUI] Workflow concluído: prompt_id=%s imagens=%d",
+            prompt_id,
+            len(images),
+        )
         return images
 
-    def upload_image(self, data: bytes, *, filename: str, content_type: str = "image/png") -> str:
+    def upload_image(
+        self, data: bytes, *, filename: str, content_type: str = "image/png"
+    ) -> str:
         multipart_type, multipart_body = encode_multipart(
             fields={"type": "input", "overwrite": "true"},
-            files=[("image", filename, content_type or "application/octet-stream", data)],
+            files=[
+                ("image", filename, content_type or "application/octet-stream", data)
+            ],
         )
         response = self._request(
             "POST",

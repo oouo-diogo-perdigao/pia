@@ -11,10 +11,12 @@ from urllib.parse import urlsplit
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .config import HOST, PORT, OPENAI_COMPAT_API_KEY
 from .ImageManager import IMAGE_MANAGER, OpenAIImageRequestError, decode_data_url
 from .ComfyUIClient import ComfyUIError
-from .image_config import (
+from .config import (
+    HOST,
+    PORT,
+    OPENAI_COMPAT_API_KEY,
     OPENAI_IMAGE_MODEL_ID,
     PUBLIC_BASE_URL,
     OUTPUT_CACHE_DIR,
@@ -257,6 +259,10 @@ class HTTPServer(BaseHTTPRequestHandler):
                 except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
                     self.send_openai_error(400, f"JSON inválido: {exc}")
                     return
+                logging.info(
+                    "[IMAGE] Requisição de geração de imagem recebida. payload=%s",
+                    payload,
+                )
                 images = IMAGE_MANAGER.generate(payload)
                 self._send_image_response(
                     images, response_format=payload.get("response_format", "b64_json")
@@ -264,6 +270,10 @@ class HTTPServer(BaseHTTPRequestHandler):
                 return
 
             if path == "/v1/images/edits":
+                logging.info(
+                    "[IMAGE] Requisição de edição de imagem recebida. payload=%s",
+                    self.headers,
+                )
                 fields, files = self._read_edit_or_variation()
                 image = self._first_file(files, "image", required=True)
                 mask = self._first_file(files, "mask", required=False)
@@ -274,6 +284,7 @@ class HTTPServer(BaseHTTPRequestHandler):
                 return
 
             if path == "/v1/images/variations":
+                logging.info("[IMAGE] Requisição de variação de imagem recebida.")
                 fields, files = self._read_edit_or_variation()
                 image = self._first_file(files, "image", required=True)
                 images = IMAGE_MANAGER.variation(fields=fields, image=image)
@@ -298,7 +309,7 @@ class HTTPServer(BaseHTTPRequestHandler):
                 error_code="image_generation_error",
             )
         except Exception as exc:
-            logging.exception("Erro durante requisição POST HTTP.")
+            logging.exception("[IMAGE] Erro durante requisição POST HTTP.")
             self.send_openai_error(
                 500,
                 str(exc),
@@ -310,6 +321,7 @@ class HTTPServer(BaseHTTPRequestHandler):
         path = self._path()
 
         if path == "/v1/models":
+            logging.info("[IMAGE] Requisição de listagem de modelos recebida.")
             if not self._authorize_openai():
                 return
             self.send_json(
@@ -329,6 +341,7 @@ class HTTPServer(BaseHTTPRequestHandler):
             return
 
         if path == "/health":
+            logging.info("[IMAGE] Requisição de verificação de saúde recebida.")
             try:
                 self.send_json(
                     200,
@@ -343,9 +356,9 @@ class HTTPServer(BaseHTTPRequestHandler):
                 self.send_json(503, {"ok": False, "comfyui": False, "error": str(exc)})
             return
 
-        prefix = "/v1/images/files/"
-        if path.startswith(prefix):
-            token = path[len(prefix) :]
+        if path.startswith("/v1/images/files/"):
+            logging.info("[IMAGE] Requisição de arquivo de imagem recebida.")
+            token = path[len("/v1/images/files/") :]
             if not token or "/" in token or "\\" in token or ".." in token:
                 self.send_json(404, {"ok": False})
                 return
