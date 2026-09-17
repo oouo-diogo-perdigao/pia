@@ -1,8 +1,8 @@
-from src.HTTPServer import run_stt_server
+from src.HTTPServer import run_tts_server
 
 
 def main():
-    run_stt_server()
+    run_tts_server()
 
 
 if __name__ == "__main__":

@@ -169,7 +169,7 @@ class HTTPServer(BaseHTTPRequestHandler):
         pass
 
 
-def run_http_server():
+def run_agent_server():
     server = ThreadingHTTPServer((HOST, PORT), HTTPServer)
     logging.info("Servidor HTTP leve iniciado em http://%s:%d", HOST, PORT)
 

@@ -1,8 +1,8 @@
-from src.HTTPServer import run_http_server
+from src.HTTPServer import run_agent_server
 
 
 def main():
-    run_http_server()
+    run_agent_server()
 
 
 if __name__ == "__main__":

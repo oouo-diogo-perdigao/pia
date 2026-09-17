@@ -7,7 +7,7 @@ services:
     env_file:
       - .env
     environment:
-      - CLI_ARGS=--highvram --listen 0.0.0.0
+      - CLI_ARGS=--listen 0.0.0.0
     deploy:
       resources:
         reservations:
@@ -16,7 +16,7 @@ services:
               count: all
               capabilities: [gpu]
     volumes:
-      - ./models_cache:/home/user/ComfyUI/models/checkpoints
+      - ./models_cache:/root/ComfyUI/models/checkpoints
     # command: >
     #   bash -c "
     #   if [ ! -f /home/user/ComfyUI/models/checkpoints/flux1-schnell.safetensors ]; then
@@ -26,14 +26,3 @@ services:
     #   exec /home/user/venv/bin/python main.py --highvram --listen 0.0.0.0
     #   "
     restart: unless-stopped
-
-  # image_api:
-  #   build: ./openai_image_gateway
-  #   container_name: openai-image-gateway
-  #   ports:
-  #     - "8764:8764"
-  #   env_file:
-  #     - .env
-  #   depends_on:
-  #     - comfyui
-  #   restart: unless-stopped
