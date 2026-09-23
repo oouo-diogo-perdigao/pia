@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+    html, body {
+        background: transparent !important; 
+        background-color: transparent !important;
+        margin: 0; 
+        padding: 0;
+        overflow: hidden; 
+        width: {window_size}px;
+        height: {window_size}px;
+        display: flex; 
+        align-items: center; 
+        justify-content: center; 
+    }
+    svg {
+        width: {window_size}px !important;
+        height: {window_size}px !important;
+        transform-origin: center center;
+    }
+</style>
+<script>
+    let eventSource = null;
+    let stopRequested = false;
+
+    function startStreaming() {
+        if (eventSource) return; // Evita múltiplas instâncias
+        
+        eventSource = new EventSource("{sat_server_url}/status/stream");
+
+        eventSource.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            const mouth = document.querySelector('.enable-mouth');
+            const talking = document.querySelector('.animation-talking');
+            
+            if (!talking.dataset.listenerAdded) {
+                talking.dataset.listenerAdded = "true";
+                talking.addEventListener('animationiteration', () => {
+                    if (stopRequested) {
+                        mouth.style.opacity = "0";
+                        talking.style.animationPlayState = "paused";
+                        stopRequested = false;
+                    }
+                });
+            }
+
+            if (data.status === "playing") {
+                stopRequested = false;
+                mouth.style.opacity = "1";
+                talking.style.animationPlayState = "running";
+            } else {
+                stopRequested = true;
+            }
+        };
+
+        eventSource.onerror = function(err) {
+            console.error("Erro na conexão SSE:", err);
+        };
+    }
+</script>
+</head>
+<body>
+{svg_raw}
+</body>
+</html>

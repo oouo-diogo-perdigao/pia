@@ -2,30 +2,14 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "STT Service",
+      "name": "SAT Service",
       "type": "node",
       "request": "launch",
       "runtimeExecutable": "uv",
       "runtimeArgs": [
         "run",
         "--directory",
-        "${workspaceFolder}/speech_to_text",
-        "python",
-        "-m",
-        "watchfiles",
-        "python -m server"
-      ],
-      "console": "integratedTerminal"
-    },
-    {
-      "name": "TTS Service",
-      "type": "node",
-      "request": "launch",
-      "runtimeExecutable": "uv",
-      "runtimeArgs": [
-        "run",
-        "--directory",
-        "${workspaceFolder}/text_to_speech",
+        "${workspaceFolder}/speech_and_text",
         "python",
         "-m",
         "watchfiles",
@@ -70,8 +54,7 @@
     {
       "name": "Iniciar Todos os Serviços (F5)",
       "configurations": [
-        "STT Service",
-        "TTS Service",
+        "SAT Service",
         "Agent Service",
         "Pia Principal"
       ]

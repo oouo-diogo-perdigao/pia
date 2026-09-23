@@ -41,6 +41,9 @@ class GenericAgent:
     """Agente genérico que consome a lista de prioridades do Router."""
 
     def run(self, prompt: str) -> str:
+        # Mostra a entrada na tela
+        print(f"\n[AGENT INPUT]: {prompt}")
+
         messages = [
             {
                 "role": "system",
@@ -49,8 +52,42 @@ class GenericAgent:
             {"role": "user", "content": prompt},
         ]
         # O Router tenta o primeiro modelo da lista. Se estourar a cota/erro, faz fallback automático
-        response = llm_router.completion(model="auto-agent", messages=messages)
+        used_model = response.get("model", "auto-agent")
+
         # Log de qual modelo realmente respondeu essa requisição
-        used_model = response.get("model", "desconhecido")
+        response = llm_router.completion(model=used_model, messages=messages)
+
         logging.info("[ROUTER] Resposta gerada usando o modelo: %s", used_model)
-        return response.choices[0].message.content.strip()
+        answer = response.choices[0].message.content
+
+        # Mostra a saída completa na tela
+        print(f"[AGENT OUTPUT]: {answer}\n")
+        return answer
+
+    def run_stream(self, prompt: str):
+        # Mostra a entrada na tela
+        print(f"\n[AGENT STREAM INPUT]: {prompt}")
+        print("[AGENT STREAM OUTPUT]: ", end="", flush=True)
+
+        messages = [
+            {
+                "role": "system",
+                "content": "Você é uma assistente inteligente, prestativa e sucinta. Responda de forma direta em português.",
+            },
+            {"role": "user", "content": prompt},
+        ]
+        # Ativa o stream no router/litellm
+        response = llm_router.completion(
+            model="auto-agent", messages=messages, stream=True
+        )
+
+        full_response = ""
+        for chunk in response:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                # Imprime cada pedaço na tela em tempo real conforme é gerado
+                print(delta, end="", flush=True)
+                full_response += delta
+                yield delta
+
+        print("\n")  # Quebra de linha ao finalizar o stream

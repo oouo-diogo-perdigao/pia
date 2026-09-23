@@ -1,10 +1,12 @@
 import threading
 import time
 import os
+
+os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
 import pygame
 import requests
 
-from .config import logging, TTS_SERVER_URL
+from .config import logging, SAT_SERVER_URL
 from .agents.AgentManager import AgentManager
 
 # Initialize audio mixer once (safe to call multiple times)
@@ -38,11 +40,11 @@ def play_sound(file_path: str) -> None:
 
 
 def speak_tts(text: str):
-    """Envia o texto para o serviço local de TTS."""
+    """Envia o texto para o serviço local de SAT."""
     try:
-        requests.post(f"{TTS_SERVER_URL}/speak", json={"text": text})
+        requests.post(f"{SAT_SERVER_URL}/speak", json={"text": text})
     except Exception as e:
-        logging.error("[TTS ERRO] Falha ao enviar para o TTS: %s", e)
+        logging.error("[SAT ERRO] Falha ao enviar para o SAT: %s", e)
 
 
 # ============================================================================

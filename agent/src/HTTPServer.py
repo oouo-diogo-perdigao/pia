@@ -22,25 +22,19 @@ class HTTPServer(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:
-        if self.path in ("/process", "/v1/chat/completions"):
-            content_length = int(self.headers.get("Content-Length", 0))
-            raw_body = self.rfile.read(content_length).decode("utf-8")
-
-            # Log separado e dedicado das entradas da LLM/API
-            llm_logger = logging.getLogger("llm_trace")
-            llm_logger.info("[LLM INPUT] %s", raw_body)
-
+        if self.path == "/v1/chat/completions":
             try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                raw_body = self.rfile.read(content_length).decode("utf-8")
+
+                # Log separado e dedicado das entradas da LLM/APIVocê está me escutando bem?
+                llm_logger = logging.getLogger("llm_trace")
+                llm_logger.info("[LLM INPUT] %s", raw_body)
+
                 data = json.loads(raw_body)
 
-                # Suporte a payload padrão OpenAI (/v1/chat/completions) ou customizado (/process)
-                if self.path == "/v1/chat/completions":
-                    messages = data.get("messages", [])
-                    user_text = (
-                        messages[-1].get("content", "").strip() if messages else ""
-                    )
-                else:
-                    user_text = data.get("text", "").strip()
+                messages = data.get("messages", [])
+                user_text = messages[-1].get("content", "").strip() if messages else ""
 
                 if not user_text:
                     error_payload = (
@@ -56,92 +50,97 @@ class HTTPServer(BaseHTTPRequestHandler):
                     self.send_json(400, error_payload)
                     return
 
-                # Executa o processamento real do agente para obter a resposta da LLM
-                try:
-                    agent_response = BUFFER_MANAGER.agent_manager.process(user_text)
-                except Exception as ex:
-                    agent_response = f"Erro ao executar agente: {ex}"
+                is_stream = data.get("stream", False)
+                model_name = data.get("model", "gemini-local")
+                chunk_id = f"chatcmpl-{int(time.time())}"
 
-                if self.path == "/v1/chat/completions":
-                    is_stream = data.get("stream", False)
-                    model_name = data.get("model", "gemini-local")
-                    chunk_id = f"chatcmpl-{int(time.time())}"
+                if is_stream:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "keep-alive")
+                    self.end_headers()
 
-                    if is_stream:
-                        self.send_response(200)
-                        self.send_header(
-                            "Content-Type", "text/event-stream; charset=utf-8"
-                        )
-                        self.send_header("Cache-Control", "no-cache")
-                        self.send_header("Connection", "keep-alive")
-                        self.end_headers()
+                    full_response = ""
+                    try:
+                        for chunk_text in BUFFER_MANAGER.agent_manager.process_stream(
+                            user_text
+                        ):
+                            if not chunk_text:
+                                continue
+                            full_response += chunk_text
 
-                        # Envia o conteúdo gerado pelo agente em formato chunk SSE do padrão OpenAI
-                        chunk_payload = {
-                            "id": chunk_id,
-                            "object": "chat.completion.chunk",
-                            "created": int(time.time()),
-                            "model": model_name,
-                            "choices": [
-                                {
-                                    "index": 0,
-                                    "delta": {"content": agent_response},
-                                    "finish_reason": None,
-                                }
-                            ],
-                        }
-                        self.wfile.write(
-                            f"data: {json.dumps(chunk_payload, ensure_ascii=False)}\n\n".encode(
-                                "utf-8"
+                            chunk_payload = {
+                                "id": chunk_id,
+                                "object": "chat.completion.chunk",
+                                "created": int(time.time()),
+                                "model": model_name,
+                                "choices": [
+                                    {
+                                        "index": 0,
+                                        "delta": {"content": chunk_text},
+                                        "finish_reason": None,
+                                    }
+                                ],
+                            }
+                            self.wfile.write(
+                                f"data: {json.dumps(chunk_payload, ensure_ascii=False)}\n\n".encode(
+                                    "utf-8"
+                                )
                             )
-                        )
-                        self.wfile.flush()
+                            self.wfile.flush()
+                    except Exception as ex:
+                        error_chunk = f"Erro no stream do agente: {ex}"
+                        full_response += error_chunk
 
-                        end_payload = {
-                            "id": chunk_id,
-                            "object": "chat.completion.chunk",
-                            "created": int(time.time()),
-                            "model": model_name,
-                            "choices": [
-                                {"index": 0, "delta": {}, "finish_reason": "stop"}
-                            ],
-                        }
-                        self.wfile.write(
-                            f"data: {json.dumps(end_payload, ensure_ascii=False)}\n\n".encode(
-                                "utf-8"
-                            )
+                    # Encerramento do stream
+                    end_payload = {
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model_name,
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                    }
+                    self.wfile.write(
+                        f"data: {json.dumps(end_payload, ensure_ascii=False)}\n\n".encode(
+                            "utf-8"
                         )
-                        self.wfile.write(b"data: [DONE]\n\n")
-                        self.wfile.flush()
+                    )
+                    self.wfile.write(b"data: [DONE]\n\n")
+                    self.wfile.flush()
 
-                        llm_logger.info(
-                            "[LLM OUTPUT STREAM] Resposta enviada com sucesso: %s",
-                            agent_response,
-                        )
-                    else:
-                        response_payload = {
-                            "id": chunk_id,
-                            "object": "chat.completion",
-                            "created": int(time.time()),
-                            "model": model_name,
-                            "choices": [
-                                {
-                                    "index": 0,
-                                    "message": {
-                                        "role": "assistant",
-                                        "content": agent_response,
-                                    },
-                                    "finish_reason": "stop",
-                                }
-                            ],
-                        }
-                        llm_logger.info(
-                            "[LLM OUTPUT] %s",
-                            json.dumps(response_payload, ensure_ascii=False),
-                        )
-                        self.send_json(200, response_payload)
+                    llm_logger.info(
+                        "[LLM OUTPUT STREAM] Resposta enviada com sucesso: %s",
+                        full_response,
+                    )
+
                 else:
-                    self.send_json(200, {"ok": True, "response": agent_response})
+                    try:
+                        agent_response = BUFFER_MANAGER.agent_manager.process(user_text)
+                    except Exception as ex:
+                        agent_response = f"Erro ao executar agente: {ex}"
+
+                    response_payload = {
+                        "id": chunk_id,
+                        "object": "chat.completion",
+                        "created": int(time.time()),
+                        "model": model_name,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "message": {
+                                    "role": "assistant",
+                                    "content": agent_response,
+                                },
+                                "finish_reason": "stop",
+                            }
+                        ],
+                    }
+                    llm_logger.info(
+                        "[LLM OUTPUT] %s",
+                        json.dumps(response_payload, ensure_ascii=False),
+                    )
+                    self.send_json(200, response_payload)
 
             except Exception as e:
                 logging.error("[HTTP ERRO]: %s", e)
