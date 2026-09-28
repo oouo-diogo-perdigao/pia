@@ -6,7 +6,6 @@ import binascii
 import json
 import os
 import sys
-import time
 import io
 import shutil
 import subprocess
@@ -34,6 +33,7 @@ from .config import (
 
 from .AudioPlayer import AudioPlayer
 from .TTSManager import TTSManager
+from .StoryVoiceRegistry import StoryVoiceRegistry
 from .utils import clean_text
 
 APP = get_app_state()
@@ -51,6 +51,7 @@ OPENAI_TTS_MODELS = (
 
 PLAYER = AudioPlayer()
 TTS_MANAGER = TTSManager(PLAYER)
+STORY_VOICE_REGISTRY = StoryVoiceRegistry(voices=TTS_MANAGER.qwen_voices())
 
 RESPONSE_FORMAT_MIME = {
     "mp3": "audio/mpeg",
@@ -922,6 +923,110 @@ class HTTPServer(BaseHTTPRequestHandler):
                     "[SPEAK] %d parte(s) enfileirada(s) para o TTSManager.", len(parts)
                 )
                 self.send_json(200, {"ok": True, "status": "queued"})
+                return
+
+            # Rota personalizada para leitura de jogos de rpg escritos
+            if path == "/tts/storytelling":
+                # rota parecida com /tts/speak, mas textos entre " são lidas com voz diferente
+                # (Qwen CustomVoice)
+                # Por padrão le os textos como pm_santa e textos entre " com pm_alex
+                # Se antes das " tiver identificado interlocutor como por exemplo:
+                # 'Texto narrado pm_santa [NomeInterlocutor] "Fala interlocutor." outro exemplo de pm_santa'
+                # Utiliza classe especial de registro e classificação de voz para interlocutores.
+                # E envia cada trexo de texto para TTS_MANAGER com a voz correta do qwen.
+
+                text = payload.get("text", "")
+                speed = float(payload.get("speed", DEFAULT_SPEED))
+                device = payload.get("device", None)
+
+                if not isinstance(text, str) or not text.strip():
+                    self.send_json(
+                        400,
+                        {
+                            "ok": False,
+                            "error": "Texto vazio.",
+                        },
+                    )
+                    return
+
+                text = clean_text(text)
+
+                if not text.strip():
+                    self.send_json(
+                        400,
+                        {
+                            "ok": False,
+                            "error": "Texto vazio após normalização.",
+                        },
+                    )
+                    return
+
+                segments = STORY_VOICE_REGISTRY.parse_storytelling_text(text)
+
+                if not segments:
+                    self.send_json(
+                        400,
+                        {
+                            "ok": False,
+                            "error": "Nenhum trecho válido encontrado.",
+                        },
+                    )
+                    return
+
+                text_cute_name = text[:30] + "..." if len(text) > 30 else text
+
+                queued = []
+
+                for i, segment in enumerate(segments, start=1):
+                    segment_text = segment["text"].strip()
+                    voice = segment["voice"]
+                    character = segment["character"]
+                    segment_style = segment.get("style")
+
+                    if not segment_text:
+                        continue
+
+                    logger_tts.info(segment_text)
+
+                    job_name = (
+                        f"Storytelling ({i} de {len(segments)}) "
+                        f"{character or 'Narrador'} "
+                        f"[{voice}] "
+                        f"{text_cute_name}"
+                    )
+
+                    TTS_MANAGER.add_tts_job(
+                        text=segment_text,
+                        voice=voice,
+                        speed=speed,
+                        style=segment_style,
+                        device=device,
+                        job_name=job_name,
+                    )
+
+                    queued.append(
+                        {
+                            "index": i,
+                            "character": character,
+                            "voice": voice,
+                            "style": segment_style,
+                            "text": segment_text,
+                        }
+                    )
+
+                logging.info(
+                    "[STORYTELLING] %d trecho(s) enfileirado(s).",
+                    len(queued),
+                )
+
+                self.send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "status": "queued",
+                        "segments": queued,
+                    },
+                )
                 return
 
             if path == "/tts/stop":

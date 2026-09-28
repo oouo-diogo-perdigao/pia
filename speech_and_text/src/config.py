@@ -47,6 +47,9 @@ STT_BEAM_SIZE = int(os.getenv("STT_BEAM_SIZE", 5))
 STT_BEST_OF = int(os.getenv("STT_BEST_OF", 5))
 STT_TEMPERATURE = float(os.getenv("STT_TEMPERATURE", 0.0))
 
+LLM_URL = os.getenv("LLM_URL", "http://127.0.0.1:11434").rstrip("/")
+LLM_MODEL = os.getenv("LLM_MODEL", "").strip()
+
 # Logging setup
 log_dir = BASE_DIR / "logs"
 log_dir.mkdir(parents=True, exist_ok=True)

@@ -203,40 +203,42 @@ def split_text(text, max_chars=420):
 class TTSManager:
     def __init__(self, audio_player=None):
         self.lock = threading.Lock()
-        # O worker processa uma geração por vez. Serializar generate_wav evita
-        # que duas threads concorrentes disputem a mesma result_queue.
         self.generation_lock = threading.Lock()
+
         self.worker_process = None
         self.task_queue = None
         self.result_queue = None
         self.req_counter = 0
 
         self.audio_player = audio_player
+
+        # Fila de textos aguardando geração.
         self.tts_job_queue = queue.Queue()
+
         self.tts_thread = None
         self._stop_event = threading.Event()
 
     @staticmethod
     def qwen_voices():
-        return [
-            "aiden",
-            "dylan",
-            "eric",
-            "ono_anna",
-            "ryan",
-            "serena",
-            "sohee",
-            "uncle_fu",
-            "vivian",
-        ]
+        return {
+            "ryan": "male",
+            "aiden": "male",
+            "dylan": "male",
+            "eric": "male",
+            "ono_anna": "female",
+            "serena": "female",
+            "sohee": "female",
+            "uncle_fu": "male",
+            "vivian": "female",
+        }
 
     @staticmethod
     def kokoro_voices():
-        return [
-            "pm_santa",  # default voice
-            "pm_alex",
-            "pf_dora",
-        ]
+        return {
+            "pm_santa": "male",  # default voice
+            "pm_alex": "male",
+            "pf_dora": "female",
+        }
 
     def add_tts_job(self, text, voice, speed, style=None, device=None, job_name=None):
         with self.lock:
@@ -259,17 +261,20 @@ class TTSManager:
 
     def stop_tts_queue(self):
         self._stop_event.set()
-        with self.lock:
-            while not self.tts_job_queue.empty():
-                try:
-                    self.tts_job_queue.get_nowait()
-                except queue.Empty:
-                    break
+
+        # Limpa textos ainda não gerados.
+        while True:
+            try:
+                self.tts_job_queue.get_nowait()
+                self.tts_job_queue.task_done()
+            except queue.Empty:
+                break
 
     def _tts_consumer_loop(self):
         while not self._stop_event.is_set():
             try:
                 job = self.tts_job_queue.get(timeout=0.1)
+
             except queue.Empty:
                 continue
 
@@ -284,16 +289,45 @@ class TTSManager:
                 device = job["device"]
                 job_name = job["job_name"]
 
-                # Gera o WAV da parte atual usando o processo worker isolado
+                # ------------------------------------------------------
+                # GERA O WAV
+                # ------------------------------------------------------
+
                 wav_bytes = self.generate_wav(
-                    text, voice, speed, style=style, job_name=job_name
+                    text,
+                    voice,
+                    speed,
+                    style=style,
+                    job_name=job_name,
                 )
 
-                if not self._stop_event.is_set() and self.audio_player and wav_bytes:
-                    # Envia o áudio concluído para a fila do AudioPlayer
-                    self.audio_player.add_audio_job(job_name, wav_bytes, device=device)
+                # ------------------------------------------------------
+                # ENTREGA PARA A FILA ASSÍNCRONA DO AudioPlayer
+                # ------------------------------------------------------
+
+                if not self._stop_event.is_set() and wav_bytes and self.audio_player:
+                    self.audio_player.add_audio_job(
+                        job_name,
+                        wav_bytes,
+                        device=device,
+                    )
+
+                    logging.info(
+                        "[TTSManager] [%s] Áudio enviado para fila de reprodução.",
+                        job_name,
+                    )
+
+                # add_audio_job() retorna imediatamente.
+                #
+                # Portanto o loop volta ao início e começa a gerar
+                # o próximo TTS enquanto AudioPlayer._play_loop()
+                # reproduz este WAV em outra thread.
+
             except Exception:
                 logging.exception("[TTSManager] Erro processando parte na fila do TTS.")
+
+            finally:
+                self.tts_job_queue.task_done()
 
     def ensure_worker_running(self):
         with self.lock:
@@ -375,4 +409,4 @@ class TTSManager:
 
     def get_voices(self):
         # Retorna uma lista de vozes disponíveis
-        return self.kokoro_voices() + self.qwen_voices()
+        return {**self.kokoro_voices(), **self.qwen_voices()}
