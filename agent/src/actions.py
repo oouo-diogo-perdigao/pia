@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import os
 import subprocess
 import time
@@ -10,7 +9,7 @@ from urllib.parse import urlparse
 
 import pyautogui
 
-from .config import Settings
+from .config import Settings, DEFAULT_LOCATION, logging
 from .memory import MemoryStore
 from .weather import get_weather
 
@@ -54,7 +53,7 @@ class ActionExecutor:
             return self._open_target(step.target)
 
         if kind == "weather":
-            location = step.location or self.settings.default_location
+            location = step.location or DEFAULT_LOCATION
             when = step.when or "hoje"
             result = get_weather(location, when)
             return {"action": kind, "ok": True, "result": result}
@@ -108,9 +107,7 @@ class ActionExecutor:
                 "target": str(path),
             }
 
-        raise ValueError(
-            f"Tipo de ação aprendida ainda não suportado: {action_type}"
-        )
+        raise ValueError(f"Tipo de ação aprendida ainda não suportado: {action_type}")
 
     def _open_target(self, target: str) -> dict:
         target = target.strip()

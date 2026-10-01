@@ -5,21 +5,27 @@ import json
 from google import genai
 from google.genai import types
 
-from .config import Settings
+from .config import (
+    Settings,
+    GEMINI_API_KEY,
+    GEMINI_STT_MODEL,
+    GEMINI_AGENT_MODEL,
+    USER_NAME,
+)
 from .models import AgentDecision
 
 
 class GeminiService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.client = genai.Client(api_key=settings.gemini_api_key)
+        self.client = genai.Client(api_key=GEMINI_API_KEY)
 
     def transcribe(self, wav_bytes: bytes) -> str:
         if not wav_bytes:
             return ""
 
         response = self.client.models.generate_content(
-            model=self.settings.gemini_stt_model,
+            model=GEMINI_STT_MODEL,
             contents=[
                 (
                     "Transcreva somente a fala deste áudio em português do Brasil. "
@@ -42,7 +48,7 @@ class GeminiService:
         prompt = self._build_router_prompt(utterance, memory_context)
 
         interaction = self.client.interactions.create(
-            model=self.settings.gemini_agent_model,
+            model=GEMINI_AGENT_MODEL,
             input=prompt,
             response_format={
                 "type": "text",
@@ -60,7 +66,7 @@ class GeminiService:
         memory_context: dict,
     ) -> str:
         response = self.client.models.generate_content(
-            model=self.settings.gemini_agent_model,
+            model=GEMINI_AGENT_MODEL,
             contents=[
                 (
                     "Responda em português do Brasil, em uma ou duas frases curtas, "
@@ -124,7 +130,7 @@ Leia os arquivos relevantes e proponha a mudança mínima segura. Em seguida imp
         memory_json = json.dumps(memory_context, ensure_ascii=False, indent=2)
 
         return f"""Você é o roteador de um agente de voz local do Windows.
-O usuário se chama {self.settings.user_name}.
+O usuário se chama {USER_NAME}.
 
 Sua função é decidir se o pedido deve:
 1. executar uma ou mais ações locais permitidas;
@@ -151,7 +157,7 @@ REGRAS IMPORTANTES:
 - Se a solicitação for abrir um recurso PARTICULAR dentro de um site, canal, vídeo, jogo transmitido, página específica ou URL que NÃO esteja na memória, NÃO invente a URL. Use mode=learn_memory, learning.kind=url.
 - Exemplo obrigatório: "Abre o jogo do roque no youtube" sem memória correspondente deve resultar em learn_memory. O prompt deve pedir para o usuário copiar o link correto e depois dizer "Pronto".
 - Em learn_memory, `canonical_trigger` deve representar a intenção que será lembrada. `success_message` deve ser uma frase natural para usar depois que o usuário disser "Pronto" e a memória for salva.
-- Em learn_memory, `success_message` deve mencionar {self.settings.user_name}, dizer que agora aprendeu a ação e indicar que vai executá-la imediatamente.
+- Em learn_memory, `success_message` deve mencionar {USER_NAME}, dizer que agora aprendeu a ação e indicar que vai executá-la imediatamente.
 - Se o usuário pedir uma operação de computador para a qual não existe ação local permitida, use mode=learn_capability e learning.kind=capability. Exemplo: alterar o volume do Windows, se não houver ferramenta de volume.
 - Para learn_capability, diga em `spoken_response` algo equivalente a: "Eu não sei executar essa ação, mas preparei o que é necessário para me ensinar no VS Code."
 - Não transforme perguntas em ações desnecessárias.

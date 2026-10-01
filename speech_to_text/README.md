@@ -30,6 +30,20 @@ Set-ExecutionPolicy -Scope Process Bypass
 ## **5. Endpoints da API Local**
 O servidor responde no host e porta configurados via `.env`:
 
-* `POST /start`: Inicia a captura de áudio pelo microfone.
-* `POST /stop`: Interrompe a gravação e processa o trecho final.
-* `GET /status`: Retorna o estado atual da gravação, transcrição e entrega os blocos de texto processados.
+- `POST /start`: Inicia a captura de áudio pelo microfone.
+- `POST /stop`: Interrompe a gravação e processa o trecho final.
+- `GET /status`: Retorna o estado atual da gravação, transcrição e entrega os blocos de texto processados.
+
+Padrão OpenAI:
+- `POST /v1/audio/transcriptions` 
+- `GET /v1/models`
+- `OPTIONS` para CORS
+
+O endpoint de transcrição aceita:
+
+- `multipart/form-data` no padrão OpenAI (`file`, `model`, `language`, `prompt`, `temperature`, `response_format`);
+- upload multipart com `Transfer-Encoding: chunked`, usado pelo Open WebUI quando ele faz streaming do arquivo;
+- JSON/Base64 no formato opcional do Open WebUI (`input_audio.data`);
+- `response_format=json`, `text` e `verbose_json`.
+
+O campo `model` recebido é aceito para compatibilidade de protocolo. A inferência continua usando o modelo definido por `STT_MODEL` no seu `.env`.

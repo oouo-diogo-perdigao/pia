@@ -14,7 +14,7 @@ model_list:
   # 3ª Opção Local: Qwen 3.8 (Leve e rápido)
   - model_name: auto-agent
     litellm_params:
-      model: ollama/qwen3.8
+      model: ollama/qwen3:8b
       api_base: http://localhost:11434
 
   # 4ª Opção Local: Qwen 3.5 27B (Para respostas mais elaboradas)
@@ -30,7 +30,7 @@ model_list:
       api_base: http://localhost:11434
 
 router_settings:
-  fallbacks: [{"auto-agent": ["auto-agent"]}]
+  fallbacks: []
   num_retries: 2
   allowed_fails: 1
   cooldown_time: 300 # Tempo de espera de 5 min se o modelo der erro de cota (HTTP 429)
