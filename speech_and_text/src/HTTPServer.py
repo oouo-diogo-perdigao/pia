@@ -8,8 +8,12 @@ import os
 import sys
 import io
 import shutil
+import time
 import subprocess
 import wave
+import re
+import threading
+
 
 from email.parser import BytesParser
 from email.policy import default as email_policy
@@ -28,6 +32,9 @@ from .config import (
     DEFAULT_VOICE,
     DEFAULT_SPEED,
     logger_tts,
+    BASE_DIR,
+    LLM_URL,
+    LLM_MODEL,
 )
 
 
@@ -35,6 +42,12 @@ from .AudioPlayer import AudioPlayer
 from .TTSManager import TTSManager
 from .StoryVoiceRegistry import StoryVoiceRegistry
 from .utils import clean_text
+
+import urllib.request
+
+# Buffer global para acumular trechos de texto vindos do eventstream/chunk POST
+STREAM_TEXT_BUFFER = ""
+STREAM_BUFFER_LOCK = threading.RLock()
 
 APP = get_app_state()
 
@@ -96,10 +109,10 @@ class HTTPServer(BaseHTTPRequestHandler):
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header(
                 "Access-Control-Allow-Headers", "Authorization, Content-Type"
             )
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.end_headers()
             self.wfile.write(body)
             self.wfile.flush()
@@ -133,6 +146,142 @@ class HTTPServer(BaseHTTPRequestHandler):
                 }
             },
         )
+
+    @staticmethod
+    def resolve_interlocutor_voice(character: str, context: str) -> str:
+        """Consulta o cache ou a LLM para decidir a voz (homem = pm_alex, mulher = pf_dora)"""
+        cache_file = BASE_DIR / "logs" / "selectedVoices.json"
+        cache = {}
+
+        # 1. Tenta carregar do cache
+        if cache_file.exists():
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    cache = json.load(f)
+            except Exception as e:
+                logging.error(f"[STREAM TTS] Erro ao ler cache: {e}")
+
+        char_key = character.strip().lower()
+        if char_key in cache:
+            return cache[char_key].get("voice", "pm_alex")
+
+        # 2. Se não está no cache, pergunta para a LLM
+        prompt = (
+            f"Baseado na fala: '{context}', o personagem '{character}' é homem ou mulher?\n"
+            "Responda SOMENTE com 'male' para homem ou 'female' para mulher."
+        )
+
+        request_payload = {
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "Você classifica gênero de personagens para TTS. Responda apenas com a palavra male ou female.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0,
+            "max_tokens": 10,
+        }
+
+        if LLM_MODEL:
+            request_payload["model"] = LLM_MODEL
+
+        voice = "pm_alex"  # Fallback padrão homem
+        try:
+            req = urllib.request.Request(
+                LLM_URL.rstrip("/") + "/v1/chat/completions",
+                data=json.dumps(request_payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=15) as response:
+                result = json.loads(response.read().decode("utf-8"))
+
+            content = result["choices"][0]["message"]["content"].strip().lower()
+
+            if "female" in content or "mulher" in content:
+                voice = "pf_dora"
+            else:
+                voice = "pm_alex"
+
+        except Exception as e:
+            logging.error(f"[STREAM TTS] Falha ao consultar LLM para {character}: {e}")
+
+        # 3. Salva no cache
+        cache[char_key] = {
+            "name": character,
+            "voice": voice,
+            "gender": "female" if voice == "pf_dora" else "male",
+        }
+
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(cache, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logging.error(f"[STREAM TTS] Erro ao salvar cache: {e}")
+
+        return voice
+
+    @staticmethod
+    def process_and_queue_sentences(text: str):
+        """Extrai partes de narração e interlocutores e enfileira no TTS"""
+        # Procura pelo padrão: [Nome] "Fala" ou apenas "Fala" ou texto normal
+        token_re = re.compile(
+            r'\[([^\[\]\r\n]+)\]\s*"([^"]+)"'  # [Interlocutor] "fala"
+            r"|"
+            r'"([^"]+)"',  # "fala sem nome"
+            re.MULTILINE,
+        )
+
+        cursor = 0
+        for match in token_re.finditer(text):
+            # Texto de narração (antes das aspas)[cite: 6]
+            between = text[cursor : match.start()].strip()
+            if between:
+                TTS_MANAGER.add_tts_job(
+                    text=between,
+                    voice="pm_santa",
+                    speed=DEFAULT_SPEED,
+                    job_name="Narrador (pm_santa)",
+                )
+
+            character = match.group(1)
+
+            # Se tem [Personagem]
+            if character:
+                speech = match.group(2).strip()
+                voice = resolve_interlocutor_voice(character, speech)
+                if speech:
+                    TTS_MANAGER.add_tts_job(
+                        text=speech,
+                        voice=voice,
+                        speed=DEFAULT_SPEED,
+                        job_name=f"[{character}] ({voice})",
+                    )
+            else:
+                # Fala sem personagem definido na tag, pode continuar com pm_santa ou outra lógica
+                speech = match.group(3).strip()
+                if speech:
+                    TTS_MANAGER.add_tts_job(
+                        text=speech,
+                        voice="pm_santa",
+                        speed=DEFAULT_SPEED,
+                        job_name="Fala Anônima (pm_santa)",
+                    )
+
+            cursor = match.end()
+
+        # Sobra da narração no final
+        if cursor < len(text):
+            narration = text[cursor:].strip()
+            if narration:
+                TTS_MANAGER.add_tts_job(
+                    text=narration,
+                    voice="pm_santa",
+                    speed=DEFAULT_SPEED,
+                    job_name="Narrador (pm_santa)",
+                )
 
     # --------------------------------------------------------------------------
     # Request helpers
@@ -426,9 +575,22 @@ class HTTPServer(BaseHTTPRequestHandler):
             return
 
         if path == "/tts/warmup":
-            logging.info("[WARMUP] Aquecendo Worker do TTS antecipadamente...")
-            TTS_MANAGER.ensure_worker_running()
-            self.send_json(200, {"ok": True, "status": "warmed_up"})
+            logging.info("[GET /tts/warmup] Aquecendo Workers TTS antecipadamente...")
+
+            TTS_MANAGER.ensure_worker_running("kokoro")
+            TTS_MANAGER.ensure_worker_running("qwen")
+
+            self.send_json(
+                200,
+                {
+                    "ok": True,
+                    "status": "warmed_up",
+                    "workers": [
+                        "kokoro",
+                        "qwen",
+                    ],
+                },
+            )
             return
 
         # ======================================================================
@@ -900,6 +1062,20 @@ class HTTPServer(BaseHTTPRequestHandler):
                 device = payload.get("device", None)
                 style = payload.get("style", None)
 
+                # Remove o bloco de metadados <t>...</t> quando estiver
+                # no início do texto, com ou sem ** de Markdown.
+                # Exemplos removidos:
+                # <t>Hora: 10:11 | Data: Jun 17</t>
+                # **<t>Hora: 10:11 | Data: Jun 17</t>**
+                # Espaços e quebras de linha anteriores também são ignorados.
+                text = re.sub(
+                    r"^\s*(?:\*\*\s*)?<t>.*?</t>\s*(?:\*\*)?\s*",
+                    "",
+                    text,
+                    count=1,
+                    flags=re.IGNORECASE | re.DOTALL,
+                )
+
                 if not isinstance(text, str) or not text.strip():
                     self.send_json(400, {"ok": False, "error": "Texto vazio."})
                     return
@@ -977,6 +1153,8 @@ class HTTPServer(BaseHTTPRequestHandler):
 
                 queued = []
 
+                story_id = time.time_ns()
+
                 for i, segment in enumerate(segments, start=1):
                     segment_text = segment["text"].strip()
                     voice = segment["voice"]
@@ -1002,6 +1180,9 @@ class HTTPServer(BaseHTTPRequestHandler):
                         style=segment_style,
                         device=device,
                         job_name=job_name,
+                        story_id=story_id,
+                        story_index=i,
+                        story_total=len(segments),
                     )
 
                     queued.append(
@@ -1026,6 +1207,53 @@ class HTTPServer(BaseHTTPRequestHandler):
                         "status": "queued",
                         "segments": queued,
                     },
+                )
+                return
+
+            # Rota eventstream que recebe trechos do texto organiza em frases e envia para o tts reproduzir.
+            # O tts le o texto com pm_santa mas os trechos entre " se antes do texto tiver um
+            # identificador de interlocutor entre [], ele envia todo o contexto para a llm decidir
+            # se o interlocutor é homem ou mulher, armazena o sexo dele no arquivo de selectedVoices.json.
+            # interlocutores identificados como homem usam a voz pm_alex e mulher usa a voz pf_dora
+            if path == "/tts/stream_text":
+                global STREAM_TEXT_BUFFER
+
+                chunk = payload.get("text", "")
+                flush = payload.get(
+                    "flush", False
+                )  # Se True, força o processamento do resto do buffer
+
+                if not chunk and not flush:
+                    self.send_json(400, {"ok": False, "error": "Texto vazio."})
+                    return
+
+                with STREAM_BUFFER_LOCK:
+                    STREAM_TEXT_BUFFER += chunk
+
+                    # Usa expressões regulares para separar por pontuações de final de frase
+                    # Isso garante que só vamos mandar para o TTS quando a frase concluir
+                    sentences = re.split(r"(?<=[.!?\n])\s+", STREAM_TEXT_BUFFER)
+
+                    if flush:
+                        # Processa tudo, esvazia o buffer
+                        text_to_process = " ".join(sentences).strip()
+                        STREAM_TEXT_BUFFER = ""
+                        if text_to_process:
+                            HTTPServer.process_and_queue_sentences(text_to_process)
+                    else:
+                        # Deixa o último item no buffer, pois pode ser uma frase incompleta
+                        STREAM_TEXT_BUFFER = (
+                            sentences.pop() if len(sentences) > 0 else ""
+                        )
+
+                        # Processa as frases completas
+                        for sentence in sentences:
+                            sentence = sentence.strip()
+                            if sentence:
+                                HTTPServer.process_and_queue_sentences(sentence)
+
+                self.send_json(
+                    200, {"ok": True, "status": "chunk_received_and_processed"}
                 )
                 return
 

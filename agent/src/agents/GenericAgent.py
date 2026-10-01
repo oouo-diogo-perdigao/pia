@@ -47,21 +47,38 @@ class GenericAgent:
         messages = [
             {
                 "role": "system",
-                "content": "Você é uma assistente inteligente, prestativa e sucinta. Responda de forma direta em português.",
+                "content": (
+                    "Você é uma assistente inteligente, prestativa e sucinta. "
+                    "Responda de forma direta em português."
+                ),
             },
-            {"role": "user", "content": prompt},
+            {
+                "role": "user",
+                "content": prompt,
+            },
         ]
-        # O Router tenta o primeiro modelo da lista. Se estourar a cota/erro, faz fallback automático
-        used_model = response.get("model", "auto-agent")
 
-        # Log de qual modelo realmente respondeu essa requisição
-        response = llm_router.completion(model=used_model, messages=messages)
+        # O Router recebe o alias configurado no models.yaml e decide
+        # qual modelo utilizar, aplicando os fallbacks configurados.
+        response = llm_router.completion(
+            model="auto-agent",
+            messages=messages,
+        )
 
-        logging.info("[ROUTER] Resposta gerada usando o modelo: %s", used_model)
+        # Somente depois da resposta podemos descobrir qual modelo
+        # efetivamente foi utilizado.
+        used_model = getattr(response, "model", "desconhecido")
+
+        logging.info(
+            "[ROUTER] Resposta gerada usando o modelo: %s",
+            used_model,
+        )
+
         answer = response.choices[0].message.content
 
         # Mostra a saída completa na tela
         print(f"[AGENT OUTPUT]: {answer}\n")
+
         return answer
 
     def run_stream(self, prompt: str):
