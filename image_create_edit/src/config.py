@@ -97,7 +97,7 @@ if not logger.handlers:
     logger.addHandler(stream_handler)
 
     rotating_handler = RotatingFileHandler(
-        log_dir / "tts.log",
+        log_dir / "ice.log",
         maxBytes=10 * 1024 * 1024,  # Limite exato de 10 MB (10.485.760 bytes)
         backupCount=1,
         encoding="utf-8",
