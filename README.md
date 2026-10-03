@@ -1,5 +1,4 @@
 # PIA — Coleção de IA locais
-
 PIA é uma coleção de utilitários e pequenos serviços de inteligência artificial que rodam localmente, sob demanda, com foco em baixo consumo de memória, privacidade (funcionam off-line) e integração simples com o Windows via AutoHotkey.
 
 O objetivo principal do projeto é fornecer ferramentas prontas para uso que realizam tarefas comuns de voz — transcrição (Speech-to-Text) e síntese (Text-to-Speech) — de forma leve e integrada ao sistema operacional, sem depender de serviços remotos.
@@ -33,29 +32,36 @@ Contribuições e desenvolvimento
 
 # Servidor do Agent (AGENT) PORT=8761
 
-# Servidor de Speech to Text (STT) PORT=8762
-* `POST /start`: Inicia a captura de áudio pelo microfone.
-* `POST /stop`: Interrompe a gravação e processa o trecho final.
-* `GET /status`: Retorna o estado atual da gravação, transcrição e entrega os blocos de texto processados.
-* Padrão OpenAI:
-  - `POST /v1/audio/transcriptions` 
-  - `GET /v1/models`
-
-
-### Servidor de Text to Speech (TTS) PORT=8763
-* `POST /speak`: Adiciona o texto enviado à fila de síntese para reprodução direta nas caixas de som locais em segundo plano.
-* `POST /stop`: Interrompe a reprodução de áudio em andamento e limpa a fila de processamento local.
-* `POST /generate`: Sintetiza o texto enviado e retorna o áudio em formato nativo `audio/wav` no corpo da resposta HTTP (ideal para SillyTavern e clientes web).
-* `GET /status`: Retorna o estado atual da aplicação, indicando se o player está reproduzindo áudio, o dispositivo em uso (`cuda`/`cpu`) e se o modelo Kokoro está carregado em memória.
 Padrão OpenAI:
-- `POST /v1/audio/speech`
 - `GET /v1/models`
 
-### Servidor de Criação e Edição de Imagens com o ConfyUI PORT=c
+## Images - Servidor de Criação e Edição de Imagens com o ConfyUI
+* `POST /v1/images/generations`:
+* `POST /v1/images/edits`:
+* `POST /v1/images/variations`:
 
+### Audio
+OpenIA:
+* `POST   /v1/audio/speech`:
+* `POST   /v1/audio/transcriptions`:
+* `POST   /v1/audio/translations`:
+* `POST   /v1/audio/voices`:
+
+MyRoutes:
+* `GET /stt/start`: Inicia a captura de áudio pelo microfone.
+* `GET /stt/stop`: Interrompe a gravação e processa o trecho final.
+* `GET /stt/status`: Retorna o estado atual da gravação, transcrição e entrega os blocos de texto processados.
+* `GET /stt/status/stream`: 
+* `GET /tts/status`: Retorna o estado atual da aplicação, indicando se o player está reproduzindo áudio, o dispositivo em uso (`cuda`/`cpu`) e se o modelo Kokoro está carregado em memória.
+* `GET /tts/status/stream`:
+* `GET /tts/help`:
+* `POST /tts/speak`:Adiciona o texto enviado à fila de síntese para reprodução direta nas caixas de som locais em segundo plano.
+* `POST /tts/storytelling`: 
+* `POST /tts/stream_text`: Rota eventstream que recebe trechos do texto organiza em frases e envia para o tts reproduzir. O tts le o texto com pm_santa mas os trechos entre " se antes do texto tiver um identificador de interlocutor entre [], ele envia todo o contexto para a llm decidir se o interlocutor é homem ou mulher, armazena o sexo dele no arquivo de selectedVoices.json. interlocutores identificados como homem usam a voz pm_alex e mulher usa a voz pf_dora
+* `POST /tts/stop`: Interrompe a reprodução de áudio em andamento e limpa a fila de processamento local.
+* `POST /tts/generate`: Sintetiza o texto enviado e retorna o áudio em formato nativo `audio/wav` no corpo da resposta HTTP (ideal para SillyTavern e clientes web).
 
 ## Rodar local
 
 `.venv\Scripts\Activate.ps1`
 `python server.py`
-

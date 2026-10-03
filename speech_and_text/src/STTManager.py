@@ -1,27 +1,28 @@
-from __future__ import annotations
-
-import threading
+import multiprocessing as mp
 import queue
+import threading
 import time
+import uuid
 from pathlib import Path
-
-from .AudioRecorder import AudioRecorder, worker_audio_bridge
-from .STTWorkerManager import STTWorkerManager
-from .config import logging
-from .utils import play_sound_async, insert_text_at_cursor
 from enum import Enum
+
+from .config import (
+    UNLOAD_TIMEOUT_SECONDS,
+    logging,
+    MODELS_DIR,
+    OPENAI_COMPAT_TIMEOUT_SECONDS,
+)
+from .AudioRecorder import AudioRecorder, worker_audio_bridge
+from .utils import play_sound_async, insert_text_at_cursor
 
 SOUNDS_DIR = Path(__file__).parent / ".." / ".." / "sounds"
 END_SOUND = SOUNDS_DIR / "end.mp3"
 START_SOUND = SOUNDS_DIR / "start.mp3"
-MODELS_DIR = Path(__file__).parent.parent / "models_cache"
 
 
 class SATState(Enum):
     # Parado, memoria descarregada
     IDLE = "IDLE"
-    # Parado, memoria carregada, aguardando iniciar gravação
-    WARMUP = "WARMUP"
     # Gravando audios
     RECORDING = "RECORDING"
     # Gravador parou, aguardando esvaziar último buffer/transcrição
@@ -30,16 +31,29 @@ class SATState(Enum):
     FINISHED = "FINISHED"
 
 
-class AppState:
-    """Holds shared objects and controls background workers.
+# ==============================================================================
+# GERENCIADOR DO WORKER NO PROCESSO PRINCIPAL
+# ==============================================================================
+class STTManager:
+    """
+    Holds shared objects and controls background workers.
 
     Responsibilities:
     - create and expose the AudioRecorder
-    - create STTWorkerManager
+    - create STTManager
     - manage background bridge thread lifecycle and text distribution queues
     """
 
     def __init__(self):
+        """Manage a separate process that runs the heavy STT model."""
+        self.lock = threading.Lock()
+        self.api_lock = threading.Lock()
+        self.worker_process = None
+        self.audio_chunk_queue = None
+        self.text_result_queue = None
+        self.api_result_queue = None
+        self.models_dir = MODELS_DIR
+
         self.recorder = AudioRecorder()
 
         # 1. Fila central onde o worker_audio_bridge despeja os textos novos
@@ -59,7 +73,6 @@ class AppState:
         self.status: SATState = SATState.IDLE
         self.insert_at_cursor: bool = True  # Controlado pela rota POST /insert
 
-        self.stt_manager = STTWorkerManager(models_dir=MODELS_DIR)
         self.STT_INSERT_THREAD = None
 
         # Thread central que despacha os textos da fila bruta para o status_queue e SSEs
@@ -67,14 +80,147 @@ class AppState:
             target=self._text_dispatcher, daemon=True
         )
         self.text_dispatcher.start()
+        self.timeout = OPENAI_COMPAT_TIMEOUT_SECONDS
 
-    def warmup(self) -> None:
-        """Warm up the STT worker in a background thread."""
-        if self.status == SATState.IDLE:
-            logging.info("[APP] Warming up STT worker in background...")
-            threading.Thread(
-                target=self.stt_manager.ensure_worker_running, daemon=True
-            ).start()
+    def models(self):
+        return (
+            # stt
+            "gpt-transcribe",
+            "whisper-1",
+        )
+
+    def ensure_worker_running(self):
+        with self.lock:
+            if self.worker_process is None or not self.worker_process.is_alive():
+                logging.info("[MANAGER STT] Subindo novo worker isolado para STT...")
+                self.audio_chunk_queue = mp.Queue()
+                self.text_result_queue = mp.Queue()
+                self.api_result_queue = mp.Queue()
+                models_dir = self.models_dir
+                self.worker_process = mp.Process(
+                    target=stt_worker_process,
+                    args=(
+                        self.audio_chunk_queue,
+                        self.text_result_queue,
+                        self.api_result_queue,
+                        models_dir,
+                    ),
+                    daemon=True,
+                )
+                self.worker_process.start()
+
+    def send_chunk(self, chunk):
+        """Queue a recorder chunk and preserve the existing async interface."""
+        self.ensure_worker_running()
+        self.audio_chunk_queue.put(
+            {
+                "kind": "stream",
+                "audio": chunk,
+                # Preserve the old recorder behavior: Portuguese is explicit.
+                "language": "pt",
+            }
+        )
+
+    def get_result(self, timeout=0.1):
+        if self.text_result_queue is None:
+            return None
+        try:
+            return self.text_result_queue.get(timeout=timeout)
+        except Exception:
+            # mp.Queue may raise different exceptions depending on platform;
+            # treat any exception as no result within timeout.
+            return None
+
+    def transcribe_request(
+        self,
+        audio_bytes: bytes,
+        *,
+        language: str | None = None,
+        prompt: str | None = None,
+        temperature: float | None = None,
+    ) -> dict:
+        """Synchronously transcribe one OpenAI-compatible API request.
+
+        API requests are serialized because the underlying Whisper worker processes
+        one item at a time anyway. Recorder results use a separate result queue, so
+        microphone transcription and Open WebUI cannot accidentally consume each
+        other's responses.
+        """
+        if not audio_bytes:
+            return {"ok": False, "error": "Arquivo de áudio vazio."}
+
+        request_id = uuid.uuid4().hex
+
+        language = self._normalize_language(language)
+
+        with self.api_lock:
+            self.ensure_worker_running()
+            request_queue = self.audio_chunk_queue
+            result_queue = self.api_result_queue
+
+            request_queue.put(
+                {
+                    "kind": "api",
+                    "request_id": request_id,
+                    "audio": audio_bytes,
+                    "language": language or None,
+                    "prompt": prompt or None,
+                    "temperature": temperature,
+                }
+            )
+
+            deadline = time.monotonic() + self.timeout
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return {
+                        "ok": False,
+                        "error": "Tempo limite excedido durante a transcrição.",
+                    }
+
+                try:
+                    result = result_queue.get(timeout=remaining)
+                except queue.Empty:
+                    return {
+                        "ok": False,
+                        "error": "Tempo limite excedido durante a transcrição.",
+                    }
+                except Exception as exc:
+                    return {"ok": False, "error": str(exc)}
+
+                if result.get("request_id") == request_id:
+                    return result
+
+                # A previous timed-out request may finish later. Discard that stale
+                # response rather than handing it to the next HTTP caller.
+                logging.warning(
+                    "[MANAGER STT] Descartando resposta API antiga (%s).",
+                    result.get("request_id"),
+                )
+
+    def stop_worker(self):
+        with self.lock:
+            if self.worker_process and self.worker_process.is_alive():
+                self.audio_chunk_queue.put("SHUTDOWN")
+                self.worker_process.join(timeout=3)
+                if self.worker_process.is_alive():
+                    self.worker_process.terminate()
+                    self.worker_process.join(timeout=1)
+
+            self.worker_process = None
+            self.audio_chunk_queue = None
+            self.text_result_queue = None
+            self.api_result_queue = None
+
+    def _normalize_language(self, language: str | None) -> str | None:
+        if language is None:
+            return None
+        value = language.strip()
+        if not value:
+            return None
+        # Open WebUI may expose locale-style values such as pt-BR. faster-whisper
+        # expects a language code such as pt, en, es, etc.
+        return value.replace("_", "-").split("-", 1)[0].lower()
 
     def get_status_payload(self) -> dict:
         # Determina se ainda há relevância/atividade aguardando processamento
@@ -124,7 +270,7 @@ class AppState:
                 target=worker_audio_bridge,
                 args=(
                     self.recorder,
-                    self.stt_manager,
+                    self,
                     self.transcribed_texts,
                     self.is_transcribing_event,
                     self.stop_bridge_event,
@@ -133,9 +279,7 @@ class AppState:
             )
             self.bridge_thread.start()
             # warm up STT in background
-            threading.Thread(
-                target=self.stt_manager.ensure_worker_running, daemon=True
-            ).start()
+            threading.Thread(target=self.ensure_worker_running, daemon=True).start()
             self.status = SATState.RECORDING
             play_sound_async(START_SOUND)
 
@@ -196,19 +340,6 @@ class AppState:
             self.transcribed_texts.put(None)
 
     # region insert
-    def start_cursor_insert(self) -> None:
-        with self.state_lock:
-            self.insert_at_cursor = True
-            self._ensure_insert_worker_locked()
-
-    def stop_cursor_insert(self) -> None:
-        with self.state_lock:
-            self.insert_at_cursor = False
-            if self.insert_queue:
-                self.insert_queue.put(None)  # Envia sinal para o worker fechar
-                self.insert_queue = None
-            logging.info("[APP] Inserção de texto no cursor desativada.")
-
     def _stt_insert_worker_loop(self, target_queue: queue.Queue):
         logging.info("[STT] Worker de inserção ativo.")
         while True:
@@ -324,14 +455,89 @@ class AppState:
         try:
             self.stop()
         finally:
-            self.stt_manager.stop_worker()
+            self.stop_worker()
 
 
-APP_STATE: AppState | None = None
+# ==============================================================================
+# WORKER PROCESS (ISOLADO): O VoiceAgent / PyTorch rodam EXCLUSIVAMENTE aqui
+# ==============================================================================
+def stt_worker_process(
+    audio_chunk_queue: mp.Queue,
+    text_result_queue: mp.Queue,
+    api_result_queue: mp.Queue,
+    models_dir: Path,
+):
+    """Processo isolado para transcrição. O encerramento deste processo devolve 100% da RAM/VRAM, e encaminha os resultados por chamador."""
+    # Importações pesadas acontecem APENAS dentro do processo filho.
+    from src.VoiceAgent import VoiceAgent
 
+    logging.info("[WORKER STT] Inicializando modelo de IA no processo filho...")
+    agent = VoiceAgent(models_dir)
+    logging.info("[WORKER STT] Modelo pronto para transcrição.")
 
-def get_app_state() -> AppState:
-    global APP_STATE
-    if APP_STATE is None:
-        APP_STATE = AppState()
-    return APP_STATE
+    last_used = time.monotonic()
+
+    while True:
+        try:
+            # Aguarda novo chunk de áudio para transcrição
+            item = audio_chunk_queue.get(timeout=1.0)
+        except (queue.Empty, KeyboardInterrupt):
+            if time.monotonic() - last_used >= UNLOAD_TIMEOUT_SECONDS:
+                logging.info(
+                    "[WORKER STT] Inatividade de %ds atingida. Finalizando processo e liberando memória...",
+                    UNLOAD_TIMEOUT_SECONDS,
+                )
+                break
+            continue
+
+        if item == "SHUTDOWN":
+            logging.info("[WORKER STT] Comando de shutdown recebido.")
+            break
+
+        # Backward compatibility if an older caller still pushes raw bytes.
+        if isinstance(item, (bytes, bytearray)):
+            task = {
+                "kind": "stream",
+                "audio": bytes(item),
+                "language": "pt",
+            }
+        else:
+            task = item
+
+        kind = task.get("kind", "stream")
+        request_id = task.get("request_id")
+        chunk = task.get("audio", b"")
+        language = task.get("language")
+        prompt = task.get("prompt")
+        temperature = task.get("temperature")
+        target_queue = api_result_queue if kind == "api" else text_result_queue
+
+        last_used = time.monotonic()
+
+        try:
+            text = agent.transcribe_chunk(
+                chunk,
+                language=language,
+                prompt=prompt,
+                temperature=temperature,
+            )
+            target_queue.put(
+                {
+                    "ok": True,
+                    "text": text or None,
+                    "request_id": request_id,
+                }
+            )
+        except Exception as exc:
+            logging.exception("[WORKER STT] Erro durante transcrição.")
+            target_queue.put(
+                {
+                    "ok": False,
+                    "error": str(exc),
+                    "request_id": request_id,
+                }
+            )
+
+    logging.info(
+        "[WORKER STT] Processo encerrado. Toda a memória VRAM/RAM foi devolvida ao sistema."
+    )

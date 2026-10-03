@@ -2,7 +2,7 @@
 #SingleInstance Force
 Persistent
 
-DictationPort := 8762
+Endpoint := "http://127.0.0.1:8762"
 global IsListening := false
 
 ; Configurações da fala
@@ -18,12 +18,12 @@ EndSound := A_ScriptDir "..\..\sounds\end.mp3"
 ; Se não estiver escutando:			inicia a escuta.
 ; ============================================================
 ^!d:: {
-	global DictationPort, IsListening
+	global Endpoint, IsListening
 
 	req := ComObject("WinHttp.WinHttpRequest.5.1")
 
 	if (IsListening) {
-		req.Open("POST", "http://127.0.0.1:" DictationPort "/stt/stop", true)
+		req.Open("GET", Endpoint "/stt/stop", true)
 		req.Send()
 
 		IsListening := false
@@ -33,7 +33,7 @@ EndSound := A_ScriptDir "..\..\sounds\end.mp3"
 		return
 	}
 
-	req.Open("GET", "http://127.0.0.1:" DictationPort "/stt/start", true)
+	req.Open("GET", Endpoint "/stt/start", true)
 	req.Send()
 
 	IsListening := true
@@ -121,10 +121,11 @@ TTS(style := "normal") {
 ; Verifica o estado atual do servidor.
 ; ============================================================
 GetServerStatus() {
+	global Endpoint
+
 	try {
 		req := ComObject("WinHttp.WinHttpRequest.5.1")
-
-				req.Open("GET", "http://127.0.0.1:" DictationPort "/tts/status", false)
+		req.Open("GET", Endpoint "/tts/status", false)
 		req.Send()
 
 		if (req.Status != 200)
@@ -146,10 +147,10 @@ GetServerStatus() {
 ; Envia POST para o servidor.
 ; ============================================================
 HttpPost(path, body) {
-	global DictationPort
+	global Endpoint
 	try {
 		req := ComObject("WinHttp.WinHttpRequest.5.1")
-				req.Open("POST", "http://127.0.0.1:" DictationPort path, false)
+		req.Open("POST", Endpoint path, false)
 		req.SetRequestHeader("Content-Type", "application/json; charset=utf-8")
 		req.Send(body)
 		return req.Status = 200

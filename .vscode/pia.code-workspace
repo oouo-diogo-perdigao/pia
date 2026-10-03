@@ -5,6 +5,9 @@
 		},
 		{
 			"path": "../../Open-LLM-VTuber"
+		},
+		{
+			"path": "../../SillyTavern"
 		}
 	],
 	"settings": {

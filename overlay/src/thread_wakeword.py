@@ -22,14 +22,14 @@ from .config import (
     logging,
 )
 from .state import TRIGGER_EVENT, play_sound
-from .agent_client import warm_up_services, send_to_agent
+from .agent_client import send_to_agent
 from .commands_loader import process_command
 
 # ---------------------------------------------------------------------------
 # Modelo KWS
 # ---------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent.parent
-KWS_ROOT = BASE_DIR / "models_cache"
+KWS_ROOT = BASE_DIR / "cache"
 # MODEL_NAME = "sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile" # chinese model
 MODEL_NAME = "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01"  # english model
 MODEL_URL = (
@@ -213,7 +213,6 @@ def _start_continuous_session(stream, keyword_spotter) -> None:
         _state.SESSION_ACTIVE = True
 
     logging.info(">>> SESSÃO DE COMANDOS INICIADA <<<")
-    warm_up_services()
 
     try:
         from commands import modo_ditado

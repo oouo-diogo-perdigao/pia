@@ -80,22 +80,3 @@ def send_to_agent(prompt_text: str) -> None:
     threading.Thread(
         target=_consume_agent_stream, args=(prompt_text,), daemon=True
     ).start()
-
-
-def warm_up_services() -> None:
-    def _ping(url: str, name: str) -> None:
-        try:
-            logging.info(f"[PIA] Pré-aquecendo o servidor {name}...")
-            requests.get(url)
-        except Exception as e:
-            logging.warning(f"[PIA] Não foi possível pré-aquecer o {name}: {e}")
-
-    threading.Thread(
-        target=lambda: _ping(f"{SAT_SERVER_URL}/stt/warmup", "STT"), daemon=True
-    ).start()
-    threading.Thread(
-        target=lambda: _ping(f"{SAT_SERVER_URL}/tts/warmup", "TTS"), daemon=True
-    ).start()
-    threading.Thread(
-        target=lambda: _ping(f"{AGENT_SERVER_URL}/warmup", "Agent"), daemon=True
-    ).start()

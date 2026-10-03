@@ -9,7 +9,6 @@ import os
 import site
 from threading import Event
 
-
 from .config import SAMPLE_RATE, CHANNELS, logging
 
 # Configuração de DLLs NVIDIA
@@ -138,8 +137,6 @@ class AudioRecorder:
 # NOTE:
 # This module provides the AudioRecorder class. Bridge and higher-level
 # orchestration should be done by an external manager to avoid globals.
-
-
 def worker_audio_bridge(
     recorder: AudioRecorder,
     stt_manager,

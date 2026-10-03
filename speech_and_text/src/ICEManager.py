@@ -5,6 +5,9 @@ import logging
 import re
 import threading
 import uuid
+import mimetypes
+import uuid
+
 
 from .ComfyUIClient import ComfyUIClient
 from .WorkflowFactory import build_generation_workflow, build_edit_workflow
@@ -18,8 +21,10 @@ from .config import (
     IMAGE_EDIT_MASK_DENOISE,
     IMAGE_VARIATION_DENOISE,
     IMAGE_VARIATION_PROMPT,
+    OUTPUT_CACHE_DIR,
+    OUTPUT_CACHE_TTL_SECONDS,
 )
-from .multipart_utils import extension_for_content_type
+from .utils import extension_for_content_type
 
 
 class OpenAIImageRequestError(ValueError):
@@ -53,7 +58,10 @@ def decode_data_url(value: str) -> tuple[bytes, str]:
     return data, content_type
 
 
-class ImageManager:
+# ==============================================================================
+# GERENCIADOR DO WORKER NO SERVIDOR PRINCIPAL
+# ==============================================================================
+class ICEManager:
     def __init__(self):
         self.client = ComfyUIClient()
         self._job_lock = threading.Lock()
@@ -234,8 +242,39 @@ class ImageManager:
         )
         return self._run_and_free(job)
 
-    def health(self) -> dict:
-        return self.client.health()
+    def models(self):
+        return (
+            # images
+            "gpt-image-1",
+        )
 
+    def getImage(self, token):
+        file_path = OUTPUT_CACHE_DIR / token
 
-IMAGE_MANAGER = ImageManager()
+        if not file_path.is_file():
+            return False, False
+        data = file_path.read_bytes()
+        content_type = mimetypes.guess_type(file_path.name)[0] or "image/png"
+
+        return content_type, data
+
+    def _cleanup_output_cache() -> None:
+        now = time.time()
+        try:
+            for path in OUTPUT_CACHE_DIR.iterdir():
+                if (
+                    path.is_file()
+                    and now - path.stat().st_mtime > OUTPUT_CACHE_TTL_SECONDS
+                ):
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass
+        except Exception:
+            logging.exception("[IMAGE CACHE] Falha ao limpar arquivos expirados.")
+
+    def _cache_image(image_bytes: bytes, extension: str = ".png") -> str:
+        extension = extension if extension.startswith(".") else f".{extension}"
+        token = f"{uuid.uuid4().hex}{extension}"
+        (OUTPUT_CACHE_DIR / token).write_bytes(image_bytes)
+        return token

@@ -16,7 +16,7 @@ from .config import (
     COMFYUI_UNLOAD_MODELS,
     COMFYUI_FREE_MEMORY,
 )
-from .multipart_utils import encode_multipart
+from .utils import encode_multipart
 
 
 class ComfyUIError(RuntimeError):
@@ -77,9 +77,6 @@ class ComfyUIClient:
             raise ComfyUIError(
                 f"Não foi possível conectar ao ComfyUI em {self.base_url}: {exc}"
             ) from exc
-
-    def health(self) -> dict:
-        return self._request("GET", "/system_stats")
 
     def list_models(self, folder: str) -> list[str]:
         response = self._request("GET", f"/models/{urllib.parse.quote(folder)}")

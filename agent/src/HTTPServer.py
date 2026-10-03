@@ -150,17 +150,6 @@ class HTTPServer(BaseHTTPRequestHandler):
         self.send_json(404, {"ok": False, "error": "Endpoint não encontrado."})
 
     def do_GET(self) -> None:
-        if self.path == "/warmup":
-            try:
-                logging.info("[WARMUP] Aquecendo conexões do Agent/LiteLLM...")
-                BUFFER_MANAGER.agent_manager.process("Diga Olá!")
-                logging.info("[WARMUP] Modelo de IA aquecido com sucesso!")
-                self.send_json(200, {"ok": True, "status": "warmed_up"})
-            except Exception as e:
-                logging.error("[HTTP ERRO]: %s", e)
-                self.send_json(500, {"ok": False, "error": str(e)})
-            return
-
         self.send_json(404, {"ok": False, "error": "Endpoint não encontrado."})
 
     # Override para suprimir logs de requisições HTTP padrão no console
