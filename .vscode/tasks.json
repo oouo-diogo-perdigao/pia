@@ -1,0 +1,35 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "shell",
+      "label": "sat: Rodar Servidor",
+      "command": "python -m server",
+      "group": "none",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    },
+    {
+      "type": "shell",
+      "label": "docker: Subir containers (Up)",
+      "command": "docker compose -f ./speech_and_text/docker-compose.yml up --build",
+      "group": "none",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    },
+    {
+      "type": "shell",
+      "label": "docker: Descer containers (Down)",
+      "command": "docker compose -f ./speech_and_text/docker-compose.yml down",
+      "group": "none",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    }
+  ]
+}
