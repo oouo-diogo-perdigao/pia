@@ -5,6 +5,16 @@ import time
 import threading
 import traceback
 
+# Reuse the project's existing Gemini credential when a dedicated STT key was
+# not configured. Also normalize the unary model name to the Live variant used
+# by HybridSTTManager.
+from src import config as _config
+
+if not _config.STT_GEMINI_API_KEY:
+    _config.STT_GEMINI_API_KEY = _config.AGE_GEMINI_API_KEY
+if _config.STT_GEMINI_MODEL == "gemini-3.5-transcribe":
+    _config.STT_GEMINI_MODEL = "gemini-3.5-transcribe-live"
+
 # Keep the existing public import path (src.STTManager.STTManager) intact while
 # swapping in the cloud-first implementation before HTTPServer imports it.
 # HybridSTTManager itself imports the original class first and subclasses it, so
