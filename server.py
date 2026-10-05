@@ -5,6 +5,15 @@ import time
 import threading
 import traceback
 
+# Keep the existing public import path (src.STTManager.STTManager) intact while
+# swapping in the cloud-first implementation before HTTPServer imports it.
+# HybridSTTManager itself imports the original class first and subclasses it, so
+# local Faster-Whisper remains the transparent fallback.
+from src import STTManager as _stt_module
+from src.HybridSTTManager import STTManager as _HybridSTTManager
+
+_stt_module.STTManager = _HybridSTTManager
+
 from src.commands_loader import load_commands
 from src.HTTPServer import run_http_server
 from src.thread_wakeword import audio_listening_loop
