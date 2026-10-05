@@ -220,8 +220,17 @@ class STTManager(LocalSTTManager):
 
     def get_status_payload(self) -> dict:
         payload = super().get_status_payload()
+        next_provider = self._next_available_provider()
         payload.update(
             {
+                # Campos antigos preservados para clientes existentes.
+                "stt_provider": self.active_provider or next_provider,
+                "stt_remote_available": any(
+                    provider != "local" and self._provider_available(provider)
+                    for provider in self.providers
+                ),
+                "stt_fallback": "local" if "local" in self.providers else None,
+                # Campos novos para a cadeia ordenada.
                 "stt_providers": list(self.providers),
                 "stt_active_provider": self.active_provider,
                 "stt_provider_available": {
