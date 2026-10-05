@@ -60,6 +60,15 @@ STT_SAMPLE_RATE = _int_env("STT_SAMPLE_RATE", 16_000)
 STT_CHANNELS = _int_env("STT_CHANNELS", 1)
 STT_WHISPER_TIMEOUT = _int_env("STT_WHISPER_TIMEOUT", 600)
 
+# Provider prioritário. Valores: gemini, grok, local.
+# O fallback para o Whisper local é automático quando o provider remoto falha.
+STT_PROVIDER = _str_env("STT_PROVIDER", "gemini").lower()
+STT_REMOTE_COOLDOWN_SECONDS = _int_env("STT_REMOTE_COOLDOWN_SECONDS", 900)
+STT_GEMINI_API_KEY = _str_env("STT_GEMINI_API_KEY", _str_env("GEMINI_API_KEY", ""))
+STT_GEMINI_MODEL = _str_env("STT_GEMINI_MODEL", "gemini-3.5-transcribe")
+STT_GROK_API_KEY = _str_env("STT_GROK_API_KEY", _str_env("XAI_API_KEY", ""))
+STT_GROK_MODEL = _str_env("STT_GROK_MODEL", "xai/grok-voice-transcribe-2.0")
+
 # ============================================================
 # TTS
 # ============================================================
@@ -151,17 +160,16 @@ if not logger.handlers:
 
     rotating_handler = RotatingFileHandler(
         log_dir / "stt.log",
-        maxBytes=10 * 1024 * 1024,  # Limite exato de 10 MB (10.485.760 bytes)
+        maxBytes=10 * 1024 * 1024,
         backupCount=1,
         encoding="utf-8",
     )
     rotating_handler.setFormatter(formatter)
     logger.addHandler(rotating_handler)
 
-# Crie um logger dedicado para os textos emitidos (no topo do arquivo ou logo após as importações)
 logger_stt = logging.getLogger("logger_stt")
 logger_stt.setLevel(logging.INFO)
-logger_stt.propagate = False  # Evita que suba para o log geral
+logger_stt.propagate = False
 
 if not logger_stt.handlers:
     formatter_stt = logging.Formatter("%(asctime)s\n%(message)s")
@@ -178,17 +186,15 @@ if not logger_stt.handlers:
     file_handler_stt.setFormatter(formatter_stt)
     logger_stt.addHandler(file_handler_stt)
 
-
-# Crie um logger dedicado para os textos emitidos (no topo do arquivo ou logo após as importações)
 logger_tts = logging.getLogger("logger_tts")
 logger_tts.setLevel(logging.INFO)
-logger_tts.propagate = False  # Evita que suba para o log geral
+logger_tts.propagate = False
 
 if not logger_tts.handlers:
-    formatter_tts = logging.Formatter("%(asctime)s\n%(message)s")
+    formatter_stt = logging.Formatter("%(asctime)s\n%(message)s")
 
     stream_handler_tts = logging.StreamHandler()
-    stream_handler_tts.setFormatter(formatter_tts)
+    stream_handler_tts.setFormatter(formatter_stt)
     logger_tts.addHandler(stream_handler_tts)
 
     file_handler_tts = RotatingFileHandler(
@@ -197,17 +203,15 @@ if not logger_tts.handlers:
         backupCount=1,
         encoding="utf-8",
     )
-    file_handler_tts.setFormatter(formatter_tts)
+    file_handler_tts.setFormatter(formatter_stt)
     logger_tts.addHandler(file_handler_tts)
 
-
-# Crie um logger dedicado para os textos emitidos (no topo do arquivo ou logo após as importações)
 logger_llm = logging.getLogger("logger_llm")
 logger_llm.setLevel(logging.INFO)
-logger_llm.propagate = False  # Evita que suba para o log geral
+logger_llm.propagate = False
 
 if not logger_llm.handlers:
-    # Handler dedicado e separado para entradas e saídas da LLM
+    formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
     logger_llm = logging.getLogger("llm_trace")
     logger_llm.setLevel(logging.INFO)
     logger_llm.propagate = False
