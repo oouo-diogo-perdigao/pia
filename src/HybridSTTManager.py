@@ -12,6 +12,7 @@ import wave
 from .STTManager import STTManager as LocalSTTManager, SATState
 from .config import (
     logging,
+    logger_stt,
     STT_PROVIDER,
     STT_REMOTE_COOLDOWN_SECONDS,
     STT_GEMINI_API_KEY,
@@ -41,6 +42,11 @@ class STTManager(LocalSTTManager):
         self.remote_disabled_until = 0.0
         self.remote_disabled_reason = ""
         self._force_local_worker = False
+        logging.info(
+            "[STT] Provider configurado: %s | remoto_configurado=%s",
+            self.provider,
+            self._remote_configured(),
+        )
 
     def _remote_configured(self) -> bool:
         if self.provider == "gemini":
@@ -114,7 +120,14 @@ class STTManager(LocalSTTManager):
     def _remote_chunk_job(self, chunk: bytes) -> None:
         with self.remote_lock:
             try:
+                logging.info(
+                    "[STT] Enviando %d bytes para provider remoto %s...",
+                    len(chunk),
+                    self.provider,
+                )
                 text = self._transcribe_remote(chunk, language="pt")
+                if text:
+                    logger_stt.info(text)
                 self.remote_result_queue.put({"ok": True, "text": text or None})
                 return
             except Exception as exc:
@@ -152,6 +165,8 @@ class STTManager(LocalSTTManager):
                     language=language,
                     prompt=prompt,
                 )
+                if text:
+                    logger_stt.info(text)
                 return {"ok": True, "text": text or None, "request_id": None}
             except Exception as exc:
                 logging.exception("[STT] Falha no provider remoto %s.", self.provider)
