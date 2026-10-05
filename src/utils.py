@@ -50,8 +50,6 @@ def insert_text_at_cursor(text: str) -> None:
     import time
     import ctypes
 
-    logging.info("[TRANSCRICAO INSERINDO] %s", text)
-
     # 1. Salva o conteúdo atual da área de transferência para não perdê-lo
     previous_clipboard = pyperclip.paste()
 
