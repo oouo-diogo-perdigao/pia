@@ -480,33 +480,27 @@ class HTTPServer(BaseHTTPRequestHandler):
             return
 
         if path == "/stt/status":
-            logging.info("[GET /stt/status] Verificando status do Worker STT...")
-
+            logging.info("[GET /stt/status] Gravação transcrita.")
             payload = STT_MANAGER.get_status_payload()
-            text_chunks = STT_MANAGER.get_status_queue()
-
             self.send_json(
                 200,
                 {
                     **payload,
-                    "text_chunks": text_chunks,
+                    "text_chunks": STT_MANAGER.get_status_queue(),
                 },
             )
             return
 
         if path == "/stt/status/stream":
-            logging.info(
-                "[GET /stt/status/stream] Iniciando stream SSE para status do Worker STT..."
-            )
-
+            logging.info("[GET /stt/status/stream] Gravação transcrita SSE.")
             client_queue = STT_MANAGER.add_stream_queue()
 
             try:
                 self.send_response(200)
+                self.send_header("Access-Control-Allow-Origin", "*")
                 self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                 self.send_header("Cache-Control", "no-cache")
                 self.send_header("Connection", "keep-alive")
-                self.send_header("Access-Control-Allow-Origin", "*")
                 self.send_header("X-Accel-Buffering", "no")
                 self.end_headers()
                 self.wfile.flush()
@@ -541,10 +535,8 @@ class HTTPServer(BaseHTTPRequestHandler):
                 ConnectionError,
             ):
                 logging.info("[SSE /stt/status/stream] Cliente desconectado.")
-
             finally:
                 STT_MANAGER.remove_stream_queue(client_queue)
-
             return
 
         if path == "/tts/status":

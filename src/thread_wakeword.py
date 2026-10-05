@@ -383,10 +383,10 @@ def _start_continuous_session(stream, keyword_spotter) -> None:
 # Loop principal
 # ---------------------------------------------------------------------------
 def audio_listening_loop() -> None:
-    logging.info("Verificando/Baixando modelos do sherpa_onnx...")
+    # logging.info("Verificando/Baixando modelos do sherpa_onnx...")
     _ensure_keyword_model()  # <--- Adicione esta linha aqui
 
-    logging.info("Carregando modelos do sherpa_onnx...")
+    # logging.info("Carregando modelos do sherpa_onnx...")
     try:
         keyword_spotter = sherpa_onnx.KeywordSpotter(
             tokens=str(KWS_TOKENS),

@@ -4,12 +4,12 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 ' Obtém o caminho da pasta onde o arquivo .vbs está salvo
 scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
 
-' Define o diretório de trabalho dois níveis acima (onde está o package.json)
-targetDir = fso.GetAbsolutePathName(scriptDir & "\..\..\")
+' Define o diretório de trabalho um nível acima (onde está o package.json)
+targetDir = fso.GetAbsolutePathName(scriptDir & "\..\")
 
 ' Executa o comando npm run sat no diretório alvo sem exibir janela (0)
 WshShell.CurrentDirectory = targetDir
-WshShell.Run "cmd.exe /c npm run sat", 0, False
+WshShell.Run "cmd.exe /c uv run python -m server", 0, False
 
 Set WshShell = Nothing
 Set fso = Nothing

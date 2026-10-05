@@ -1,9 +1,14 @@
 __pycache__
 /.venv
 /cache
+/build
+/dist
 /logs
 /softwares
 .env
 keywords.txt
 models.yaml
 uv.lock
+*.spec
+*.pyc
+
