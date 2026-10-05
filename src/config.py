@@ -60,6 +60,19 @@ STT_SAMPLE_RATE = _int_env("STT_SAMPLE_RATE", 16_000)
 STT_CHANNELS = _int_env("STT_CHANNELS", 1)
 STT_WHISPER_TIMEOUT = _int_env("STT_WHISPER_TIMEOUT", 600)
 
+# Provider prioritário. Valores: gemini, groq, local.
+# O fallback para o Whisper local é automático quando o provider remoto falha.
+STT_PROVIDER = _str_env("STT_PROVIDER", "gemini").lower()
+STT_REMOTE_COOLDOWN_SECONDS = _int_env("STT_REMOTE_COOLDOWN_SECONDS", 900)
+STT_GEMINI_API_KEY = (
+    os.getenv("STT_GEMINI_API_KEY")
+    or os.getenv("GEMINI_API_KEY")
+    or os.getenv("AGE_GEMINI_API_KEY")
+    or ""
+).strip()
+STT_GEMINI_MODEL = _str_env("STT_GEMINI_MODEL", "gemini-3.5-transcribe-live")
+STT_GROQ_MODEL = _str_env("STT_GROQ_MODEL", "groq/whisper-large-v3-turbo")
+
 # ============================================================
 # TTS
 # ============================================================

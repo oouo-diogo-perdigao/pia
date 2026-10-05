@@ -23,6 +23,7 @@ dependencies = [
     "transformers>=4.57.3",
     "setuptools==75.8.2",
     "litellm>=1.105.0rc1",
+    "google-genai>=1.47.0",
     "pygame>=2.6.1",
     "pyyaml>=6.0.3",
     "requests>=2.34.2",
