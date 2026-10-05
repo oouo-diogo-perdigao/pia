@@ -9,7 +9,7 @@ import os
 import site
 from threading import Event
 
-from .config import STT_SAMPLE_RATE, STT_CHANNELS, logging
+from .config import STT_SAMPLE_RATE, STT_CHANNELS, STT_SPEECH_THRESHOLD, logging
 
 # Configuração de DLLs NVIDIA
 venv_path = site.getsitepackages()[0]
@@ -34,7 +34,7 @@ class AudioRecorder:
         self._raw_frames = []
 
         # Configurações do Buffer de Fala (Estilo VTuber)
-        self.speech_threshold = 0.0030  # Sensibilidade de captação de voz
+        self.speech_threshold = STT_SPEECH_THRESHOLD
         self.silence_chunks_limit = 18  # ~0.55 segundos de silêncio para fechar a frase
         self.silence_counter = 0
         self.has_spoken = False
@@ -111,7 +111,11 @@ class AudioRecorder:
         self.silence_counter = 0
         self._raw_frames = []
 
-        logging.info("[AUDIO] Abrindo fluxo do microfone (%d Hz)...", self.sample_rate)
+        logging.info(
+            "[AUDIO] Abrindo fluxo do microfone (%d Hz, threshold=%.6f)...",
+            self.sample_rate,
+            self.speech_threshold,
+        )
         self.stream = sd.InputStream(
             samplerate=self.sample_rate,
             channels=self.channels,
@@ -159,43 +163,71 @@ def worker_audio_bridge(
 ):
     """Read audio chunks from the recorder and forward them to the STT manager.
 
-    This function is intended to run in a background thread. All shared
-    dependencies are injected to avoid module-level globals.
-
-    Args:
-        recorder: AudioRecorder instance to read chunks from.
-        stt_manager: STT manager instance exposing send_chunk and get_result.
-        transcribed_texts: Queue to push final transcribed strings.
-        is_transcribing_event: Event used to indicate active transcription.
-        stop_event: Event used to request bridge shutdown.
+    When stop_event is set, the bridge enters drain mode: it keeps forwarding
+    audio already queued by AudioRecorder.stop() and waits for every pending STT
+    result before emitting the final None sentinel.
     """
-    while not stop_event.is_set():
-        try:
-            chunk = recorder.audio_queue.get(timeout=0.1)
-            is_transcribing_event.set()
-            try:
-                stt_manager.send_chunk(chunk)
-            except Exception as e:
-                logging.error("[BRIDGE] Erro ao enviar chunk para STT: %s", e)
-            finally:
-                try:
-                    recorder.audio_queue.task_done()
-                except Exception:
-                    pass
-        except queue.Empty:
-            pass
-        except Exception as e:
-            logging.error("[BRIDGE] Erro no repasse de áudio: %s", e)
+    pending_transcriptions = 0
 
-        # Collect results from the STT worker (non-blocking)
+    while True:
+        # Continue draining recorder.audio_queue after stop. This is essential
+        # because AudioRecorder.stop() places the final utterance in that queue
+        # immediately before STTManager sets stop_event.
+        if not (stop_event.is_set() and recorder.audio_queue.empty()):
+            try:
+                chunk = recorder.audio_queue.get(timeout=0.05)
+                try:
+                    stt_manager.send_chunk(chunk)
+                    pending_transcriptions += 1
+                    is_transcribing_event.set()
+                    logging.info(
+                        "[BRIDGE] Chunk enviado ao STT. pendentes=%d",
+                        pending_transcriptions,
+                    )
+                except Exception as e:
+                    logging.exception("[BRIDGE] Erro ao enviar chunk para STT: %s", e)
+                finally:
+                    try:
+                        recorder.audio_queue.task_done()
+                    except Exception:
+                        pass
+            except queue.Empty:
+                pass
+            except Exception:
+                logging.exception("[BRIDGE] Erro no repasse de áudio.")
+
+        # Collect one result per loop. Remote providers may answer asynchronously.
         try:
-            result = stt_manager.get_result(timeout=0.01)
+            result = stt_manager.get_result(timeout=0.05)
         except Exception:
             result = None
 
         if result:
+            if pending_transcriptions > 0:
+                pending_transcriptions -= 1
+
             if result.get("ok") and result.get("text"):
                 text = result["text"]
                 logging.info("[TRANSCRICAO CONCLUIDA]: %s", text)
                 transcribed_texts.put(text)
-            is_transcribing_event.clear()
+            elif not result.get("ok"):
+                logging.error(
+                    "[BRIDGE] Transcrição falhou: %s",
+                    result.get("error", "erro desconhecido"),
+                )
+
+            if pending_transcriptions == 0:
+                is_transcribing_event.clear()
+
+        if (
+            stop_event.is_set()
+            and recorder.audio_queue.empty()
+            and pending_transcriptions == 0
+        ):
+            break
+
+    is_transcribing_event.clear()
+    # The dispatcher owns shutdown of status/SSE/insert consumers. Only signal
+    # completion after the final transcription result has been delivered.
+    transcribed_texts.put(None)
+    logging.info("[BRIDGE] Drenagem concluída; bridge finalizada.")
