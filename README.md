@@ -413,12 +413,6 @@ Sincronizar dependências:
 uv sync
 ```
 
-Executar testes existentes:
-
-```powershell
-uv run pytest
-```
-
 A aplicação foi estruturada para manter modelos pesados em workers/processos separados sempre que possível, permitindo liberar RAM/VRAM durante períodos de inatividade.
 
 ---
