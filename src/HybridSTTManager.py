@@ -16,8 +16,8 @@ from .config import (
     STT_REMOTE_COOLDOWN_SECONDS,
     STT_GEMINI_API_KEY,
     STT_GEMINI_MODEL,
-    STT_GROK_API_KEY,
-    STT_GROK_MODEL,
+    GROQ_API_KEY,
+    STT_GROQ_MODEL,
 )
 
 
@@ -45,8 +45,8 @@ class STTManager(LocalSTTManager):
     def _remote_configured(self) -> bool:
         if self.provider == "gemini":
             return bool(STT_GEMINI_API_KEY)
-        if self.provider == "grok":
-            return bool(STT_GROK_API_KEY)
+        if self.provider == "groq":
+            return bool(GROQ_API_KEY)
         return False
 
     def _remote_available(self) -> bool:
@@ -190,8 +190,8 @@ class STTManager(LocalSTTManager):
     ) -> str:
         if self.provider == "gemini":
             return self._transcribe_gemini_live(audio_bytes, language=language)
-        if self.provider == "grok":
-            return self._transcribe_grok_litellm(
+        if self.provider == "groq":
+            return self._transcribe_groq_litellm(
                 audio_bytes,
                 language=language,
                 prompt=prompt,
@@ -271,15 +271,15 @@ class STTManager(LocalSTTManager):
 
         return ""
 
-    def _transcribe_grok_litellm(
+    def _transcribe_groq_litellm(
         self,
         audio_bytes: bytes,
         *,
         language: str | None = None,
         prompt: str | None = None,
     ) -> str:
-        if not STT_GROK_API_KEY:
-            raise RemoteSTTUnavailable("STT_GROK_API_KEY não configurada.")
+        if not GROQ_API_KEY:
+            raise RemoteSTTUnavailable("GROQ_API_KEY não configurada.")
 
         try:
             import litellm
@@ -295,9 +295,9 @@ class STTManager(LocalSTTManager):
         try:
             with open(tmp_path, "rb") as audio_file:
                 kwargs = {
-                    "model": STT_GROK_MODEL,
+                    "model": STT_GROQ_MODEL,
                     "file": audio_file,
-                    "api_key": STT_GROK_API_KEY,
+                    "api_key": GROQ_API_KEY,
                 }
                 if language:
                     kwargs["language"] = language
