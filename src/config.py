@@ -58,6 +58,7 @@ STT_BEST_OF = _int_env("STT_BEST_OF", 5)
 STT_TEMPERATURE = _float_env("STT_TEMPERATURE", 0.0)
 STT_SAMPLE_RATE = _int_env("STT_SAMPLE_RATE", 16_000)
 STT_CHANNELS = _int_env("STT_CHANNELS", 1)
+STT_SPEECH_THRESHOLD = _float_env("STT_SPEECH_THRESHOLD", 0.0030)
 STT_WHISPER_TIMEOUT = _int_env("STT_WHISPER_TIMEOUT", 600)
 
 # Provider prioritário. Valores: gemini, groq, local.
