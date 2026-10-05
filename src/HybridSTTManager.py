@@ -40,6 +40,7 @@ class STTManager(LocalSTTManager):
         self.remote_lock = threading.Lock()
         self.remote_disabled_until = 0.0
         self.remote_disabled_reason = ""
+        self._force_local_worker = False
 
     def _remote_configured(self) -> bool:
         if self.provider == "gemini":
@@ -82,8 +83,18 @@ class STTManager(LocalSTTManager):
         )
         return any(marker in text for marker in markers)
 
+    def ensure_worker_running(self):
+        """Do not preload Whisper while the configured cloud provider is healthy."""
+        if self._remote_available() and not self._force_local_worker:
+            return
+        return super().ensure_worker_running()
+
     def _local_send_chunk(self, chunk: bytes) -> None:
-        super().send_chunk(chunk)
+        self._force_local_worker = True
+        try:
+            super().send_chunk(chunk)
+        finally:
+            self._force_local_worker = False
 
     def send_chunk(self, chunk):
         """Prefer the configured remote provider and fallback to local Whisper."""
@@ -147,21 +158,16 @@ class STTManager(LocalSTTManager):
                 if self._is_quota_or_auth_error(exc):
                     self._disable_remote_temporarily(str(exc))
 
-        return super().transcribe_request(
-            audio_bytes,
-            language=language,
-            prompt=prompt,
-            temperature=temperature,
-        )
-
-    def start(self) -> None:
-        """Start recording without loading Whisper unless local fallback is needed."""
-        super().start()
-        if self._remote_available():
-            # LocalSTTManager.start() warms Whisper in the background. Stop it again
-            # when cloud is usable so VRAM/RAM remain free during normal operation.
-            # A local worker will be recreated automatically on the first fallback.
-            threading.Thread(target=self.stop_worker, daemon=True).start()
+        self._force_local_worker = True
+        try:
+            return super().transcribe_request(
+                audio_bytes,
+                language=language,
+                prompt=prompt,
+                temperature=temperature,
+            )
+        finally:
+            self._force_local_worker = False
 
     def get_status_payload(self) -> dict:
         payload = super().get_status_payload()
@@ -282,8 +288,7 @@ class STTManager(LocalSTTManager):
 
         # LiteLLM/OpenAI-compatible transcription APIs expect a file-like object
         # with a filename. A temporary WAV keeps that contract reliable on Windows.
-        suffix = ".wav"
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
 
