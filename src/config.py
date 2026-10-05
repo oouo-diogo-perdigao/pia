@@ -150,7 +150,7 @@ if not logger.handlers:
     logger.addHandler(stream_handler)
 
     rotating_handler = RotatingFileHandler(
-        log_dir / "stt.log",
+        log_dir / "_main.log",
         maxBytes=10 * 1024 * 1024,  # Limite exato de 10 MB (10.485.760 bytes)
         backupCount=1,
         encoding="utf-8",
@@ -170,7 +170,7 @@ if not logger_stt.handlers:
     stream_handler_stt.setFormatter(formatter_stt)
     logger_stt.addHandler(stream_handler_stt)
     file_handler_stt = RotatingFileHandler(
-        log_dir / "emited.log",
+        log_dir / "stt.log",
         maxBytes=10 * 1024 * 1024,
         backupCount=1,
         encoding="utf-8",
@@ -192,7 +192,7 @@ if not logger_tts.handlers:
     logger_tts.addHandler(stream_handler_tts)
 
     file_handler_tts = RotatingFileHandler(
-        log_dir / "emited.log",
+        log_dir / "tts.log",
         maxBytes=10 * 1024 * 1024,
         backupCount=1,
         encoding="utf-8",
@@ -212,7 +212,7 @@ if not logger_llm.handlers:
     logger_llm.setLevel(logging.INFO)
     logger_llm.propagate = False
     llm_rotating_handler = RotatingFileHandler(
-        log_dir / "llm_interactions.log",
+        log_dir / "llm.log",
         maxBytes=10 * 1024 * 1024,
         backupCount=2,
         encoding="utf-8",
