@@ -331,12 +331,13 @@ class STTManager:
             logging.info("[APP] Parando gravador...")
             self.recorder.stop()
 
-            # Sinaliza a parada para a thread de bridge
-            self.stop_bridge_event.set()
+            # Entra em modo de drenagem. A bridge continuará viva até encaminhar
+            # todo áudio já enfileirado (inclusive o trecho final criado por
+            # AudioRecorder.stop()) e receber as respectivas respostas do STT.
+            # Ela própria injeta None em transcribed_texts somente ao terminar.
             self.status = SATState.STOPPING
-
-            # injeta none na fila principal
-            self.transcribed_texts.put(None)
+            self.stop_bridge_event.set()
+            logging.info("[APP] Aguardando drenagem do último áudio/transcrição...")
 
     # region insert
     def _stt_insert_worker_loop(self, target_queue: queue.Queue):
