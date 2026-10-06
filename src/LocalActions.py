@@ -21,12 +21,7 @@ from .config import BASE_DIR, logging
 
 
 class LocalActions:
-    """Local desktop actions exposed through the HTTP action API.
-
-    STT is injected only as a text source. Cursor manipulation, screenshots,
-    audio playback and opening images all live here so STTManager stays focused
-    exclusively on transcription.
-    """
+    """Local desktop actions exposed through the HTTP action API."""
 
     def __init__(self, stt_manager):
         self.stt_manager = stt_manager
@@ -35,16 +30,26 @@ class LocalActions:
         self._dictation_thread: threading.Thread | None = None
         self._dictation_stop = threading.Event()
 
-        self._audio_items = deque()
-        self._audio_condition = threading.Condition()
-        self._audio_interrupt = threading.Event()
-        self._audio_playing = False
-        self._audio_thread = threading.Thread(
-            target=self._audio_worker_loop,
+        # Sequential queue audio owns channel 0 exclusively.
+        self._queued_audio_items = deque()
+        self._queued_audio_condition = threading.Condition()
+        self._queued_audio_playing = False
+        self._queued_audio_current_id: str | None = None
+
+        # Immediate audio uses independent channels and may overlap freely.
+        self._immediate_lock = threading.RLock()
+        self._immediate_channels: dict[str, pygame.mixer.Channel] = {}
+        self._immediate_sounds: dict[str, pygame.mixer.Sound] = {}
+
+        self._ensure_audio_mixer()
+        self._queue_channel = pygame.mixer.Channel(0)
+
+        self._queued_audio_thread = threading.Thread(
+            target=self._queued_audio_worker_loop,
             daemon=True,
-            name="LocalActionsAudio",
+            name="LocalActionsAudioQueue",
         )
-        self._audio_thread.start()
+        self._queued_audio_thread.start()
 
         self._output_dir = BASE_DIR / "cache" / "local_actions"
         self._output_dir.mkdir(parents=True, exist_ok=True)
@@ -73,7 +78,6 @@ class LocalActions:
         bmp_buffer = io.BytesIO()
         image.save(bmp_buffer, format="BMP")
 
-        # CF_DIB expects the BMP payload without the 14-byte BITMAPFILEHEADER.
         dib = bmp_buffer.getvalue()[14:]
         self._set_windows_clipboard_dib(dib)
         time.sleep(0.03)
@@ -122,7 +126,6 @@ class LocalActions:
             if not user32.SetClipboardData(CF_DIB, handle):
                 kernel32.GlobalFree(handle)
                 raise RuntimeError("Não foi possível gravar a imagem no clipboard.")
-            # Clipboard now owns the HGLOBAL.
             handle = None
         finally:
             user32.CloseClipboard()
@@ -206,80 +209,238 @@ class LocalActions:
     # ------------------------------------------------------------------
     # Audio playback
     # ------------------------------------------------------------------
-    def play_audio(self, audio_bytes: bytes, content_type: str | None = None) -> str:
-        """Play as soon as possible, interrupting the current local-action audio."""
-        return self._enqueue_audio(audio_bytes, content_type, immediate=True)
+    @staticmethod
+    def _ensure_audio_mixer() -> None:
+        if not pygame.mixer.get_init():
+            pygame.mixer.init(buffer=512)
 
-    def queue_audio(self, audio_bytes: bytes, content_type: str | None = None) -> str:
-        """Append audio to the sequential local-action playback queue."""
-        return self._enqueue_audio(audio_bytes, content_type, immediate=False)
+        # Channel 0 is reserved for the ordered queue. Other channels are
+        # exclusively available to immediate/overlapping audio.
+        if pygame.mixer.get_num_channels() < 16:
+            pygame.mixer.set_num_channels(16)
+        pygame.mixer.set_reserved(1)
 
-    def _enqueue_audio(
-        self,
-        audio_bytes: bytes,
-        content_type: str | None,
+    @staticmethod
+    def _validate_audio_path(path: str) -> Path:
+        value = Path(path).expanduser()
+        if not value.is_absolute():
+            raise ValueError("O parâmetro 'path' deve ser um caminho absoluto.")
+        if not value.is_file():
+            raise ValueError(f"Arquivo de áudio não encontrado: {value}")
+        return value
+
+    @staticmethod
+    def _audio_item(
         *,
-        immediate: bool,
-    ) -> str:
+        audio_bytes: bytes | None = None,
+        content_type: str | None = None,
+        path: str | None = None,
+    ) -> dict:
+        if path:
+            return {
+                "id": uuid.uuid4().hex,
+                "path": LocalActions._validate_audio_path(path),
+                "data": None,
+                "suffix": None,
+            }
+
         if not audio_bytes:
             raise ValueError("Áudio vazio.")
 
-        action_id = uuid.uuid4().hex
-        suffix = mimetypes.guess_extension((content_type or "").split(";", 1)[0]) or ".audio"
-        item = {
-            "id": action_id,
+        suffix = (
+            mimetypes.guess_extension((content_type or "").split(";", 1)[0])
+            or ".audio"
+        )
+        return {
+            "id": uuid.uuid4().hex,
+            "path": None,
             "data": bytes(audio_bytes),
             "suffix": suffix,
         }
 
-        with self._audio_condition:
-            if immediate:
-                self._audio_items.appendleft(item)
-                if self._audio_playing:
-                    self._audio_interrupt.set()
-            else:
-                self._audio_items.append(item)
-            self._audio_condition.notify()
+    @staticmethod
+    def _load_sound(item: dict) -> pygame.mixer.Sound:
+        path = item.get("path")
+        if path is not None:
+            return pygame.mixer.Sound(str(path))
 
+        data = item["data"]
+        suffix = (item.get("suffix") or "").lower()
+
+        # WAV/OGG can be decoded directly from an in-memory file object, avoiding
+        # the temporary-file round trip on the latency-sensitive route.
+        if suffix in {".wav", ".ogg", ".oga"}:
+            return pygame.mixer.Sound(file=io.BytesIO(data))
+
+        # SDL_mixer relies on filename/extension for some compressed formats
+        # such as MP3, so use a short-lived temp file for those.
+        temp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp.write(data)
+                temp_path = Path(tmp.name)
+            return pygame.mixer.Sound(str(temp_path))
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+    def _acquire_immediate_channel(self) -> pygame.mixer.Channel:
+        with self._immediate_lock:
+            channel_count = pygame.mixer.get_num_channels()
+
+            for index in range(1, channel_count):
+                channel = pygame.mixer.Channel(index)
+                if not channel.get_busy():
+                    return channel
+
+            # Grow instead of stealing another immediate sound or the queue.
+            new_count = channel_count + 8
+            pygame.mixer.set_num_channels(new_count)
+            pygame.mixer.set_reserved(1)
+            return pygame.mixer.Channel(channel_count)
+
+    def play_audio(
+        self,
+        audio_bytes: bytes | None = None,
+        content_type: str | None = None,
+        *,
+        path: str | None = None,
+    ) -> str:
+        """Play immediately on its own mixer channel.
+
+        Consecutive calls overlap and never interfere with the sequential queue.
+        """
+        item = self._audio_item(
+            audio_bytes=audio_bytes,
+            content_type=content_type,
+            path=path,
+        )
+        action_id = item["id"]
+
+        threading.Thread(
+            target=self._play_immediate_audio,
+            args=(item,),
+            daemon=True,
+            name=f"LocalActionImmediate-{action_id[:8]}",
+        ).start()
         return action_id
 
-    def _audio_worker_loop(self) -> None:
+    def _play_immediate_audio(self, item: dict) -> None:
+        action_id = item["id"]
+        try:
+            sound = self._load_sound(item)
+            channel = self._acquire_immediate_channel()
+
+            with self._immediate_lock:
+                self._immediate_sounds[action_id] = sound
+                self._immediate_channels[action_id] = channel
+
+            channel.play(sound)
+            logging.info("[ACTION AUDIO] imediato iniciado id=%s", action_id)
+
+            while channel.get_busy():
+                time.sleep(0.02)
+        except Exception:
+            logging.exception(
+                "[ACTION AUDIO] Falha ao reproduzir áudio imediato id=%s",
+                action_id,
+            )
+        finally:
+            with self._immediate_lock:
+                self._immediate_channels.pop(action_id, None)
+                self._immediate_sounds.pop(action_id, None)
+
+    def stop_immediate_audio(self, action_id: str | None = None) -> int:
+        """Stop one immediate audio by id, or every immediate audio when id is absent."""
+        with self._immediate_lock:
+            if action_id:
+                channel = self._immediate_channels.get(action_id)
+                if channel is None:
+                    return 0
+                channel.stop()
+                return 1
+
+            channels = list(self._immediate_channels.values())
+            for channel in channels:
+                channel.stop()
+            return len(channels)
+
+    def queue_audio(
+        self,
+        audio_bytes: bytes | None = None,
+        content_type: str | None = None,
+        *,
+        path: str | None = None,
+    ) -> str:
+        """Append audio to the non-overlapping sequential queue."""
+        item = self._audio_item(
+            audio_bytes=audio_bytes,
+            content_type=content_type,
+            path=path,
+        )
+
+        with self._queued_audio_condition:
+            self._queued_audio_items.append(item)
+            self._queued_audio_condition.notify()
+
+        return item["id"]
+
+    def _queued_audio_worker_loop(self) -> None:
         while True:
-            with self._audio_condition:
-                while not self._audio_items:
-                    self._audio_condition.wait()
-                item = self._audio_items.popleft()
-                self._audio_playing = True
-                self._audio_interrupt.clear()
+            with self._queued_audio_condition:
+                while not self._queued_audio_items:
+                    self._queued_audio_condition.wait()
 
-            path: Path | None = None
+                item = self._queued_audio_items.popleft()
+                self._queued_audio_playing = True
+                self._queued_audio_current_id = item["id"]
+
             try:
-                with tempfile.NamedTemporaryFile(
-                    suffix=item["suffix"],
-                    delete=False,
-                ) as tmp:
-                    tmp.write(item["data"])
-                    path = Path(tmp.name)
+                sound = self._load_sound(item)
+                self._queue_channel.play(sound)
+                logging.info(
+                    "[ACTION AUDIO QUEUE] iniciado id=%s restantes=%d",
+                    item["id"],
+                    len(self._queued_audio_items),
+                )
 
-                sound = pygame.mixer.Sound(str(path))
-                channel = pygame.mixer.find_channel(force=True)
-                channel.play(sound)
-
-                while channel.get_busy():
-                    if self._audio_interrupt.is_set():
-                        channel.stop()
-                        break
-                    time.sleep(0.03)
+                while self._queue_channel.get_busy():
+                    time.sleep(0.02)
             except Exception:
-                logging.exception("[ACTION] Falha ao reproduzir áudio local.")
+                logging.exception(
+                    "[ACTION AUDIO QUEUE] Falha ao reproduzir id=%s",
+                    item["id"],
+                )
             finally:
-                if path:
-                    try:
-                        path.unlink(missing_ok=True)
-                    except Exception:
-                        pass
-                with self._audio_condition:
-                    self._audio_playing = False
+                with self._queued_audio_condition:
+                    self._queued_audio_playing = False
+                    self._queued_audio_current_id = None
+
+    def stop_audio_queue(self, *, next_only: bool = False) -> dict:
+        """Skip current queue item or stop current and clear every pending item."""
+        with self._queued_audio_condition:
+            was_playing = self._queued_audio_playing
+            current_id = self._queued_audio_current_id
+            cleared = 0
+
+            if not next_only:
+                cleared = len(self._queued_audio_items)
+                self._queued_audio_items.clear()
+
+            if was_playing:
+                self._queue_channel.stop()
+
+            self._queued_audio_condition.notify_all()
+
+        return {
+            "stopped": bool(was_playing),
+            "current_id": current_id,
+            "cleared": cleared,
+            "next": bool(next_only),
+        }
 
     # ------------------------------------------------------------------
     # Images
@@ -299,7 +460,6 @@ class LocalActions:
 
         output = self._output_dir / f"image-{uuid.uuid4().hex}{suffix}"
 
-        # Re-encode using Pillow instead of trusting arbitrary uploaded bytes.
         format_name = Image.registered_extensions().get(suffix.lower()) or "PNG"
         try:
             image.save(output, format=format_name)
