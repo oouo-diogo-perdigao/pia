@@ -1,6 +1,7 @@
 import pyautogui
-import pyperclip
+import requests
 from src.utils import speak_tts
+from src.config import PUBLIC_BASE_URL
 
 COMMAND_NAME = "modo ditado"
 
@@ -71,14 +72,18 @@ def process_dictation_chunk(text: str) -> bool:
         print("[DITADO - AÇÃO]: COLAR EXECUTADO")
         return True
 
-    # --- Inserção do Texto (Onde o seletor/cursor estiver) ---
+    # --- Inserção do Texto via LocalActions HTTP API ---
     if text.strip():
-        # Copia o texto para o clipboard e cola para preservar acentos e caracteres especiais
-        pyperclip.copy(text.strip() + " ")
-        pyautogui.hotkey("ctrl", "v")
+        value = text.strip() + " "
+        response = requests.post(
+            f"{PUBLIC_BASE_URL}/action/text-at-cursor",
+            json={"text": value},
+            timeout=2.0,
+        )
+        response.raise_for_status()
 
         # Armazena o que foi inserido para permitir a ação 'apagar' na próxima iteração
-        last_typed_text = text.strip() + " "
+        last_typed_text = value
         print(f"[DITADO - INSERIDO]: '{last_typed_text}'")
 
     return True
