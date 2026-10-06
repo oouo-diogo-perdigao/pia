@@ -35,9 +35,12 @@ class LocalActions:
         self._queued_audio_condition = threading.Condition()
         self._queued_audio_playing = False
         self._queued_audio_current_id: str | None = None
+        self._queued_audio_cancel_current = threading.Event()
 
         # Immediate audio uses independent channels and may overlap freely.
         self._immediate_lock = threading.RLock()
+        self._immediate_pending: set[str] = set()
+        self._immediate_cancelled: set[str] = set()
         self._immediate_channels: dict[str, pygame.mixer.Channel] = {}
         self._immediate_sounds: dict[str, pygame.mixer.Sound] = {}
 
@@ -319,6 +322,8 @@ class LocalActions:
             path=path,
         )
         action_id = item["id"]
+        with self._immediate_lock:
+            self._immediate_pending.add(action_id)
 
         threading.Thread(
             target=self._play_immediate_audio,
@@ -331,10 +336,21 @@ class LocalActions:
     def _play_immediate_audio(self, item: dict) -> None:
         action_id = item["id"]
         try:
+            with self._immediate_lock:
+                if action_id in self._immediate_cancelled:
+                    return
+
             sound = self._load_sound(item)
+
+            with self._immediate_lock:
+                if action_id in self._immediate_cancelled:
+                    return
+
             channel = self._acquire_immediate_channel()
 
             with self._immediate_lock:
+                if action_id in self._immediate_cancelled:
+                    return
                 self._immediate_sounds[action_id] = sound
                 self._immediate_channels[action_id] = channel
 
@@ -350,6 +366,8 @@ class LocalActions:
             )
         finally:
             with self._immediate_lock:
+                self._immediate_pending.discard(action_id)
+                self._immediate_cancelled.discard(action_id)
                 self._immediate_channels.pop(action_id, None)
                 self._immediate_sounds.pop(action_id, None)
 
@@ -358,15 +376,23 @@ class LocalActions:
         with self._immediate_lock:
             if action_id:
                 channel = self._immediate_channels.get(action_id)
-                if channel is None:
+                pending = action_id in self._immediate_pending
+
+                if not channel and not pending:
                     return 0
-                channel.stop()
+
+                self._immediate_cancelled.add(action_id)
+                if channel:
+                    channel.stop()
                 return 1
 
-            channels = list(self._immediate_channels.values())
-            for channel in channels:
+            targets = set(self._immediate_pending) | set(self._immediate_channels)
+            self._immediate_cancelled.update(targets)
+
+            for channel in list(self._immediate_channels.values()):
                 channel.stop()
-            return len(channels)
+
+            return len(targets)
 
     def queue_audio(
         self,
@@ -397,9 +423,14 @@ class LocalActions:
                 item = self._queued_audio_items.popleft()
                 self._queued_audio_playing = True
                 self._queued_audio_current_id = item["id"]
+                self._queued_audio_cancel_current.clear()
 
             try:
                 sound = self._load_sound(item)
+
+                if self._queued_audio_cancel_current.is_set():
+                    continue
+
                 self._queue_channel.play(sound)
                 logging.info(
                     "[ACTION AUDIO QUEUE] iniciado id=%s restantes=%d",
@@ -418,6 +449,7 @@ class LocalActions:
                 with self._queued_audio_condition:
                     self._queued_audio_playing = False
                     self._queued_audio_current_id = None
+                    self._queued_audio_cancel_current.clear()
 
     def stop_audio_queue(self, *, next_only: bool = False) -> dict:
         """Skip current queue item or stop current and clear every pending item."""
@@ -431,6 +463,7 @@ class LocalActions:
                 self._queued_audio_items.clear()
 
             if was_playing:
+                self._queued_audio_cancel_current.set()
                 self._queue_channel.stop()
 
             self._queued_audio_condition.notify_all()
