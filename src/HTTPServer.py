@@ -1385,6 +1385,7 @@ class HTTPServer(BaseHTTPRequestHandler):
                     return
 
                 text = clean_text(text)
+                kokoro_only = str(body.get("kokoro") or "").strip().lower() == "only"
 
                 if not text.strip():
                     self.send_json(
@@ -1419,6 +1420,20 @@ class HTTPServer(BaseHTTPRequestHandler):
                     voice = segment["voice"]
                     character = segment["character"]
                     segment_style = segment.get("style")
+
+                    if kokoro_only:
+                        segment_type = segment.get("type")
+                        gender = str(segment.get("gender") or "unknown").lower()
+
+                        if segment_type == "narration":
+                            voice = "pm_santa"
+                        elif gender == "female":
+                            voice = "pf_dora"
+                        else:
+                            voice = "pm_alex"
+
+                        # Kokoro não usa o estilo livre do Qwen.
+                        segment_style = None
 
                     if not segment_text:
                         continue
@@ -1455,8 +1470,9 @@ class HTTPServer(BaseHTTPRequestHandler):
                     )
 
                 logging.info(
-                    "[STORYTELLING] %d trecho(s) enfileirado(s).",
+                    "[STORYTELLING] %d trecho(s) enfileirado(s). kokoro_only=%s",
                     len(queued),
+                    kokoro_only,
                 )
 
                 self.send_json(
@@ -1464,6 +1480,7 @@ class HTTPServer(BaseHTTPRequestHandler):
                     {
                         "ok": True,
                         "status": "queued",
+                        "kokoro": "only" if kokoro_only else None,
                         "segments": queued,
                     },
                 )
