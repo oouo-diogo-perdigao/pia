@@ -234,8 +234,9 @@ def _start_continuous_session(stream, keyword_spotter) -> None:
     logging.info(">>> SESSÃO DE COMANDOS INICIADA <<<")
 
     try:
-        from .commands.modo_ditado import modo_ditado
+        from .commands import modo_ditado
     except Exception:
+        logging.exception("[MODO DITADO] Falha ao importar módulo.")
         modo_ditado = None
 
     # play_sound(START_SOUND)
