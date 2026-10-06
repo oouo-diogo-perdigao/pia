@@ -38,7 +38,6 @@ class AudioRecorder:
         self.silence_chunks_limit = 18  # ~0.55 segundos de silêncio para fechar a frase
         self.silence_counter = 0
         self.has_spoken = False
-        self._debug_callback_counter = 0
 
     def _audio_callback(
         self, indata: np.ndarray, frames: int, time_info: dict, status: sd.CallbackFlags
@@ -49,16 +48,6 @@ class AudioRecorder:
             return
 
         rms = float(np.sqrt(np.mean(indata**2)))
-        self._debug_callback_counter += 1
-
-        if self._debug_callback_counter >= 15:
-            logging.info(
-                "[AUDIO DEBUG] RMS=%.6f | threshold=%.6f | speaking=%s",
-                rms,
-                self.speech_threshold,
-                self.is_speaking,
-            )
-            self._debug_callback_counter = 0
 
         is_above_threshold = rms > self.speech_threshold
 
@@ -196,6 +185,5 @@ def worker_audio_bridge(
         if result:
             if result.get("ok") and result.get("text"):
                 text = result["text"]
-                logging.info("[TRANSCRICAO CONCLUIDA]: %s", text)
                 transcribed_texts.put(text)
             is_transcribing_event.clear()

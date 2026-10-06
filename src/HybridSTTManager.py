@@ -12,7 +12,8 @@ import wave
 from .STTManager import STTManager as LocalSTTManager, SATState
 from .config import (
     logging,
-    STT_PROVIDER,
+    logger_stt,
+    STT_PROVIDERS,
     STT_REMOTE_COOLDOWN_SECONDS,
     STT_GEMINI_API_KEY,
     STT_GEMINI_MODEL,
@@ -26,70 +27,66 @@ class RemoteSTTUnavailable(RuntimeError):
 
 
 class STTManager(LocalSTTManager):
-    """Cloud-first STT facade with transparent local Whisper fallback.
-
-    The public interface intentionally matches the original STTManager, so the
-    recorder bridge and OpenAI-compatible HTTP endpoint do not need provider-aware
-    code. Remote providers are optional and can fail without taking STT offline.
-    """
+    """Ordered multi-provider STT facade with local Whisper fallback."""
 
     def __init__(self):
         super().__init__()
-        self.provider = STT_PROVIDER
+        self.providers = STT_PROVIDERS or ("local",)
         self.remote_result_queue: queue.Queue = queue.Queue()
         self.remote_lock = threading.Lock()
-        self.remote_disabled_until = 0.0
-        self.remote_disabled_reason = ""
+        self.provider_disabled_until: dict[str, float] = {}
+        self.provider_disabled_reason: dict[str, str] = {}
+        self.active_provider: str | None = None
         self._force_local_worker = False
 
-    def _remote_configured(self) -> bool:
-        if self.provider == "gemini":
+        logging.info("[STT] Ordem de providers: %s", " -> ".join(self.providers))
+
+    def _provider_configured(self, provider: str) -> bool:
+        if provider == "gemini":
             return bool(STT_GEMINI_API_KEY)
-        if self.provider == "groq":
+        if provider == "groq":
             return bool(GROQ_API_KEY)
+        if provider == "local":
+            return True
         return False
 
-    def _remote_available(self) -> bool:
-        if self.provider == "local" or not self._remote_configured():
+    def _provider_available(self, provider: str) -> bool:
+        if not self._provider_configured(provider):
             return False
-        return time.monotonic() >= self.remote_disabled_until
+        return time.monotonic() >= self.provider_disabled_until.get(provider, 0.0)
 
-    def _disable_remote_temporarily(self, reason: str) -> None:
-        self.remote_disabled_reason = reason
-        self.remote_disabled_until = time.monotonic() + STT_REMOTE_COOLDOWN_SECONDS
+    def _disable_provider_temporarily(self, provider: str, reason: str) -> None:
+        if provider == "local":
+            return
+        self.provider_disabled_reason[provider] = reason
+        self.provider_disabled_until[provider] = (
+            time.monotonic() + STT_REMOTE_COOLDOWN_SECONDS
+        )
         logging.warning(
-            "[STT] Provider remoto %s indisponível por %ss; usando Whisper local. Motivo: %s",
-            self.provider,
+            "[STT] Provider %s indisponível por %ss; tentando o próximo. Motivo: %s",
+            provider,
             STT_REMOTE_COOLDOWN_SECONDS,
             reason,
         )
 
-    @staticmethod
-    def _is_quota_or_auth_error(exc: Exception) -> bool:
-        text = str(exc).lower()
-        markers = (
-            "429",
-            "quota",
-            "rate limit",
-            "resource_exhausted",
-            "resource exhausted",
-            "insufficient",
-            "401",
-            "403",
-            "unauthorized",
-            "forbidden",
-            "invalid api key",
-            "api key not valid",
-        )
-        return any(marker in text for marker in markers)
+    def _next_available_provider(self) -> str | None:
+        for provider in self.providers:
+            if self._provider_available(provider):
+                return provider
+        return None
 
     def ensure_worker_running(self):
-        """Do not preload Whisper while the configured cloud provider is healthy."""
-        if self._remote_available() and not self._force_local_worker:
-            return
-        return super().ensure_worker_running()
+        """Only warm local Whisper when local is the next usable provider."""
+        if self._force_local_worker:
+            return super().ensure_worker_running()
+
+        provider = self._next_available_provider()
+        if provider == "local":
+            return super().ensure_worker_running()
+        return None
 
     def _local_send_chunk(self, chunk: bytes) -> None:
+        self.active_provider = "local"
         self._force_local_worker = True
         try:
             super().send_chunk(chunk)
@@ -97,34 +94,62 @@ class STTManager(LocalSTTManager):
             self._force_local_worker = False
 
     def send_chunk(self, chunk):
-        """Prefer the configured remote provider and fallback to local Whisper."""
-        if not self._remote_available():
+        """Transcribe recorder audio using providers in configured order."""
+        provider = self._next_available_provider()
+        if provider == "local":
             return self._local_send_chunk(chunk)
 
-        # The recorder bridge is synchronous. Keep it responsive by running the
-        # network operation outside the bridge thread and returning the result
-        # through the same get_result() contract.
+        if provider is None:
+            self.remote_result_queue.put(
+                {"ok": False, "error": "Nenhum provider STT disponível."}
+            )
+            return
+
         threading.Thread(
-            target=self._remote_chunk_job,
+            target=self._provider_chain_chunk_job,
             args=(bytes(chunk),),
             daemon=True,
-            name="STTRemoteChunk",
+            name="STTProviderChain",
         ).start()
 
-    def _remote_chunk_job(self, chunk: bytes) -> None:
+    def _provider_chain_chunk_job(self, chunk: bytes) -> None:
         with self.remote_lock:
-            try:
-                text = self._transcribe_remote(chunk, language="pt")
-                self.remote_result_queue.put({"ok": True, "text": text or None})
-                return
-            except Exception as exc:
-                logging.exception("[STT] Falha no provider remoto %s.", self.provider)
-                if self._is_quota_or_auth_error(exc):
-                    self._disable_remote_temporarily(str(exc))
+            for provider in self.providers:
+                if not self._provider_available(provider):
+                    continue
 
-            # A mesma fala ainda precisa ser entregue. Reenvia apenas este chunk
-            # ao worker local e deixa get_result() coletar a resposta normalmente.
-            self._local_send_chunk(chunk)
+                if provider == "local":
+                    self._local_send_chunk(chunk)
+                    return
+
+                try:
+                    self.active_provider = provider
+                    text = self._transcribe_remote(provider, chunk, language="pt")
+                    if text:
+                        logger_stt.info(text)
+                    self.remote_result_queue.put(
+                        {
+                            "ok": True,
+                            "text": text or None,
+                            "provider": provider,
+                        }
+                    )
+                    return
+                except Exception as exc:
+                    logging.warning(
+                        "[STT] Falha no provider %s: %s",
+                        provider,
+                        exc,
+                    )
+                    self._disable_provider_temporarily(provider, str(exc))
+
+            self.active_provider = None
+            self.remote_result_queue.put(
+                {
+                    "ok": False,
+                    "error": "Todos os providers STT configurados falharam ou estão indisponíveis.",
+                }
+            )
 
     def get_result(self, timeout=0.1):
         try:
@@ -140,63 +165,104 @@ class STTManager(LocalSTTManager):
         prompt: str | None = None,
         temperature: float | None = None,
     ) -> dict:
-        """Use remote STT first, then transparently retry through local Whisper."""
         if not audio_bytes:
             return {"ok": False, "error": "Arquivo de áudio vazio."}
 
         language = self._normalize_language(language)
-        if self._remote_available():
+        errors: list[str] = []
+
+        for provider in self.providers:
+            if not self._provider_available(provider):
+                continue
+
+            if provider == "local":
+                self.active_provider = "local"
+                self._force_local_worker = True
+                try:
+                    result = super().transcribe_request(
+                        audio_bytes,
+                        language=language,
+                        prompt=prompt,
+                        temperature=temperature,
+                    )
+                    if result.get("ok"):
+                        result["provider"] = "local"
+                    return result
+                finally:
+                    self._force_local_worker = False
+
             try:
+                self.active_provider = provider
                 text = self._transcribe_remote(
+                    provider,
                     audio_bytes,
                     language=language,
                     prompt=prompt,
                 )
-                return {"ok": True, "text": text or None, "request_id": None}
+                if text:
+                    logger_stt.info(text)
+                return {
+                    "ok": True,
+                    "text": text or None,
+                    "request_id": None,
+                    "provider": provider,
+                }
             except Exception as exc:
-                logging.exception("[STT] Falha no provider remoto %s.", self.provider)
-                if self._is_quota_or_auth_error(exc):
-                    self._disable_remote_temporarily(str(exc))
+                errors.append(f"{provider}: {exc}")
+                logging.warning("[STT] Falha no provider %s: %s", provider, exc)
+                self._disable_provider_temporarily(provider, str(exc))
 
-        self._force_local_worker = True
-        try:
-            return super().transcribe_request(
-                audio_bytes,
-                language=language,
-                prompt=prompt,
-                temperature=temperature,
-            )
-        finally:
-            self._force_local_worker = False
+        self.active_provider = None
+        return {
+            "ok": False,
+            "error": "Todos os providers STT falharam. " + " | ".join(errors),
+        }
 
     def get_status_payload(self) -> dict:
         payload = super().get_status_payload()
+        next_provider = self._next_available_provider()
         payload.update(
             {
-                "stt_provider": self.provider,
-                "stt_remote_available": self._remote_available(),
-                "stt_fallback": "local",
-                "stt_remote_disabled_reason": self.remote_disabled_reason or None,
+                # Campos antigos preservados para clientes existentes.
+                "stt_provider": self.active_provider or next_provider,
+                "stt_remote_available": any(
+                    provider != "local" and self._provider_available(provider)
+                    for provider in self.providers
+                ),
+                "stt_fallback": "local" if "local" in self.providers else None,
+                # Campos novos para a cadeia ordenada.
+                "stt_providers": list(self.providers),
+                "stt_active_provider": self.active_provider,
+                "stt_provider_available": {
+                    provider: self._provider_available(provider)
+                    for provider in self.providers
+                },
+                "stt_provider_disabled_reason": {
+                    provider: self.provider_disabled_reason.get(provider)
+                    for provider in self.providers
+                    if self.provider_disabled_reason.get(provider)
+                },
             }
         )
         return payload
 
     def _transcribe_remote(
         self,
+        provider: str,
         audio_bytes: bytes,
         *,
         language: str | None = None,
         prompt: str | None = None,
     ) -> str:
-        if self.provider == "gemini":
+        if provider == "gemini":
             return self._transcribe_gemini_live(audio_bytes, language=language)
-        if self.provider == "groq":
+        if provider == "groq":
             return self._transcribe_groq_litellm(
                 audio_bytes,
                 language=language,
                 prompt=prompt,
             )
-        raise RemoteSTTUnavailable(f"Provider STT desconhecido: {self.provider}")
+        raise RemoteSTTUnavailable(f"Provider STT desconhecido: {provider}")
 
     @staticmethod
     def _wav_to_pcm16(audio_bytes: bytes) -> tuple[bytes, int]:
@@ -210,7 +276,7 @@ class STTManager(LocalSTTManager):
                 return wf.readframes(wf.getnframes()), rate
         except wave.Error as exc:
             raise RemoteSTTUnavailable(
-                "Gemini Live recebe PCM bruto; o fallback local será usado para arquivos que não sejam WAV."
+                "Gemini Live recebe PCM bruto; use WAV mono/16-bit ou outro provider."
             ) from exc
 
     def _transcribe_gemini_live(
@@ -235,7 +301,6 @@ class STTManager(LocalSTTManager):
 
         language_codes = []
         if language:
-            # Gemini accepts BCP-47. Keep Portuguese recorder traffic explicit.
             language_codes = ["pt-BR" if language == "pt" else language]
 
         client = genai.Client(api_key=STT_GEMINI_API_KEY)
@@ -251,9 +316,6 @@ class STTManager(LocalSTTManager):
             model=STT_GEMINI_MODEL,
             config=config,
         ) as session:
-            # Google recommends chunks around 100 ms. The recorder already closes
-            # utterances locally, so send those utterances in small PCM pieces and
-            # explicitly end the stream for low finalization latency.
             bytes_per_100ms = max(2, int(sample_rate * 2 * 0.1))
             for offset in range(0, len(pcm), bytes_per_100ms):
                 await session.send_realtime_input(
@@ -286,8 +348,6 @@ class STTManager(LocalSTTManager):
         except ImportError as exc:
             raise RemoteSTTUnavailable("Dependência litellm ausente.") from exc
 
-        # LiteLLM/OpenAI-compatible transcription APIs expect a file-like object
-        # with a filename. A temporary WAV keeps that contract reliable on Windows.
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name

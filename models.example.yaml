@@ -1,36 +1,33 @@
-model_list:
-  # 1ª Opção: Gemini 2.5 Flash (Gratuito / Nuvem)
-  - model_name: auto-agent
-    litellm_params:
-      model: gemini/gemini-2.5-flash
-      api_key: os.environ/GEMINI_API_KEY
+# Referência opcional de configuração do LiteLLM Router.
+#
+# A PIA não usa mais este arquivo para definir a ordem do /v1/chat/completions.
+# A prioridade oficial é configurada no .env:
+#
+# LLM_PROVIDERS=gemini,groq,local
+# LLM_GEMINI_MODEL=gemini/gemini-3.5-flash
+# LLM_GROQ_MODEL=groq/openai/gpt-oss-120b
+# LLM_LOCAL_MODEL=ollama/qwen3:8b
+#
+# Este YAML é mantido apenas como exemplo para quem quiser usar o Router do
+# LiteLLM em integrações próprias.
 
-  # 2ª Opção: Groq Free Tier (Fallback da nuvem)
-  - model_name: auto-agent
+model_list:
+  - model_name: gemini
     litellm_params:
-      model: groq/llama-3.1-70b-versatile
+      model: gemini/gemini-3.5-flash
+      api_key: os.environ/AGE_GEMINI_API_KEY
+
+  - model_name: groq
+    litellm_params:
+      model: groq/openai/gpt-oss-120b
       api_key: os.environ/GROQ_API_KEY
 
-  # 3ª Opção Local: Qwen 3.8 (Leve e rápido)
-  - model_name: auto-agent
+  - model_name: local
     litellm_params:
       model: ollama/qwen3:8b
       api_base: http://localhost:11434
 
-  # 4ª Opção Local: Qwen 3.5 27B (Para respostas mais elaboradas)
-  # - model_name: auto-agent
-  #   litellm_params:
-  #     model: ollama/qwen3.5:27b
-  #     api_base: http://localhost:11434
-
-  # 5ª Opção Local: Qwen 3-VL 8B (Visão/Multimodal)
-  - model_name: auto-agent
-    litellm_params:
-      model: ollama/qwen3-vl:8b
-      api_base: http://localhost:11434
-
 router_settings:
-  fallbacks: []
-  num_retries: 2
+  num_retries: 1
   allowed_fails: 1
-  cooldown_time: 300 # Tempo de espera de 5 min se o modelo der erro de cota (HTTP 429)
+  cooldown_time: 300

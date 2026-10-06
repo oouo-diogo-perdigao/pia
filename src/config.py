@@ -24,6 +24,11 @@ def _str_env(name: str, default: str) -> str:
     return os.getenv(name, default).strip()
 
 
+def _list_env(name: str, default: str) -> tuple[str, ...]:
+    values = [item.strip().lower() for item in os.getenv(name, default).split(",")]
+    return tuple(item for item in values if item)
+
+
 def _path_env(name: str, default: str) -> Path:
     return Path(os.getenv(name, default).strip())
 
@@ -60,9 +65,8 @@ STT_SAMPLE_RATE = _int_env("STT_SAMPLE_RATE", 16_000)
 STT_CHANNELS = _int_env("STT_CHANNELS", 1)
 STT_WHISPER_TIMEOUT = _int_env("STT_WHISPER_TIMEOUT", 600)
 
-# Provider prioritário. Valores: gemini, groq, local.
-# O fallback para o Whisper local é automático quando o provider remoto falha.
-STT_PROVIDER = _str_env("STT_PROVIDER", "gemini").lower()
+# Ordem explícita de tentativa. Ex.: gemini,groq,local
+STT_PROVIDERS = _list_env("STT_PROVIDERS", "gemini,groq,local")
 STT_REMOTE_COOLDOWN_SECONDS = _int_env("STT_REMOTE_COOLDOWN_SECONDS", 900)
 STT_GEMINI_API_KEY = (
     os.getenv("STT_GEMINI_API_KEY")
@@ -131,12 +135,20 @@ ICE_OUTPUT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 ICE_OUTPUT_CACHE_TTL_SECONDS = _int_env("ICE_OUTPUT_CACHE_TTL_SECONDS", 900)
 
 # ============================================================
-# AGE Agent LLM
+# AGE Agent / LLM
 # ============================================================
 AGE_USER_NAME = _str_env("AGE_USER_NAME", "Mestre")
 AGE_GEMINI_API_KEY = _str_env("AGE_GEMINI_API_KEY", "")
 GROQ_API_KEY = _str_env("GROQ_API_KEY", "")
 DEFAULT_LOCATION = _str_env("DEFAULT_LOCATION", "Belo Horizonte, Minas Gerais, Brasil")
+
+# Ordem explícita usada por /v1/chat/completions.
+LLM_PROVIDERS = _list_env("LLM_PROVIDERS", "gemini,groq,local")
+LLM_REMOTE_COOLDOWN_SECONDS = _int_env("LLM_REMOTE_COOLDOWN_SECONDS", 300)
+LLM_GEMINI_MODEL = _str_env("LLM_GEMINI_MODEL", "gemini/gemini-3.5-flash")
+LLM_GROQ_MODEL = _str_env("LLM_GROQ_MODEL", "groq/openai/gpt-oss-120b")
+LLM_LOCAL_MODEL = _str_env("LLM_LOCAL_MODEL", "ollama/qwen3:8b")
+LLM_LOCAL_API_BASE = _str_env("LLM_LOCAL_API_BASE", "http://localhost:11434")
 
 # ============================================================
 # OVE
@@ -177,11 +189,8 @@ logger_stt.setLevel(logging.INFO)
 logger_stt.propagate = False  # Evita que suba para o log geral
 
 if not logger_stt.handlers:
-    formatter_stt = logging.Formatter("%(asctime)s\n%(message)s")
+    formatter_stt = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
 
-    stream_handler_stt = logging.StreamHandler()
-    stream_handler_stt.setFormatter(formatter_stt)
-    logger_stt.addHandler(stream_handler_stt)
     file_handler_stt = RotatingFileHandler(
         log_dir / "stt.log",
         maxBytes=10 * 1024 * 1024,
