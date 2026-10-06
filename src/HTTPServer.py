@@ -514,69 +514,73 @@ class HTTPServer(BaseHTTPRequestHandler):
                 return
 
         # ======================================================================
-        # ======================================================================
         # Local actions
         # ======================================================================
-        if path == "/action/text-at-cursor":
-            text = LOCAL_ACTIONS.read_text_at_cursor()
-            self.send_json(200, {"ok": True, "text": text})
-            return
+        if path.startswith("/action/"):
+            if path == "/action/text-at-cursor":
+                text = LOCAL_ACTIONS.read_text_at_cursor()
+                self.send_json(200, {"ok": True, "text": text})
+                return
 
-        if path == "/action/screen":
-            png = LOCAL_ACTIONS.screenshot_current_monitor()
-            self._send(200, png, "image/png")
-            return
+            if path == "/action/screen":
+                png = LOCAL_ACTIONS.screenshot_current_monitor()
+                self._send(200, png, "image/png")
+                return
 
-        if path == "/action/screen-all":
-            png = LOCAL_ACTIONS.screenshot_all()
-            self._send(200, png, "image/png")
-            return
+            if path == "/action/screen-all":
+                png = LOCAL_ACTIONS.screenshot_all()
+                self._send(200, png, "image/png")
+                return
 
-        if path == "/action/local-record":
-            self.send_json(200, LOCAL_ACTIONS.get_local_record_status())
-            return
+            if path == "/action/local-record":
+                self.send_json(200, LOCAL_ACTIONS.get_local_record_status())
+                return
 
-        if path == "/action/local-record/stream":
-            client_queue = LOCAL_ACTIONS.add_record_stream()
-            try:
-                self.send_response(200)
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-                self.send_header("Cache-Control", "no-cache")
-                self.send_header("Connection", "keep-alive")
-                self.send_header("X-Accel-Buffering", "no")
-                self.end_headers()
-                self.wfile.flush()
+            if path == "/action/local-record/stream":
+                client_queue = LOCAL_ACTIONS.add_record_stream()
+                try:
+                    self.send_response(200)
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "keep-alive")
+                    self.send_header("X-Accel-Buffering", "no")
+                    self.end_headers()
+                    self.wfile.flush()
 
-                last_payload_signature = None
-                while True:
-                    payload = STT_MANAGER.get_status_payload()
-                    text_chunks = LOCAL_ACTIONS.get_record_stream_chunks(client_queue)
-                    current_signature = (
-                        payload["status"],
-                        payload["is_speaking"],
-                        payload["is_transcribing"],
+                    last_payload_signature = None
+                    while True:
+                        payload = STT_MANAGER.get_status_payload()
+                        text_chunks = LOCAL_ACTIONS.get_record_stream_chunks(
+                            client_queue
+                        )
+                        current_signature = (
+                            payload["status"],
+                            payload["is_speaking"],
+                            payload["is_transcribing"],
+                        )
+
+                        if current_signature != last_payload_signature or text_chunks:
+                            last_payload_signature = current_signature
+                            message = (
+                                f"data: {json.dumps({**payload, 'text_chunks': text_chunks}, ensure_ascii=False)}\n\n"
+                            ).encode("utf-8")
+                            self.wfile.write(message)
+                            self.wfile.flush()
+
+                        time.sleep(0.1)
+                except (
+                    ConnectionResetError,
+                    ConnectionAbortedError,
+                    BrokenPipeError,
+                    ConnectionError,
+                ):
+                    logging.info(
+                        "[SSE /action/local-record/stream] Cliente desconectado."
                     )
-
-                    if current_signature != last_payload_signature or text_chunks:
-                        last_payload_signature = current_signature
-                        message = (
-                            f"data: {json.dumps({**payload, 'text_chunks': text_chunks}, ensure_ascii=False)}\n\n"
-                        ).encode("utf-8")
-                        self.wfile.write(message)
-                        self.wfile.flush()
-
-                    time.sleep(0.1)
-            except (
-                ConnectionResetError,
-                ConnectionAbortedError,
-                BrokenPipeError,
-                ConnectionError,
-            ):
-                logging.info("[SSE /action/local-record/stream] Cliente desconectado.")
-            finally:
-                LOCAL_ACTIONS.remove_record_stream(client_queue)
-            return
+                finally:
+                    LOCAL_ACTIONS.remove_record_stream(client_queue)
+                return
 
         if path == "/tts/status":
             logging.info("[GET /tts/status] Verificando status do Worker TTS...")
@@ -646,13 +650,14 @@ class HTTPServer(BaseHTTPRequestHandler):
                 )
             return
 
-        if path == "/ove/status":
-            from . import state as _state
+        if path.startswith("/ove/"):
+            if path == "/ove/status":
+                from . import state as _state
 
-            with _state.LOCK:
-                active = _state.SESSION_ACTIVE
-            self.send_json(200, {"ok": True, "active": active})
-            return
+                with _state.LOCK:
+                    active = _state.SESSION_ACTIVE
+                self.send_json(200, {"ok": True, "active": active})
+                return
 
         self.send_json(404, {"ok": False, "error": "Endpoint inexistente."})
 
@@ -660,6 +665,9 @@ class HTTPServer(BaseHTTPRequestHandler):
         try:
             path = self._path()
 
+            # ======================================================================
+            # Local actions
+            # ======================================================================
             if path.startswith("/action/"):
                 content_type = self.headers.get("Content-Type", "").lower()
                 raw_body = self._read_raw_body()
@@ -679,7 +687,9 @@ class HTTPServer(BaseHTTPRequestHandler):
 
                 if path == "/action/text-at-cursor":
                     if content_type.startswith("application/json"):
-                        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+                        payload = (
+                            json.loads(raw_body.decode("utf-8")) if raw_body else {}
+                        )
                         if "text" in payload:
                             LOCAL_ACTIONS.insert_text_at_cursor(str(payload["text"]))
                             self.send_json(200, {"ok": True, "kind": "text"})
@@ -689,7 +699,11 @@ class HTTPServer(BaseHTTPRequestHandler):
                             LOCAL_ACTIONS.insert_image_at_cursor(image_bytes)
                             self.send_json(
                                 200,
-                                {"ok": True, "kind": "image", "content_type": image_mime},
+                                {
+                                    "ok": True,
+                                    "kind": "image",
+                                    "content_type": image_mime,
+                                },
                             )
                             return
                         raise ValueError("Envie 'text' ou 'image'.")
@@ -705,7 +719,9 @@ class HTTPServer(BaseHTTPRequestHandler):
                             LOCAL_ACTIONS.insert_image_at_cursor(file_part["data"])
                             self.send_json(200, {"ok": True, "kind": "image"})
                             return
-                        raise ValueError("Multipart deve conter 'text', 'image' ou 'file'.")
+                        raise ValueError(
+                            "Multipart deve conter 'text', 'image' ou 'file'."
+                        )
 
                     if content_type.startswith("image/"):
                         LOCAL_ACTIONS.insert_image_at_cursor(raw_body)
@@ -747,8 +763,12 @@ class HTTPServer(BaseHTTPRequestHandler):
                         image_bytes = file_part["data"]
                         image_type = file_part.get("content_type")
                     elif content_type.startswith("application/json"):
-                        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
-                        image_bytes, image_type = decode_data_url(payload.get("image", ""))
+                        payload = (
+                            json.loads(raw_body.decode("utf-8")) if raw_body else {}
+                        )
+                        image_bytes, image_type = decode_data_url(
+                            payload.get("image", "")
+                        )
 
                     saved_path = LOCAL_ACTIONS.save_and_open_image(
                         image_bytes,
@@ -777,7 +797,6 @@ class HTTPServer(BaseHTTPRequestHandler):
                 # ======================================================================
                 # Audio
                 # ======================================================================
-
                 if path == "/v1/audio/speech":
                     # region (collapsed) text (input)
                     text = body.get("input", "")
@@ -1523,38 +1542,39 @@ class HTTPServer(BaseHTTPRequestHandler):
                 self.wfile.write(wav_data)
                 return
 
-            if path == "/ove/start":
-                TRIGGER_EVENT.set()
-                self.send_json(200, {"ok": True, "status": "triggered"})
-                return
+            if path.startswith("/ove/"):
+                if path == "/ove/start":
+                    TRIGGER_EVENT.set()
+                    self.send_json(200, {"ok": True, "status": "triggered"})
+                    return
 
-            if path == "/ove/stop":
-                with LOCK:
-                    from . import state as _state
+                if path == "/ove/stop":
+                    with LOCK:
+                        from . import state as _state
 
-                    _state.SESSION_ACTIVE = False
+                        _state.SESSION_ACTIVE = False
 
-                overlay = get_overlay()
-                if overlay:
-                    overlay.set_thinking(False)
-                    overlay.set_speaking(False)
-                self.send_json(200, {"ok": True, "status": "stopped"})
-                return
+                    overlay = get_overlay()
+                    if overlay:
+                        overlay.set_thinking(False)
+                        overlay.set_speaking(False)
+                    self.send_json(200, {"ok": True, "status": "stopped"})
+                    return
 
-            if path in [
-                "/ove/thinking",
-                "/ove/processing",
-                "/ove/speaking",
-                "/ove/listening",
-                "/ove/pulse",
-            ]:
-                self._handle_hud_action(path, 1)
-                return
+                if path in [
+                    "/ove/thinking",
+                    "/ove/processing",
+                    "/ove/speaking",
+                    "/ove/listening",
+                    "/ove/pulse",
+                ]:
+                    self._handle_hud_action(path, 1)
+                    return
 
-            if path == "/ove/blink":
-                state_machine.trigger_blink()
-                self.send_json(200, {"ok": True, "state": path})
-                return
+                if path == "/ove/blink":
+                    state_machine.trigger_blink()
+                    self.send_json(200, {"ok": True, "state": path})
+                    return
 
             self.send_json(404, {"ok": False, "error": "Endpoint inexistente."})
 

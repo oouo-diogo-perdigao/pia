@@ -88,7 +88,7 @@ TTS(style := "normal") {
 	; Servidor não está rodando.
 	; --------------------------------------------------------
 	if (status = "") {
-		ToolTip("Servidor Kokoro TTS não está rodando!")
+		ToolTip("Servidor TTS não está rodando!")
 		SetTimer(() => ToolTip(), -2500)
 		return
 	}
