@@ -4,7 +4,12 @@ import json
 import threading
 import requests
 
-from .config import PUBLIC_BASE_URL, OPENAI_COMPAT_API_KEY, logging
+from .config import (
+    PUBLIC_BASE_URL,
+    OPENAI_COMPAT_API_KEY,
+    OPENAI_COMPAT_TIMEOUT_SECONDS,
+    logging,
+)
 
 
 def _synthesize_and_speak(text_chunk: str) -> None:
@@ -42,7 +47,7 @@ def _consume_agent_stream(prompt_text: str) -> None:
             json=payload,
             headers=headers,
             stream=True,
-            timeout=(2.0, 30.0),
+            timeout=(2.0, float(OPENAI_COMPAT_TIMEOUT_SECONDS)),
         )
         response.raise_for_status()
 
