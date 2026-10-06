@@ -245,7 +245,11 @@ def _start_continuous_session(stream, keyword_spotter) -> None:
         stream.read(OVE_CHUNK, exception_on_overflow=False)
 
     try:
-        requests.get(f"{PUBLIC_BASE_URL}/stt/start", timeout=2)
+        requests.post(
+            f"{PUBLIC_BASE_URL}/action/local-record",
+            json={"insert_at_cursor": False},
+            timeout=2,
+        )
     except Exception as e:
         logging.error(f"Erro ao conectar ao servidor SAT: {e}")
 
@@ -263,7 +267,7 @@ def _start_continuous_session(stream, keyword_spotter) -> None:
 
     def sse_worker():
         try:
-            with requests.get(f"{PUBLIC_BASE_URL}/stt/status/stream", stream=True) as r:
+            with requests.get(f"{PUBLIC_BASE_URL}/action/local-record/stream", stream=True) as r:
                 for line in r.iter_lines():
                     with _state.LOCK:
                         if not _state.SESSION_ACTIVE:
@@ -364,7 +368,7 @@ def _start_continuous_session(stream, keyword_spotter) -> None:
 
     finally:
         try:
-            requests.get(f"{PUBLIC_BASE_URL}/stt/stop", timeout=2)
+            requests.delete(f"{PUBLIC_BASE_URL}/action/local-record", timeout=2)
         except Exception:
             pass
 
