@@ -224,24 +224,24 @@ class STTManager(LocalSTTManager):
         payload.update(
             {
                 # Campos antigos preservados para clientes existentes.
-                "stt_provider": self.active_provider or next_provider,
-                "stt_remote_available": any(
-                    provider != "local" and self._provider_available(provider)
-                    for provider in self.providers
-                ),
-                "stt_fallback": "local" if "local" in self.providers else None,
+                # "stt_provider": self.active_provider or next_provider,
+                # "stt_remote_available": any(
+                #     provider != "local" and self._provider_available(provider)
+                #     for provider in self.providers
+                # ),
+                # "stt_fallback": "local" if "local" in self.providers else None,
                 # Campos novos para a cadeia ordenada.
-                "stt_providers": list(self.providers),
-                "stt_active_provider": self.active_provider,
-                "stt_provider_available": {
-                    provider: self._provider_available(provider)
-                    for provider in self.providers
-                },
-                "stt_provider_disabled_reason": {
-                    provider: self.provider_disabled_reason.get(provider)
-                    for provider in self.providers
-                    if self.provider_disabled_reason.get(provider)
-                },
+                # "stt_providers": list(self.providers),
+                # "stt_active_provider": self.active_provider,
+                # "stt_provider_available": {
+                #     provider: self._provider_available(provider)
+                #     for provider in self.providers
+                # },
+                # "stt_provider_disabled_reason": {
+                #     provider: self.provider_disabled_reason.get(provider)
+                #     for provider in self.providers
+                #     if self.provider_disabled_reason.get(provider)
+                # },
             }
         )
         return payload
@@ -286,7 +286,9 @@ class STTManager(LocalSTTManager):
             raise RemoteSTTUnavailable("STT_GEMINI_API_KEY não configurada.")
 
         pcm, sample_rate = self._wav_to_pcm16(audio_bytes)
-        return asyncio.run(self._transcribe_gemini_live_async(pcm, sample_rate, language))
+        return asyncio.run(
+            self._transcribe_gemini_live_async(pcm, sample_rate, language)
+        )
 
     async def _transcribe_gemini_live_async(
         self, pcm: bytes, sample_rate: int, language: str | None

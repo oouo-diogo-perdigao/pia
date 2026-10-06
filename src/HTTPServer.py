@@ -12,8 +12,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
 from .TTSManager import TTSManager
-from .STTManager import STTManager, SATState
+from .STTManager import STTManager
 from .ICEManager import ICEManager, OpenAIImageRequestError, decode_data_url
+from .LocalActions import LocalActions
 from .state import TRIGGER_EVENT, LOCK
 from .PiaOverlay import get_overlay, get_state_machine
 
@@ -34,6 +35,7 @@ from .ComfyUIClient import ComfyUIError
 STT_MANAGER = STTManager()
 TTS_MANAGER = TTSManager()
 ICE_MANAGER = ICEManager()
+LOCAL_ACTIONS = LocalActions(STT_MANAGER)
 
 from .InactivityBufferManager import InactivityBufferManager
 
@@ -178,6 +180,56 @@ class HTTPServer(BaseHTTPRequestHandler):
                 fields[name] = payload.decode(charset, errors="replace")
 
         return fields, files
+
+    def _read_raw_body(self) -> bytes:
+        """Read a raw request body without assuming JSON."""
+        transfer_encoding = self.headers.get("Transfer-Encoding", "").lower()
+
+        if "chunked" in transfer_encoding:
+            chunks: list[bytes] = []
+            total = 0
+            while True:
+                size_line = self.rfile.readline()
+                if not size_line:
+                    raise ValueError("Unexpected end of chunked request body.")
+
+                size_token = size_line.split(b";", 1)[0].strip()
+                if not size_token:
+                    continue
+                chunk_size = int(size_token, 16)
+
+                if chunk_size == 0:
+                    while True:
+                        trailer = self.rfile.readline()
+                        if trailer in (b"\r\n", b"\n", b""):
+                            break
+                    break
+
+                total += chunk_size
+                if total > OPENAI_COMPAT_MAX_UPLOAD_BYTES:
+                    raise ValueError("Request body exceeds configured upload limit.")
+
+                chunk = self.rfile.read(chunk_size)
+                if len(chunk) != chunk_size:
+                    raise ValueError("Incomplete HTTP chunk.")
+                chunks.append(chunk)
+
+                if self.rfile.read(2) != b"\r\n":
+                    raise ValueError("Invalid HTTP chunk terminator.")
+
+            return b"".join(chunks)
+
+        raw_length = self.headers.get("Content-Length")
+        if raw_length is None:
+            return b""
+
+        content_length = int(raw_length)
+        if content_length < 0:
+            raise ValueError("Invalid Content-Length header.")
+        if content_length > OPENAI_COMPAT_MAX_UPLOAD_BYTES:
+            raise ValueError("Request body exceeds configured upload limit.")
+
+        return self.rfile.read(content_length)
 
     def _read_body(self) -> bytes | None:
         transfer_encoding = self.headers.get("Transfer-Encoding", "").lower()
@@ -462,82 +514,73 @@ class HTTPServer(BaseHTTPRequestHandler):
                 return
 
         # ======================================================================
-        # START / STATUS e/ou STREAM / STOP
+        # Local actions
         # ======================================================================
-        if path == "/stt/start":
-            logging.info("[GET /stt/start] Iniciando gravação...")
-            STT_MANAGER.start()
-            self.send_json(
-                200 if STT_MANAGER.status == SATState.RECORDING else 409,
-                STT_MANAGER.get_status_payload(),
-            )
-            return
+        if path.startswith("/action/"):
+            if path == "/action/text-at-cursor":
+                text = LOCAL_ACTIONS.read_text_at_cursor()
+                self.send_json(200, {"ok": True, "text": text})
+                return
 
-        if path == "/stt/stop":
-            logging.info("[GET /stt/stop] Pausando gravação.")
-            STT_MANAGER.stop()
-            self.send_json(200, STT_MANAGER.get_status_payload())
-            return
+            if path == "/action/screen":
+                png = LOCAL_ACTIONS.screenshot_current_monitor()
+                self._send(200, png, "image/png")
+                return
 
-        if path == "/stt/status":
-            logging.info("[GET /stt/status] Gravação transcrita.")
-            payload = STT_MANAGER.get_status_payload()
-            self.send_json(
-                200,
-                {
-                    **payload,
-                    "text_chunks": STT_MANAGER.get_status_queue(),
-                },
-            )
-            return
+            if path == "/action/screen-all":
+                png = LOCAL_ACTIONS.screenshot_all()
+                self._send(200, png, "image/png")
+                return
 
-        if path == "/stt/status/stream":
-            logging.info("[GET /stt/status/stream] Gravação transcrita SSE.")
-            client_queue = STT_MANAGER.add_stream_queue()
+            if path == "/action/local-record":
+                self.send_json(200, LOCAL_ACTIONS.get_local_record_status())
+                return
 
-            try:
-                self.send_response(200)
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-                self.send_header("Cache-Control", "no-cache")
-                self.send_header("Connection", "keep-alive")
-                self.send_header("X-Accel-Buffering", "no")
-                self.end_headers()
-                self.wfile.flush()
+            if path == "/action/local-record/stream":
+                client_queue = LOCAL_ACTIONS.add_record_stream()
+                try:
+                    self.send_response(200)
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "keep-alive")
+                    self.send_header("X-Accel-Buffering", "no")
+                    self.end_headers()
+                    self.wfile.flush()
 
-                last_payload_signature = None
+                    last_payload_signature = None
+                    while True:
+                        payload = STT_MANAGER.get_status_payload()
+                        text_chunks = LOCAL_ACTIONS.get_record_stream_chunks(
+                            client_queue
+                        )
+                        current_signature = (
+                            payload["status"],
+                            payload["is_speaking"],
+                            payload["is_transcribing"],
+                        )
 
-                while True:
-                    payload = STT_MANAGER.get_status_payload()
-                    text_chunks = STT_MANAGER.get_stream_queue(client_queue)
+                        if current_signature != last_payload_signature or text_chunks:
+                            last_payload_signature = current_signature
+                            message = (
+                                f"data: {json.dumps({**payload, 'text_chunks': text_chunks}, ensure_ascii=False)}\n\n"
+                            ).encode("utf-8")
+                            self.wfile.write(message)
+                            self.wfile.flush()
 
-                    current_signature = (
-                        payload["status"],
-                        payload["is_speaking"],
-                        payload["is_transcribing"],
+                        time.sleep(0.1)
+                except (
+                    ConnectionResetError,
+                    ConnectionAbortedError,
+                    BrokenPipeError,
+                    ConnectionError,
+                ):
+                    logging.info(
+                        "[SSE /action/local-record/stream] Cliente desconectado."
                     )
-
-                    if current_signature != last_payload_signature or text_chunks:
-                        last_payload_signature = current_signature
-                        message = (
-                            f"data: {json.dumps({**payload, 'text_chunks': text_chunks}, ensure_ascii=False)}\n\n"
-                        ).encode("utf-8")
-
-                        self.wfile.write(message)
-                        self.wfile.flush()
-
-                    time.sleep(0.1)
-
-            except (
-                ConnectionResetError,
-                ConnectionAbortedError,
-                BrokenPipeError,
-                ConnectionError,
-            ):
-                logging.info("[SSE /stt/status/stream] Cliente desconectado.")
-            finally:
-                STT_MANAGER.remove_stream_queue(client_queue)
-            return
+                finally:
+                    LOCAL_ACTIONS.remove_record_stream(client_queue)
+                return
 
         if path == "/tts/status":
             logging.info("[GET /tts/status] Verificando status do Worker TTS...")
@@ -607,19 +650,160 @@ class HTTPServer(BaseHTTPRequestHandler):
                 )
             return
 
-        if path == "/ove/status":
-            from . import state as _state
+        if path.startswith("/ove/"):
+            if path == "/ove/status":
+                from . import state as _state
 
-            with _state.LOCK:
-                active = _state.SESSION_ACTIVE
-            self.send_json(200, {"ok": True, "active": active})
-            return
+                with _state.LOCK:
+                    active = _state.SESSION_ACTIVE
+                self.send_json(200, {"ok": True, "active": active})
+                return
 
         self.send_json(404, {"ok": False, "error": "Endpoint inexistente."})
 
     def do_POST(self) -> None:
         try:
             path = self._path()
+
+            # ======================================================================
+            # Local actions
+            # ======================================================================
+            if path.startswith("/action/"):
+                content_type = self.headers.get("Content-Type", "").lower()
+                raw_body = self._read_raw_body()
+
+                if path == "/action/local-record":
+                    payload = {}
+                    if raw_body:
+                        payload = json.loads(raw_body.decode("utf-8"))
+                        if not isinstance(payload, dict):
+                            raise ValueError("O corpo JSON deve ser um objeto.")
+
+                    result = LOCAL_ACTIONS.start_local_record(
+                        insert_at_cursor=bool(payload.get("insert_at_cursor", False))
+                    )
+                    self.send_json(200, result)
+                    return
+
+                if path == "/action/text-at-cursor":
+                    if content_type.startswith("application/json"):
+                        payload = (
+                            json.loads(raw_body.decode("utf-8")) if raw_body else {}
+                        )
+                        if "text" in payload:
+                            LOCAL_ACTIONS.insert_text_at_cursor(str(payload["text"]))
+                            self.send_json(200, {"ok": True, "kind": "text"})
+                            return
+                        if "image" in payload:
+                            image_bytes, image_mime = decode_data_url(payload["image"])
+                            LOCAL_ACTIONS.insert_image_at_cursor(image_bytes)
+                            self.send_json(
+                                200,
+                                {
+                                    "ok": True,
+                                    "kind": "image",
+                                    "content_type": image_mime,
+                                },
+                            )
+                            return
+                        raise ValueError("Envie 'text' ou 'image'.")
+
+                    if content_type.startswith("multipart/form-data"):
+                        fields, files = self._parse_multipart(raw_body)
+                        if "text" in fields:
+                            LOCAL_ACTIONS.insert_text_at_cursor(fields["text"])
+                            self.send_json(200, {"ok": True, "kind": "text"})
+                            return
+                        file_part = files.get("image") or files.get("file")
+                        if file_part:
+                            LOCAL_ACTIONS.insert_image_at_cursor(file_part["data"])
+                            self.send_json(200, {"ok": True, "kind": "image"})
+                            return
+                        raise ValueError(
+                            "Multipart deve conter 'text', 'image' ou 'file'."
+                        )
+
+                    if content_type.startswith("image/"):
+                        LOCAL_ACTIONS.insert_image_at_cursor(raw_body)
+                        self.send_json(200, {"ok": True, "kind": "image"})
+                        return
+
+                    text = raw_body.decode("utf-8")
+                    LOCAL_ACTIONS.insert_text_at_cursor(text)
+                    self.send_json(200, {"ok": True, "kind": "text"})
+                    return
+
+                if path in {"/action/play-audio", "/action/play-audio-queue"}:
+                    audio_bytes = raw_body
+                    audio_type = content_type
+                    audio_path = None
+
+                    if content_type.startswith("application/json"):
+                        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+                        if not isinstance(payload, dict):
+                            raise ValueError("O corpo JSON deve ser um objeto.")
+                        audio_path = payload.get("path")
+                        audio_bytes = None
+                        audio_type = None
+                    elif content_type.startswith("multipart/form-data"):
+                        fields, files = self._parse_multipart(raw_body)
+                        audio_path = fields.get("path")
+                        file_part = files.get("audio") or files.get("file")
+                        if file_part:
+                            audio_bytes = file_part["data"]
+                            audio_type = file_part.get("content_type")
+                        elif not audio_path:
+                            raise ValueError(
+                                "Multipart deve conter 'audio', 'file' ou 'path'."
+                            )
+
+                    if path == "/action/play-audio":
+                        action_id = LOCAL_ACTIONS.play_audio(
+                            audio_bytes,
+                            audio_type,
+                            path=audio_path,
+                        )
+                    else:
+                        action_id = LOCAL_ACTIONS.queue_audio(
+                            audio_bytes,
+                            audio_type,
+                            path=audio_path,
+                        )
+
+                    self.send_json(202, {"ok": True, "id": action_id})
+                    return
+
+                if path == "/action/image":
+                    image_bytes = raw_body
+                    image_type = content_type
+                    if content_type.startswith("multipart/form-data"):
+                        _fields, files = self._parse_multipart(raw_body)
+                        file_part = files.get("image") or files.get("file")
+                        if not file_part:
+                            raise ValueError("Multipart deve conter 'image' ou 'file'.")
+                        image_bytes = file_part["data"]
+                        image_type = file_part.get("content_type")
+                    elif content_type.startswith("application/json"):
+                        payload = (
+                            json.loads(raw_body.decode("utf-8")) if raw_body else {}
+                        )
+                        image_bytes, image_type = decode_data_url(
+                            payload.get("image", "")
+                        )
+
+                    saved_path = LOCAL_ACTIONS.save_and_open_image(
+                        image_bytes,
+                        image_type,
+                    )
+                    self.send_json(
+                        200,
+                        {"ok": True, "path": str(saved_path)},
+                    )
+                    return
+
+                self.send_json(404, {"ok": False, "error": "Ação inexistente."})
+                return
+
             body = self._read_body()
 
             # ======================================================================
@@ -634,7 +818,6 @@ class HTTPServer(BaseHTTPRequestHandler):
                 # ======================================================================
                 # Audio
                 # ======================================================================
-
                 if path == "/v1/audio/speech":
                     # region (collapsed) text (input)
                     text = body.get("input", "")
@@ -994,14 +1177,11 @@ class HTTPServer(BaseHTTPRequestHandler):
 
                 if path == "/v1/chat/completions":
                     try:
-                        content_length = int(self.headers.get("Content-Length", 0))
-                        raw_body = self.rfile.read(content_length).decode("utf-8")
+                        data = body if isinstance(body, dict) else {}
+                        raw_body = json.dumps(data, ensure_ascii=False)
 
-                        # Log separado e dedicado das entradas da LLM/APIVocê está me escutando bem?
                         llm_logger = logging.getLogger("llm_trace")
                         llm_logger.info("[LLM INPUT] %s", raw_body)
-
-                        data = json.loads(raw_body)
 
                         messages = data.get("messages", [])
                         user_text = (
@@ -1380,38 +1560,39 @@ class HTTPServer(BaseHTTPRequestHandler):
                 self.wfile.write(wav_data)
                 return
 
-            if path == "/ove/start":
-                TRIGGER_EVENT.set()
-                self.send_json(200, {"ok": True, "status": "triggered"})
-                return
+            if path.startswith("/ove/"):
+                if path == "/ove/start":
+                    TRIGGER_EVENT.set()
+                    self.send_json(200, {"ok": True, "status": "triggered"})
+                    return
 
-            if path == "/ove/stop":
-                with LOCK:
-                    from . import state as _state
+                if path == "/ove/stop":
+                    with LOCK:
+                        from . import state as _state
 
-                    _state.SESSION_ACTIVE = False
+                        _state.SESSION_ACTIVE = False
 
-                overlay = get_overlay()
-                if overlay:
-                    overlay.set_thinking(False)
-                    overlay.set_speaking(False)
-                self.send_json(200, {"ok": True, "status": "stopped"})
-                return
+                    overlay = get_overlay()
+                    if overlay:
+                        overlay.set_thinking(False)
+                        overlay.set_speaking(False)
+                    self.send_json(200, {"ok": True, "status": "stopped"})
+                    return
 
-            if path in [
-                "/ove/thinking",
-                "/ove/processing",
-                "/ove/speaking",
-                "/ove/listening",
-                "/ove/pulse",
-            ]:
-                self._handle_hud_action(path, 1)
-                return
+                if path in [
+                    "/ove/thinking",
+                    "/ove/processing",
+                    "/ove/speaking",
+                    "/ove/listening",
+                    "/ove/pulse",
+                ]:
+                    self._handle_hud_action(path, 1)
+                    return
 
-            if path == "/ove/blink":
-                state_machine.trigger_blink()
-                self.send_json(200, {"ok": True, "state": path})
-                return
+                if path == "/ove/blink":
+                    state_machine.trigger_blink()
+                    self.send_json(200, {"ok": True, "state": path})
+                    return
 
             self.send_json(404, {"ok": False, "error": "Endpoint inexistente."})
 
@@ -1437,6 +1618,49 @@ class HTTPServer(BaseHTTPRequestHandler):
     def do_DELETE(self):
         try:
             path = self._path()
+
+            if path == "/action/text-at-cursor":
+                LOCAL_ACTIONS.delete_text_at_cursor()
+                self.send_json(200, {"ok": True})
+                return
+
+            if path == "/action/local-record":
+                self.send_json(200, LOCAL_ACTIONS.stop_local_record())
+                return
+
+            if path == "/action/play-audio":
+                raw_body = self._read_raw_body()
+                payload = {}
+                if raw_body:
+                    payload = json.loads(raw_body.decode("utf-8"))
+                    if not isinstance(payload, dict):
+                        raise ValueError("O corpo JSON deve ser um objeto.")
+
+                action_id = payload.get("id")
+                stopped = LOCAL_ACTIONS.stop_immediate_audio(action_id=action_id)
+                self.send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "stopped": stopped,
+                        "id": action_id,
+                    },
+                )
+                return
+
+            if path == "/action/play-audio-queue":
+                raw_body = self._read_raw_body()
+                payload = {}
+                if raw_body:
+                    payload = json.loads(raw_body.decode("utf-8"))
+                    if not isinstance(payload, dict):
+                        raise ValueError("O corpo JSON deve ser um objeto.")
+
+                result = LOCAL_ACTIONS.stop_audio_queue(
+                    next_only=bool(payload.get("next", False))
+                )
+                self.send_json(200, {"ok": True, **result})
+                return
 
             if path in [
                 "/ove/thinking",

@@ -4,7 +4,12 @@ import json
 import threading
 import requests
 
-from .config import PUBLIC_BASE_URL, logging
+from .config import (
+    PUBLIC_BASE_URL,
+    OPENAI_COMPAT_API_KEY,
+    OPENAI_COMPAT_TIMEOUT_SECONDS,
+    logging,
+)
 
 
 def _synthesize_and_speak(text_chunk: str) -> None:
@@ -33,11 +38,16 @@ def _consume_agent_stream(prompt_text: str) -> None:
             "stream": True,
         }
 
+        headers = {}
+        if OPENAI_COMPAT_API_KEY:
+            headers["Authorization"] = f"Bearer {OPENAI_COMPAT_API_KEY}"
+
         response = requests.post(
             f"{PUBLIC_BASE_URL}/v1/chat/completions",
             json=payload,
+            headers=headers,
             stream=True,
-            timeout=(2.0, 30.0),
+            timeout=(2.0, float(OPENAI_COMPAT_TIMEOUT_SECONDS)),
         )
         response.raise_for_status()
 

@@ -31,7 +31,12 @@ def load_commands(folder_name: str = "commands") -> None:
 
     for file in folder.iterdir():
         if file.suffix == ".py" and not file.name.startswith("__"):
-            module_name = f"{folder_name}.{file.stem}"
+            package_prefix = __package__ or ""
+            module_name = (
+                f"{package_prefix}.{folder_name}.{file.stem}"
+                if package_prefix
+                else f"{folder_name}.{file.stem}"
+            )
             try:
                 if module_name in sys.modules:
                     module = importlib.reload(sys.modules[module_name])
@@ -63,8 +68,8 @@ def process_command(text: str, fallback: Callable[[str], None]) -> None:
     """
     text_clean = text.lower().strip()
 
-    if "comando" in text_clean:
-        action_text = text_clean.replace("comando", "").strip()
+    if text_clean == "comando" or text_clean.startswith("comando "):
+        action_text = text_clean[len("comando") :].strip()
         logging.info(f"[COMANDO LOCAL DETECTADO]: '{action_text}'")
 
         best_match = None

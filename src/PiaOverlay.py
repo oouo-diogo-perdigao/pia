@@ -133,7 +133,7 @@ class PiaOverlay(QWidget):
             try:
                 import requests
 
-                requests.post(f"{PUBLIC_BASE_URL}/stt/stop", timeout=1)
+                requests.delete(f"{PUBLIC_BASE_URL}/action/local-record", timeout=1)
             except Exception:
                 pass
 
@@ -157,7 +157,7 @@ class PiaOverlay(QWidget):
                 try:
                     import requests
 
-                    requests.post(f"{PUBLIC_BASE_URL}/stt/stop", timeout=1)
+                    requests.delete(f"{PUBLIC_BASE_URL}/action/local-record", timeout=1)
                 except Exception:
                     pass
 
@@ -310,7 +310,7 @@ def run_overlay_app():
     function startStreaming() {{
         if (eventSource) return; // Evita múltiplas instâncias
         
-        eventSource = new EventSource("{PUBLIC_BASE_URL}/stt/status/stream");
+        eventSource = new EventSource("{PUBLIC_BASE_URL}/action/local-record/stream");
 
         eventSource.onmessage = function(event) {{
             const data = JSON.parse(event.data);

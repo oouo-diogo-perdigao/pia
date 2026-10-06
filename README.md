@@ -144,20 +144,22 @@ O Faster-Whisper é carregado em processo separado e pode ser descarregado após
 
 ## Ditado
 
-O fluxo de ditado é:
+O `STTManager` apenas transcreve e distribui texto. A decisão de inserir texto no cursor pertence à camada `LocalActions`.
+
+O fluxo usado pelo atalho de ditado é:
 
 ```text
-microfone
+Ctrl+Alt+D
+  -> POST /action/local-record {"insert_at_cursor": true}
   -> AudioRecorder
-  -> detecção de fala/silêncio
   -> STTManager
   -> Gemini / Groq / Faster-Whisper
-  -> texto
+  -> LocalActions
   -> clipboard temporário
   -> Ctrl+V na janela ativa
 ```
 
-A área de transferência anterior é restaurada depois da inserção.
+Sessões iniciadas por wake word usam a mesma gravação com `insert_at_cursor=false`, portanto a transcrição vira comando/agente e não é colada automaticamente.
 
 ---
 
@@ -325,14 +327,26 @@ Rotas disponíveis:
 
 `/v1/audio/translations` e `/v1/audio/voice_consents` existem apenas como respostas explícitas de não implementação.
 
-## STT
+## Local Actions
 
 | Método | Endpoint | Função |
 |---|---|---|
-| GET | `/stt/start` | Inicia gravação |
-| GET | `/stt/stop` | Para gravação |
-| GET | `/stt/status` | Estado e textos pendentes |
-| GET | `/stt/status/stream` | Stream SSE de transcrições |
+| POST | `/action/text-at-cursor` | Insere texto ou imagem no controle atualmente focado |
+| GET | `/action/text-at-cursor` | Seleciona/copia e retorna o texto do controle focado |
+| DELETE | `/action/text-at-cursor` | Seleciona e remove todo o conteúdo do controle focado |
+| GET | `/action/screen` | Retorna PNG do monitor onde está o cursor do mouse |
+| GET | `/action/screen-all` | Retorna PNG contendo todos os monitores |
+| POST | `/action/local-record` | Inicia gravação STT; aceita `{"insert_at_cursor": true|false}` |
+| DELETE | `/action/local-record` | Encerra a gravação STT |
+| GET | `/action/local-record` | Retorna status e textos pendentes |
+| GET | `/action/local-record/stream` | Stream SSE de transcrições |
+| POST | `/action/play-audio` | Reproduz áudio imediatamente em canal independente; chamadas podem sobrepor |
+| DELETE | `/action/play-audio` | Para um áudio imediato por `id`; sem `id`, para todos os imediatos |
+| POST | `/action/play-audio-queue` | Enfileira áudio para reprodução estritamente sequencial |
+| DELETE | `/action/play-audio-queue` | Para o atual e limpa a fila; com `{"next": true}`, apenas pula o atual |
+| POST | `/action/image` | Salva a imagem recebida e abre no navegador padrão |
+
+`/action/text-at-cursor` aceita JSON com `text`, JSON com imagem em data URL, `text/plain`, `image/*` ou multipart. As rotas de áudio aceitam conteúdo bruto ou multipart. `POST /action/play-audio` também aceita JSON como `{"path":"D:\\\\codes\\\\pia\\\\sounds\\\\end.mp3"}` para tocar um arquivo absoluto do Windows. A fila e os áudios imediatos usam canais independentes.
 
 ## TTS
 
@@ -377,6 +391,7 @@ PIA
 ├── src/
 │   ├── HTTPServer.py
 │   ├── STTManager.py
+│   ├── LocalActions.py
 │   ├── HybridSTTManager.py
 │   ├── AudioRecorder.py
 │   ├── VoiceAgent.py
