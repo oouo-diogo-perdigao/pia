@@ -63,8 +63,8 @@ def process_command(text: str, fallback: Callable[[str], None]) -> None:
     """
     text_clean = text.lower().strip()
 
-    if "comando" in text_clean:
-        action_text = text_clean.replace("comando", "").strip()
+    if text_clean == "comando" or text_clean.startswith("comando "):
+        action_text = text_clean[len("comando") :].strip()
         logging.info(f"[COMANDO LOCAL DETECTADO]: '{action_text}'")
 
         best_match = None
