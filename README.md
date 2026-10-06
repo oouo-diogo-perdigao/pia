@@ -348,6 +348,21 @@ Rotas disponíveis:
 
 `/action/text-at-cursor` aceita JSON com `text`, JSON com imagem em data URL, `text/plain`, `image/*` ou multipart. As rotas de áudio aceitam conteúdo bruto ou multipart. `POST /action/play-audio` também aceita JSON como `{"path":"D:\\\\codes\\\\pia\\\\sounds\\\\end.mp3"}` para tocar um arquivo absoluto do Windows. A fila e os áudios imediatos usam canais independentes.
 
+## Storytelling
+
+`POST /tts/storytelling` aceita o modo opcional:
+
+```json
+{
+  "text": "[Ayla] \"Olá.\" O vento sopra.",
+  "kokoro": "only"
+}
+```
+
+Com `kokoro: "only"`, todos os trechos são processados pelo Kokoro: narração usa `pm_santa`, falas femininas usam `pf_dora` e falas masculinas ou de gênero desconhecido usam `pm_alex`. Sem esse parâmetro, o storytelling mantém a seleção normal de vozes/personagens.
+
+O userscript `Plugins/isekai0.js` possui toggles para TTS, Kokoro-only e STT. O STT sempre inicia desligado ao carregar a página e só mantém a gravação aberta enquanto existe uma `textarea` visível. As transcrições são inseridas diretamente no campo; a sentença isolada `enviar` simula `Shift+Enter`.
+
 ## TTS
 
 - `GET /tts/status`;
