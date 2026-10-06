@@ -1,61 +1,425 @@
-# PIA — Coleção de IA locais
+# PIA
 
-PIA é uma coleção de utilitários e pequenos serviços de inteligência artificial que rodam localmente, sob demanda, com foco em baixo consumo de memória, privacidade (funcionam off-line) e integração simples com o Windows via AutoHotkey.
+PIA é um assistente pessoal multimodal para Windows que reúne, em um único servidor Python, **Speech-to-Text (STT)**, **Text-to-Speech (TTS)**, **chat/LLM**, **geração e edição de imagens**, **wake word**, comandos locais e uma interface visual de estado.
 
-O objetivo principal do projeto é fornecer ferramentas prontas para uso que realizam tarefas comuns de voz — transcrição (Speech-to-Text) e síntese (Text-to-Speech) — de forma leve e integrada ao sistema operacional, sem depender de serviços remotos.
+O projeto expõe APIs compatíveis com partes da API da OpenAI para facilitar integração com clientes como Open WebUI, scripts locais, AutoHotkey e outras aplicações.
 
-Principais características
-- Funciona localmente (offline-ready).
-- Baixo consumo de memória quando o serviço está ocioso (tipicamente < 2 MB conforme os subprojetos).
-- Integração com Windows via AutoHotkey para atalhos globais e automação.
-- APIs HTTP locais simples para integração com outras aplicações (ex: SillyTavern, clientes web, AutoHotkey, etc.).
+![PIA](./pia.png)
 
-Como usar (visão rápida)
-1. Abra um PowerShell na pasta do subprojeto desejado (por exemplo `speech_to_text` ou `text_to_speech`).
-2. Execute o instalador do subprojeto para preparar dependências e criar atalhos:
+## Principais recursos
+
+- **STT híbrido com fallback automático**
+  - Gemini 3.5 Transcribe Live;
+  - Groq Whisper via LiteLLM;
+  - Faster-Whisper local.
+- **Chat com fallback de providers**
+  - Gemini;
+  - Groq;
+  - modelo local via Ollama.
+- **TTS local**
+  - Kokoro ONNX;
+  - Qwen3-TTS.
+- **Imagens**
+  - geração, edição e variações através do ComfyUI;
+  - interface OpenAI-compatible.
+- **Wake word**
+  - detecção local com sherpa-onnx;
+  - palavra-chave configurável por arquivo.
+- **Comandos locais dinâmicos**
+  - módulos Python carregados de `src/commands/`.
+- **Overlay/HUD**
+  - estados de listening, thinking, processing, speaking e pulse.
+- **Integração Windows**
+  - inserção de texto no cursor;
+  - AutoHotkey;
+  - launcher com visualização dos logs.
+
+---
+
+## Requisitos
+
+- Windows;
+- Python 3.12;
+- [uv](https://docs.astral.sh/uv/);
+- AutoHotkey v2 para os atalhos;
+- SoX para partes do pipeline de áudio;
+- Ollama apenas se o fallback LLM local for utilizado;
+- ComfyUI apenas se os endpoints de imagem forem utilizados;
+- GPU/CUDA é opcional para vários recursos, mas recomendada para os modelos locais mais pesados.
+
+---
+
+## Instalação
+
+Na raiz do projeto:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\install.ps1
 ```
 
-3. Execute o servidor Python do subprojeto (cada subprojeto tem um `server.py`) ou use os atalhos criados na pasta `startup` para rodar os scripts do AutoHotkey.
+O instalador usa `uv`, cria o ambiente virtual quando necessário, executa `uv sync` e cria `.env` a partir de `.env.example` quando o arquivo ainda não existe.
 
-Contribuições e desenvolvimento
-- Esse repositório é modular: adicione novos serviços na raiz (por exemplo, um módulo para análise de sentimentos ou um chatbot offline) seguindo o padrão de ter um `server.py`, `install.ps1` e atalhos em `startup/` quando fizer sentido.
-- Antes de abrir PRs, rode os scripts de instalação e garanta que as novas dependências sejam compatíveis com execução local e sejam adicionadas em `requirements.txt` correspondentes.
+Também é possível preparar manualmente:
 
-![O que é a PIA?](./logo.png)
+```powershell
+uv venv
+uv sync
+Copy-Item .env.example .env
+```
 
-## Serviços
-# Servidor do Wake Word (WW) PORT=8760
-![O que é a PIA?](./pia.svg)
+Para iniciar diretamente:
 
-# Servidor do Agent (AGENT) PORT=8761
+```powershell
+uv run python -m server
+```
 
-# Servidor de Speech to Text (STT) PORT=8762
-* `POST /start`: Inicia a captura de áudio pelo microfone.
-* `POST /stop`: Interrompe a gravação e processa o trecho final.
-* `GET /status`: Retorna o estado atual da gravação, transcrição e entrega os blocos de texto processados.
-* Padrão OpenAI:
-  - `POST /v1/audio/transcriptions` 
-  - `GET /v1/models`
+---
 
+# Configuração
 
-### Servidor de Text to Speech (TTS) PORT=8763
-* `POST /speak`: Adiciona o texto enviado à fila de síntese para reprodução direta nas caixas de som locais em segundo plano.
-* `POST /stop`: Interrompe a reprodução de áudio em andamento e limpa a fila de processamento local.
-* `POST /generate`: Sintetiza o texto enviado e retorna o áudio em formato nativo `audio/wav` no corpo da resposta HTTP (ideal para SillyTavern e clientes web).
-* `GET /status`: Retorna o estado atual da aplicação, indicando se o player está reproduzindo áudio, o dispositivo em uso (`cuda`/`cpu`) e se o modelo Kokoro está carregado em memória.
-Padrão OpenAI:
-- `POST /v1/audio/speech`
-- `GET /v1/models`
+Toda a configuração principal fica no arquivo `.env`.
 
-### Servidor de Criação e Edição de Imagens com o ConfyUI PORT=c
+## Servidor
 
+```dotenv
+HOST=127.0.0.1
+PORT=8762
+OPENAI_COMPAT_API_KEY=local
+PUBLIC_BASE_URL=http://127.0.0.1:8762
+```
 
-## Rodar local
+Se `OPENAI_COMPAT_API_KEY` estiver vazio, os endpoints OpenAI-compatible ficam sem autenticação.
 
-`.venv\Scripts\Activate.ps1`
-`python server.py`
+---
 
+# Speech-to-Text
+
+O STT recebe áudio do microfone, separa enunciados por silêncio e tenta os providers na ordem definida em:
+
+```dotenv
+STT_PROVIDERS=gemini,groq,local
+```
+
+A ordem é literal. Com a configuração acima:
+
+1. tenta Gemini;
+2. se Gemini estiver sem chave, falhar ou entrar em cooldown, tenta Groq;
+3. se Groq também não estiver disponível, usa Faster-Whisper local.
+
+Providers remotos que falham ficam temporariamente em cooldown para evitar repetir a mesma chamada inútil em cada frase.
+
+## Gemini STT
+
+```dotenv
+STT_GEMINI_API_KEY=
+STT_GEMINI_MODEL=gemini-3.5-transcribe-live
+STT_REMOTE_COOLDOWN_SECONDS=900
+```
+
+A chave STT dedicada tem prioridade. Se não estiver configurada, o código também aceita `GEMINI_API_KEY` ou `AGE_GEMINI_API_KEY`.
+
+## Groq STT
+
+```dotenv
+GROQ_API_KEY=
+STT_GROQ_MODEL=groq/whisper-large-v3-turbo
+```
+
+A chamada é feita por `litellm.transcription()`.
+
+## STT local
+
+```dotenv
+STT_MODEL=large-v3-turbo
+STT_DEVICE=cpu
+STT_COMPUTE_TYPE=int8
+STT_CPU_THREADS=8
+STT_SAMPLE_RATE=16000
+STT_CHANNELS=1
+STT_WHISPER_TIMEOUT=600
+```
+
+O Faster-Whisper é carregado em processo separado e pode ser descarregado após inatividade.
+
+## Ditado
+
+O fluxo de ditado é:
+
+```text
+microfone
+  -> AudioRecorder
+  -> detecção de fala/silêncio
+  -> STTManager
+  -> Gemini / Groq / Faster-Whisper
+  -> texto
+  -> clipboard temporário
+  -> Ctrl+V na janela ativa
+```
+
+A área de transferência anterior é restaurada depois da inserção.
+
+---
+
+# Chat / LLM
+
+A rota `/v1/chat/completions` usa a mesma ideia de fallback ordenado:
+
+```dotenv
+LLM_PROVIDERS=gemini,groq,local
+```
+
+Com essa configuração, o chat tenta Gemini, depois Groq e, por último, Ollama local.
+
+## Modelos padrão
+
+```dotenv
+LLM_GEMINI_MODEL=gemini/gemini-3.5-flash
+LLM_GROQ_MODEL=groq/openai/gpt-oss-120b
+LLM_LOCAL_MODEL=ollama/qwen3:8b
+LLM_LOCAL_API_BASE=http://localhost:11434
+LLM_REMOTE_COOLDOWN_SECONDS=300
+```
+
+Credenciais:
+
+```dotenv
+AGE_GEMINI_API_KEY=
+GROQ_API_KEY=
+```
+
+O provider Gemini também aceita `GEMINI_API_KEY` como fallback de credencial.
+
+O runtime não depende mais de `models.yaml` para determinar a prioridade do chat. A ordem dos providers é definida diretamente por `LLM_PROVIDERS`.
+
+## Streaming
+
+`/v1/chat/completions` suporta `stream=true`.
+
+Se um provider falhar antes de gerar o primeiro chunk, o próximo provider é tentado. Se a transmissão já começou, o servidor não reinicia a resposta em outro modelo, evitando texto duplicado no mesmo stream.
+
+---
+
+# Text-to-Speech
+
+O serviço de TTS possui backends locais e roda modelos pesados em workers isolados.
+
+Principais configurações:
+
+```dotenv
+TTS_DEFAULT_VOICE=pm_santa
+TTS_DEFAULT_SPEED=0.95
+TTS_DEVICE=cuda
+TTS_KOKORO_MODEL=./cache/Kokoro-82M
+TTS_KOKORO_IDLE_TIMEOUT=600
+TTS_QWEN_IDLE_TIMEOUT=600
+```
+
+Modelos anunciados pela API:
+
+- `tts-1`;
+- `tts-1-hd`;
+- `gpt-4o-mini-tts`;
+- `gpt-4o-mini-tts-2025-12-15`.
+
+Formatos suportados pelo gateway incluem WAV, MP3, Opus, AAC, FLAC e PCM.
+
+---
+
+# Imagens / ComfyUI
+
+A PIA expõe um gateway OpenAI-compatible para o ComfyUI.
+
+Modelo anunciado:
+
+```text
+gpt-image-1
+```
+
+Principais endpoints:
+
+- `POST /v1/images/generations`;
+- `POST /v1/images/edits`;
+- `POST /v1/images/variations`;
+- `GET /v1/images/files/<token>`.
+
+O gateway suporta layouts de modelo `checkpoint` e `split`, serialização de jobs e liberação automática de RAM/VRAM após o processamento quando configurado.
+
+Exemplo:
+
+```dotenv
+ICE_COMFYUI_URL=http://127.0.0.1:8188
+ICE_COMFYUI_MODEL_LAYOUT=checkpoint
+ICE_COMFYUI_CHECKPOINT=flux1-schnell.safetensors
+ICE_IMAGE_DEFAULT_SIZE=1024x1024
+ICE_IMAGE_MAX_N=1
+```
+
+---
+
+# Wake word e comandos locais
+
+O listener de wake word usa `sherpa-onnx` e mantém um microfone dedicado aguardando a palavra-chave configurada.
+
+Os comandos Python são carregados dinamicamente de:
+
+```text
+src/commands/
+```
+
+Um módulo de comando precisa expor:
+
+```python
+COMMAND_NAME = "meu comando"
+
+def execute():
+    ...
+```
+
+A versão atual inclui comandos para:
+
+- abrir bloco de notas;
+- abrir navegador;
+- aprender novo comando;
+- previsão do tempo;
+- modo ditado;
+- recarregar comandos.
+
+Quando uma fala começa com `comando`, o loader tenta encontrar a ação local mais próxima. Caso não haja correspondência suficiente, o texto é repassado ao agente.
+
+---
+
+# Overlay / OVE
+
+A interface visual mantém contadores/estados para atividades do assistente.
+
+Rotas disponíveis:
+
+- `GET /ove/status`;
+- `POST /ove/start`;
+- `POST /ove/stop`;
+- `POST /ove/blink`;
+- `POST /ove/thinking`;
+- `POST /ove/processing`;
+- `POST /ove/speaking`;
+- `POST /ove/silent`;
+- `POST /ove/listening`;
+- `POST /ove/pulse`.
+
+---
+
+# API HTTP
+
+## OpenAI-compatible
+
+| Método | Endpoint | Função |
+|---|---|---|
+| GET | `/v1/models` | Lista modelos expostos pelo gateway |
+| POST | `/v1/chat/completions` | Chat, com streaming opcional e fallback LLM |
+| POST | `/v1/audio/transcriptions` | Transcrição de áudio com fallback STT |
+| POST | `/v1/audio/speech` | Síntese de voz |
+| GET | `/v1/audio/voices` | Lista vozes disponíveis |
+| POST | `/v1/images/generations` | Geração de imagem |
+| POST | `/v1/images/edits` | Edição de imagem |
+| POST | `/v1/images/variations` | Variação de imagem |
+
+`/v1/audio/translations` e `/v1/audio/voice_consents` existem apenas como respostas explícitas de não implementação.
+
+## STT
+
+| Método | Endpoint | Função |
+|---|---|---|
+| GET | `/stt/start` | Inicia gravação |
+| GET | `/stt/stop` | Para gravação |
+| GET | `/stt/status` | Estado e textos pendentes |
+| GET | `/stt/status/stream` | Stream SSE de transcrições |
+
+## TTS
+
+- `GET /tts/status`;
+- `GET /tts/status/stream`;
+- `GET /tts/help`;
+- `POST /tts/speak`;
+- `POST /tts/storytelling`;
+- `POST /tts/stream_text`;
+- `POST /tts/stop`;
+- `POST /tts/generate`.
+
+---
+
+# Logs
+
+Os logs ficam em `logs/`.
+
+| Arquivo | Conteúdo |
+|---|---|
+| `_main.log` | Eventos gerais do servidor |
+| `stt.log` | Somente textos efetivamente transcritos |
+| `tts.log` | Eventos/textos do TTS |
+| `llm.log` | Entradas, saídas e provider/modelo do chat |
+
+O `stt.log` usa uma única linha por transcrição:
+
+```text
+2026-10-05 19:26:10,450 | INFO | Exemplo de transcrição
+```
+
+O log periódico de RMS do microfone (`[AUDIO DEBUG]`) não é emitido.
+
+---
+
+# Estrutura principal
+
+```text
+PIA
+├── server.py
+├── pia_launcher.py
+├── src/
+│   ├── HTTPServer.py
+│   ├── STTManager.py
+│   ├── HybridSTTManager.py
+│   ├── AudioRecorder.py
+│   ├── VoiceAgent.py
+│   ├── TTSManager.py
+│   ├── ICEManager.py
+│   ├── ComfyUIClient.py
+│   ├── WorkflowFactory.py
+│   ├── PiaOverlay.py
+│   ├── thread_wakeword.py
+│   ├── commands_loader.py
+│   ├── commands/
+│   └── agents/
+│       ├── AgentManager.py
+│       └── GenericAgent.py
+├── startup/
+├── sounds/
+├── .env.example
+└── pyproject.toml
+```
+
+---
+
+# Execução e desenvolvimento
+
+Executar servidor:
+
+```powershell
+uv run python -m server
+```
+
+Sincronizar dependências:
+
+```powershell
+uv sync
+```
+
+A aplicação foi estruturada para manter modelos pesados em workers/processos separados sempre que possível, permitindo liberar RAM/VRAM durante períodos de inatividade.
+
+---
+
+## Observações de segurança
+
+- Não coloque chaves reais no repositório.
+- Mantenha `.env` fora do Git.
+- Se expuser `HOST=0.0.0.0`, configure `OPENAI_COMPAT_API_KEY` e proteja a rede.
+- O fallback local permite continuar usando STT e chat sem depender exclusivamente de APIs externas, desde que os modelos locais necessários estejam instalados.

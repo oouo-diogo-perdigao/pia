@@ -1,0 +1,33 @@
+# Referência opcional de configuração do LiteLLM Router.
+#
+# A PIA não usa mais este arquivo para definir a ordem do /v1/chat/completions.
+# A prioridade oficial é configurada no .env:
+#
+# LLM_PROVIDERS=gemini,groq,local
+# LLM_GEMINI_MODEL=gemini/gemini-3.5-flash
+# LLM_GROQ_MODEL=groq/openai/gpt-oss-120b
+# LLM_LOCAL_MODEL=ollama/qwen3:8b
+#
+# Este YAML é mantido apenas como exemplo para quem quiser usar o Router do
+# LiteLLM em integrações próprias.
+
+model_list:
+  - model_name: gemini
+    litellm_params:
+      model: gemini/gemini-3.5-flash
+      api_key: os.environ/AGE_GEMINI_API_KEY
+
+  - model_name: groq
+    litellm_params:
+      model: groq/openai/gpt-oss-120b
+      api_key: os.environ/GROQ_API_KEY
+
+  - model_name: local
+    litellm_params:
+      model: ollama/qwen3:8b
+      api_base: http://localhost:11434
+
+router_settings:
+  num_retries: 1
+  allowed_fails: 1
+  cooldown_time: 300
