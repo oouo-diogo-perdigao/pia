@@ -67,10 +67,6 @@ STT_WHISPER_TIMEOUT = _int_env("STT_WHISPER_TIMEOUT", 600)
 
 # Ordem explícita de tentativa. Ex.: gemini,groq,local
 STT_PROVIDERS = _list_env("STT_PROVIDERS", "gemini,groq,local")
-# Compatibilidade temporária com a configuração antiga de provider único.
-_legacy_stt_provider = _str_env("STT_PROVIDER", "").lower()
-if _legacy_stt_provider and "STT_PROVIDERS" not in os.environ:
-    STT_PROVIDERS = (_legacy_stt_provider, "local") if _legacy_stt_provider != "local" else ("local",)
 STT_REMOTE_COOLDOWN_SECONDS = _int_env("STT_REMOTE_COOLDOWN_SECONDS", 900)
 STT_GEMINI_API_KEY = (
     os.getenv("STT_GEMINI_API_KEY")
