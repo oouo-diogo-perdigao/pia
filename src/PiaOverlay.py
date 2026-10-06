@@ -133,7 +133,7 @@ class PiaOverlay(QWidget):
             try:
                 import requests
 
-                requests.post(f"{PUBLIC_BASE_URL}/stt/stop", timeout=1)
+                requests.delete(f"{PUBLIC_BASE_URL}/action/local-record", timeout=1)
             except Exception:
                 pass
 
@@ -157,7 +157,7 @@ class PiaOverlay(QWidget):
                 try:
                     import requests
 
-                    requests.post(f"{PUBLIC_BASE_URL}/stt/stop", timeout=1)
+                    requests.delete(f"{PUBLIC_BASE_URL}/action/local-record", timeout=1)
                 except Exception:
                     pass
 
