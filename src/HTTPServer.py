@@ -736,18 +736,39 @@ class HTTPServer(BaseHTTPRequestHandler):
                 if path in {"/action/play-audio", "/action/play-audio-queue"}:
                     audio_bytes = raw_body
                     audio_type = content_type
-                    if content_type.startswith("multipart/form-data"):
-                        _fields, files = self._parse_multipart(raw_body)
+                    audio_path = None
+
+                    if content_type.startswith("application/json"):
+                        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+                        if not isinstance(payload, dict):
+                            raise ValueError("O corpo JSON deve ser um objeto.")
+                        audio_path = payload.get("path")
+                        audio_bytes = None
+                        audio_type = None
+                    elif content_type.startswith("multipart/form-data"):
+                        fields, files = self._parse_multipart(raw_body)
+                        audio_path = fields.get("path")
                         file_part = files.get("audio") or files.get("file")
-                        if not file_part:
-                            raise ValueError("Multipart deve conter 'audio' ou 'file'.")
-                        audio_bytes = file_part["data"]
-                        audio_type = file_part.get("content_type")
+                        if file_part:
+                            audio_bytes = file_part["data"]
+                            audio_type = file_part.get("content_type")
+                        elif not audio_path:
+                            raise ValueError(
+                                "Multipart deve conter 'audio', 'file' ou 'path'."
+                            )
 
                     if path == "/action/play-audio":
-                        action_id = LOCAL_ACTIONS.play_audio(audio_bytes, audio_type)
+                        action_id = LOCAL_ACTIONS.play_audio(
+                            audio_bytes,
+                            audio_type,
+                            path=audio_path,
+                        )
                     else:
-                        action_id = LOCAL_ACTIONS.queue_audio(audio_bytes, audio_type)
+                        action_id = LOCAL_ACTIONS.queue_audio(
+                            audio_bytes,
+                            audio_type,
+                            path=audio_path,
+                        )
 
                     self.send_json(202, {"ok": True, "id": action_id})
                     return
@@ -1156,14 +1177,11 @@ class HTTPServer(BaseHTTPRequestHandler):
 
                 if path == "/v1/chat/completions":
                     try:
-                        content_length = int(self.headers.get("Content-Length", 0))
-                        raw_body = self.rfile.read(content_length).decode("utf-8")
+                        data = body if isinstance(body, dict) else {}
+                        raw_body = json.dumps(data, ensure_ascii=False)
 
-                        # Log separado e dedicado das entradas da LLM/APIVocê está me escutando bem?
                         llm_logger = logging.getLogger("llm_trace")
                         llm_logger.info("[LLM INPUT] %s", raw_body)
-
-                        data = json.loads(raw_body)
 
                         messages = data.get("messages", [])
                         user_text = (
@@ -1608,6 +1626,40 @@ class HTTPServer(BaseHTTPRequestHandler):
 
             if path == "/action/local-record":
                 self.send_json(200, LOCAL_ACTIONS.stop_local_record())
+                return
+
+            if path == "/action/play-audio":
+                raw_body = self._read_raw_body()
+                payload = {}
+                if raw_body:
+                    payload = json.loads(raw_body.decode("utf-8"))
+                    if not isinstance(payload, dict):
+                        raise ValueError("O corpo JSON deve ser um objeto.")
+
+                action_id = payload.get("id")
+                stopped = LOCAL_ACTIONS.stop_immediate_audio(action_id=action_id)
+                self.send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "stopped": stopped,
+                        "id": action_id,
+                    },
+                )
+                return
+
+            if path == "/action/play-audio-queue":
+                raw_body = self._read_raw_body()
+                payload = {}
+                if raw_body:
+                    payload = json.loads(raw_body.decode("utf-8"))
+                    if not isinstance(payload, dict):
+                        raise ValueError("O corpo JSON deve ser um objeto.")
+
+                result = LOCAL_ACTIONS.stop_audio_queue(
+                    next_only=bool(payload.get("next", False))
+                )
+                self.send_json(200, {"ok": True, **result})
                 return
 
             if path in [
