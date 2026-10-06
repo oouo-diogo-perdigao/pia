@@ -12,10 +12,9 @@ from .config import (
     MODELS_DIR,
     OPENAI_COMPAT_TIMEOUT_SECONDS,
     START_SOUND,
-    END_SOUND,
 )
 from .AudioRecorder import AudioRecorder, worker_audio_bridge
-from .utils import play_sound_async, insert_text_at_cursor
+from .utils import play_sound_async
 
 
 class SATState(Enum):
@@ -58,9 +57,7 @@ class STTManager:
         self.transcribed_texts: queue.Queue = queue.Queue()
         # 2. Fila do /status tradicional (máx 200)
         self.status_queue: queue.Queue = queue.Queue(maxsize=200)
-        # 3. Fila de inserção de texto no cursor (opcional, controlada por /insert)
-        self.insert_queue: queue.Queue | None = None
-        # 4. Lista de filas individuais para cada cliente SSE conectado
+        # Filas individuais para cada cliente SSE conectado
         self.stream_queues = []
 
         self.is_transcribing_event = threading.Event()
@@ -69,9 +66,6 @@ class STTManager:
         self.state_lock = threading.RLock()
 
         self.status: SATState = SATState.IDLE
-        self.insert_at_cursor: bool = True  # Controlado pela rota POST /insert
-
-        self.STT_INSERT_THREAD = None
 
         # Thread central que despacha os textos da fila bruta para o status_queue e SSEs
         self.text_dispatcher = threading.Thread(
@@ -231,7 +225,6 @@ class STTManager:
             "status": self.status.value,
             "is_speaking": self.recorder.is_speaking,
             "is_transcribing": self.is_transcribing_event.is_set(),
-            "insert_at_cursor": self.insert_at_cursor,
             "is_active": is_active,  # Informa ao client se o canal ainda tem utilidade
         }
 
@@ -258,9 +251,6 @@ class STTManager:
             logging.info("[APP] Iniciando gravação e resetando filas de status...")
 
             self._clear_status_queue()
-
-            # Garante thread e fila de inserção ativas caso o cursor esteja habilitado
-            self._ensure_insert_worker_locked()
 
             self.recorder.start()
             self.stop_bridge_event.clear()
@@ -338,36 +328,6 @@ class STTManager:
             # injeta none na fila principal
             self.transcribed_texts.put(None)
 
-    # region insert
-    def _stt_insert_worker_loop(self, target_queue: queue.Queue):
-        logging.info("[STT] Worker de inserção ativo.")
-        while True:
-            try:
-                text = target_queue.get(block=True)
-
-                if text is None:
-                    target_queue.task_done()
-                    break
-
-                if self.insert_at_cursor and text and text.strip():
-                    insert_text_at_cursor(text)
-
-                target_queue.task_done()
-
-            except Exception:
-                logging.exception("[STT] Erro no worker de inserção.")
-
-        with self.state_lock:
-            if self.insert_queue is target_queue:
-                self.insert_queue = None
-
-        if END_SOUND.exists():
-            play_sound_async(END_SOUND)
-
-        logging.info("[STT] Worker de inserção finalizado.")
-
-    # endregion
-
     def _text_dispatcher(self):
         """Distribui os chunks recebidos para status, SSEs e fila de inserção no cursor."""
         while True:
@@ -387,14 +347,7 @@ class STTManager:
             # O task_done() ocorrerá obrigatoriamente no finally deste bloco.
             try:
                 if chunk is None:
-                    # Sinal de término propagado para o worker de inserção
                     with self.state_lock:
-                        if self.insert_queue:
-                            try:
-                                self.insert_queue.put_nowait(None)
-                            except Exception:
-                                pass
-                        # Quando a gravação para e o lote é limpo, ajustamos o status de volta para IDLE/FINISHED
                         if self.status == SATState.STOPPING:
                             self.status = SATState.FINISHED
                 else:
@@ -417,13 +370,6 @@ class STTManager:
                             except Exception:
                                 pass
 
-                        # 4. Envia para o worker de inserção no cursor
-                        if self.insert_queue:
-                            try:
-                                self.insert_queue.put_nowait(chunk)
-                            except Exception:
-                                pass
-
             except Exception:
                 logging.exception(
                     "[Dispatcher] Erro ao processar/despachar o chunk de texto."
@@ -431,25 +377,6 @@ class STTManager:
             finally:
                 # Executado exatamente uma vez por item retirado da fila principal
                 self.transcribed_texts.task_done()
-
-    def _ensure_insert_worker_locked(self) -> None:
-        """Garante que a fila e a thread de inserção no cursor estejam ativas (deve ser chamado com o state_lock adquirido)."""
-        if not self.insert_at_cursor:
-            return
-
-        if self.insert_queue is None:
-            self.insert_queue = queue.Queue()
-
-        if self.STT_INSERT_THREAD is None or not self.STT_INSERT_THREAD.is_alive():
-            logging.info("[APP] Reiniciando worker de inserção de texto no cursor...")
-            current_q = self.insert_queue
-            self.STT_INSERT_THREAD = threading.Thread(
-                target=self._stt_insert_worker_loop,
-                args=(current_q,),
-                daemon=True,
-                name="STTInsertWorker",
-            )
-            self.STT_INSERT_THREAD.start()
 
     def shutdown(self) -> None:
         logging.info("[APP] Shutdown requested. Stopping recording and STT worker.")
