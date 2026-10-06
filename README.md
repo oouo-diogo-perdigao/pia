@@ -340,11 +340,13 @@ Rotas disponíveis:
 | DELETE | `/action/local-record` | Encerra a gravação STT |
 | GET | `/action/local-record` | Retorna status e textos pendentes |
 | GET | `/action/local-record/stream` | Stream SSE de transcrições |
-| POST | `/action/play-audio` | Reproduz áudio imediatamente, interrompendo o áudio atual da fila de ações |
-| POST | `/action/play-audio-queue` | Enfileira áudio para reprodução sequencial |
+| POST | `/action/play-audio` | Reproduz áudio imediatamente em canal independente; chamadas podem sobrepor |
+| DELETE | `/action/play-audio` | Para um áudio imediato por `id`; sem `id`, para todos os imediatos |
+| POST | `/action/play-audio-queue` | Enfileira áudio para reprodução estritamente sequencial |
+| DELETE | `/action/play-audio-queue` | Para o atual e limpa a fila; com `{"next": true}`, apenas pula o atual |
 | POST | `/action/image` | Salva a imagem recebida e abre no navegador padrão |
 
-`/action/text-at-cursor` aceita JSON com `text`, JSON com imagem em data URL, `text/plain`, `image/*` ou multipart. As rotas de áudio e imagem aceitam conteúdo bruto ou multipart.
+`/action/text-at-cursor` aceita JSON com `text`, JSON com imagem em data URL, `text/plain`, `image/*` ou multipart. As rotas de áudio aceitam conteúdo bruto ou multipart. `POST /action/play-audio` também aceita JSON como `{"path":"D:\\\\codes\\\\pia\\\\sounds\\\\end.mp3"}` para tocar um arquivo absoluto do Windows. A fila e os áudios imediatos usam canais independentes.
 
 ## TTS
 
