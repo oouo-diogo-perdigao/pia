@@ -31,7 +31,12 @@ def load_commands(folder_name: str = "commands") -> None:
 
     for file in folder.iterdir():
         if file.suffix == ".py" and not file.name.startswith("__"):
-            module_name = f"{folder_name}.{file.stem}"
+            package_prefix = __package__ or ""
+            module_name = (
+                f"{package_prefix}.{folder_name}.{file.stem}"
+                if package_prefix
+                else f"{folder_name}.{file.stem}"
+            )
             try:
                 if module_name in sys.modules:
                     module = importlib.reload(sys.modules[module_name])
