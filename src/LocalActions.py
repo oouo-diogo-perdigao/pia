@@ -350,7 +350,9 @@ class LocalActions:
 
     def _start_dictation_bridge(self) -> None:
         if self._dictation_thread and self._dictation_thread.is_alive():
-            return
+            self._dictation_stop.set()
+            if threading.current_thread() is not self._dictation_thread:
+                self._dictation_thread.join(timeout=0.5)
 
         self._dictation_stop.clear()
         client_queue = self.stt_manager.add_stream_queue()
@@ -379,3 +381,8 @@ class LocalActions:
 
     def _stop_dictation_bridge(self) -> None:
         self._dictation_stop.set()
+        thread = self._dictation_thread
+        if thread and thread.is_alive() and threading.current_thread() is not thread:
+            thread.join(timeout=0.5)
+        if thread and not thread.is_alive():
+            self._dictation_thread = None
