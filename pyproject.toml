@@ -21,7 +21,7 @@ dependencies = [
     "torch==2.5.1+cu124",
     "torchaudio==2.5.1+cu124",
     "transformers>=4.57.3",
-    "setuptools==75.8.2",
+    "setuptools==83.0.0",
     "litellm>=1.105.0rc1",
     "google-genai>=1.47.0",
     "pygame>=2.6.1",
