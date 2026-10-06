@@ -350,8 +350,10 @@ class TTSManager:
 
         voices = self.qwen_voices()
         self.voice_genders = {
-            str(voice).strip().lower(): str(gender).strip().lower()
-            for voice, gender in voices.items()
+            str(voice).strip().lower(): str(metadata.get("gender") or "unknown")
+            .strip()
+            .lower()
+            for voice, metadata in voices.items()
             if str(voice).strip()
         }
 
@@ -1026,6 +1028,20 @@ class TTSManager:
         # Se não encontrar nada, cai no dispositivo padrão
         return None
 
+    def get_character_gender(self, character: str) -> str:
+        """Return cached gender for a character after voice classification."""
+        character = self._normalize_character(character)
+        if not character:
+            return "unknown"
+
+        key = self._character_key(character)
+        with self.lock:
+            cached = self.characters.get(key)
+            if not cached:
+                return "unknown"
+            gender = str(cached.get("gender") or "unknown").strip().lower()
+            return gender if gender in {"male", "female", "unknown"} else "unknown"
+
     # ==============================================================
     # PARSER
     # ==============================================================
@@ -1191,9 +1207,11 @@ class TTSManager:
             if segment["type"] == "narration":
                 segments.append(
                     {
+                        "type": "narration",
                         "text": segment["text"],
                         "voice": "pm_santa",
                         "character": None,
+                        "gender": None,
                         "style": None,
                     }
                 )
@@ -1201,9 +1219,11 @@ class TTSManager:
             elif segment["type"] == "anonymous":
                 segments.append(
                     {
+                        "type": "anonymous",
                         "text": segment["text"],
                         "voice": "pm_alex",
                         "character": None,
+                        "gender": "unknown",
                         "style": None,
                     }
                 )
@@ -1219,9 +1239,11 @@ class TTSManager:
 
                 segments.append(
                     {
+                        "type": "character",
                         "text": speech,
                         "voice": voice,
                         "character": character,
+                        "gender": self.get_character_gender(character),
                         "style": segment.get("style"),
                     }
                 )
