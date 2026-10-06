@@ -310,7 +310,7 @@ def run_overlay_app():
     function startStreaming() {{
         if (eventSource) return; // Evita múltiplas instâncias
         
-        eventSource = new EventSource("{PUBLIC_BASE_URL}/stt/status/stream");
+        eventSource = new EventSource("{PUBLIC_BASE_URL}/action/local-record/stream");
 
         eventSource.onmessage = function(event) {{
             const data = JSON.parse(event.data);
