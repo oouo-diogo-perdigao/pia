@@ -350,8 +350,10 @@ class TTSManager:
 
         voices = self.qwen_voices()
         self.voice_genders = {
-            str(voice).strip().lower(): str(gender).strip().lower()
-            for voice, gender in voices.items()
+            str(voice).strip().lower(): str(metadata.get("gender") or "unknown")
+            .strip()
+            .lower()
+            for voice, metadata in voices.items()
             if str(voice).strip()
         }
 
