@@ -47,7 +47,7 @@ EndSound := A_ScriptDir "..\sounds\end.mp3"
 	req := ComObject("WinHttp.WinHttpRequest.5.1")
 
 	if (IsListening) {
-		req.Open("GET", Endpoint "/stt/stop", true)
+		req.Open("DELETE", Endpoint "/action/local-record", true)
 		req.Send()
 
 		IsListening := false
@@ -57,8 +57,9 @@ EndSound := A_ScriptDir "..\sounds\end.mp3"
 		return
 	}
 
-	req.Open("GET", Endpoint "/stt/start", true)
-	req.Send()
+	req.Open("POST", Endpoint "/action/local-record", true)
+	req.SetRequestHeader("Content-Type", "application/json; charset=utf-8")
+	req.Send('{"insert_at_cursor":true}')
 
 	IsListening := true
 		ToolTip("Escutando")
