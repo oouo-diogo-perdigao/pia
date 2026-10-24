@@ -44,8 +44,8 @@ PORT = _int_env("PORT", 8762)
 # Se vazio, o endpoint OpenAI-compatible fica sem autenticação.
 OPENAI_COMPAT_API_KEY = _str_env("OPENAI_COMPAT_API_KEY", "")
 OPENAI_COMPAT_TIMEOUT_SECONDS = _int_env("OPENAI_COMPAT_TIMEOUT_SECONDS", 180)
-# 10MB
-OPENAI_COMPAT_MAX_UPLOAD_BYTES = _int_env("OPENAI_COMPAT_MAX_UPLOAD_BYTES", 104857600)
+# 200 MiB (request body, including multipart/base64 overhead)
+OPENAI_COMPAT_MAX_UPLOAD_BYTES = _int_env("OPENAI_COMPAT_MAX_UPLOAD_BYTES", 209715200)
 START_SOUND = _path_env("START_SOUND", str(BASE_DIR / "sounds" / "start.mp3"))
 END_SOUND = _path_env("END_SOUND", str(BASE_DIR / "sounds" / "end.mp3"))
 MODELS_DIR = _path_env("MODELS_DIR", str(BASE_DIR / "cache"))

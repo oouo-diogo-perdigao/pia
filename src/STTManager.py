@@ -130,6 +130,7 @@ class STTManager:
         language: str | None = None,
         prompt: str | None = None,
         temperature: float | None = None,
+        require_timestamps: bool = False,
     ) -> dict:
         """Synchronously transcribe one OpenAI-compatible API request.
 
@@ -443,16 +444,18 @@ def stt_worker_process(
         last_used = time.monotonic()
 
         try:
-            text = agent.transcribe_chunk(
+            transcription = agent.transcribe_chunk(
                 chunk,
                 language=language,
                 prompt=prompt,
                 temperature=temperature,
+                return_metadata=(kind == "api"),
             )
+            metadata = transcription if isinstance(transcription, dict) else {"text": transcription or None}
             target_queue.put(
                 {
                     "ok": True,
-                    "text": text or None,
+                    **metadata,
                     "request_id": request_id,
                 }
             )

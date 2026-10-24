@@ -1,0 +1,4 @@
+id = "exemplo"
+commands = ["exemplo de skill"]
+entrypoint = "plugin.py"
+enabled = true

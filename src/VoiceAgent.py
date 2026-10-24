@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import json
+import time
 import warnings
 from pathlib import Path
 
@@ -25,7 +27,7 @@ class VoiceAgent:
     def __init__(self, models_dir: Path):
         self.models_dir = models_dir
 
-        logging.info("[STT] Carregando modelo %s...", STT_MODEL)
+        logging.info("[STT] Carregando modelo %s em %s (%s)...", STT_MODEL, STT_DEVICE, STT_COMPUTE_TYPE)
         model_path = download_model(STT_MODEL, output_dir=str(self.models_dir))
 
         self.model = WhisperModel(
@@ -34,7 +36,7 @@ class VoiceAgent:
             compute_type=STT_COMPUTE_TYPE,
             cpu_threads=STT_CPU_THREADS,
         )
-        logging.info("[STT] Modelo pronto na RAM.")
+        logging.info("[STT] Modelo pronto: dispositivo=%s, precisão=%s.", self.model.model.device, self.model.model.compute_type)
 
     @staticmethod
     def ensure_model_downloaded(model_size: str, models_dir: Path) -> None:
@@ -50,7 +52,8 @@ class VoiceAgent:
         language: str | None = "pt",
         prompt: str | None = None,
         temperature: float | None = None,
-    ) -> str:
+        return_metadata: bool = False,
+    ) -> str | dict:
         """Transcribe an in-memory audio file.
 
         ``audio_bytes`` may contain WAV, MP3, WebM and other formats supported by
@@ -73,19 +76,44 @@ class VoiceAgent:
             "best_of": STT_BEST_OF,
             "temperature": transcription_temperature,
             "condition_on_previous_text": False,
-            "vad_filter": False,
+            "vad_filter": return_metadata,
             "vad_parameters": {"min_silence_duration_ms": 500},
         }
 
         if prompt:
             transcribe_kwargs["initial_prompt"] = prompt
 
-        segments, _ = self.model.transcribe(audio_stream, **transcribe_kwargs)
+        def report(state, processed=0.0, duration=0.0):
+            if return_metadata:
+                logger_stt.info('[STT_PROGRESS] %s', json.dumps({
+                    'state': state, 'processed': processed, 'duration': duration,
+                    'percent': min(99.9, processed / duration * 100) if duration > 0 else 0,
+                }))
 
-        text = [segment.text for segment in segments]
-        res = " ".join(text).strip()
+        report('preparing')
+        normalized = []
+        try:
+            segments, info = self.model.transcribe(audio_stream, **transcribe_kwargs)
+            report('transcribing', 0, float(info.duration))
+            last_report = time.monotonic()
+            for i, segment in enumerate(segments):
+                if segment.text.strip():
+                    normalized.append({'id': i, 'start': float(segment.start),
+                                       'end': float(segment.end), 'text': segment.text.strip()})
+                if time.monotonic() - last_report >= 1:
+                    report('transcribing', float(segment.end), float(info.duration))
+                    last_report = time.monotonic()
+            report('completed', float(info.duration), float(info.duration))
+        except Exception:
+            report('error')
+            raise
+        segments = normalized
+        res = " ".join(segment["text"] for segment in segments).strip()
 
         if res:
             logger_stt.info(res)
 
+        if return_metadata:
+            return {"text": res, "segments": segments, "duration": float(info.duration),
+                    "language": info.language}
         return res

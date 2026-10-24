@@ -8,7 +8,19 @@ __pycache__
 .env
 keywords.txt
 models.yaml
+shortcuts.yaml
 uv.lock
 *.spec
 *.pyc
 
+
+# Projetos pessoais/externos ficam em repositórios próprios; exemplos distribuídos são versionados.
+/Plugins/Skills/*
+!/Plugins/Skills/abrir_bloco_de_notas/
+!/Plugins/Skills/abrir_navegador/
+!/Plugins/Skills/previsao_do_tempo/
+!/Plugins/Skills/modo_ditado/
+!/Plugins/Skills/exemplo/
+!/Plugins/Skills/aprender_novo_comando/
+/Plugins/Browser/*
+!/Plugins/Browser/isekai0/

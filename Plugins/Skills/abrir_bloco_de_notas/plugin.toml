@@ -1,0 +1,4 @@
+id = "abrir_bloco_de_notas"
+commands = ["abrir bloco de notas"]
+entrypoint = "plugin.py"
+enabled = true

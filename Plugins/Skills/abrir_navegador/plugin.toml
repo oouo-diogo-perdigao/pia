@@ -1,0 +1,4 @@
+id = "abrir_navegador"
+commands = ["abrir navegador"]
+entrypoint = "plugin.py"
+enabled = true

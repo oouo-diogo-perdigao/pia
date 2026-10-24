@@ -1,17 +1,33 @@
 # uv run pyinstaller --onefile --noconsole --name "PIA Server Python" --icon "pia.ico" --add-data "pia.png;." pia_launcher.py
 
+import os
 import queue
+import json
+import signal
 import subprocess
 import sys
+import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
+import autostart
 import pystray
 from PIL import Image
 
-PROJECT_DIR = Path(r"D:\codes\pia")
+IS_WINDOWS = sys.platform == "win32"
+
+if getattr(sys, "frozen", False):
+    PROJECT_DIR = Path(os.environ.get("PIA_DIR", r"D:\codes\pia"))
+else:
+    PROJECT_DIR = Path(__file__).resolve().parent
+
 LOGS_DIR = PROJECT_DIR / "logs"
+
+if str(PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_DIR))
+
+import hotkeys
 
 APP_NAME = "PIA Server Python"
 POLL_INTERVAL = 500
@@ -101,11 +117,18 @@ class LogViewer:
             xscrollcommand=horizontal.set,
         )
 
-        text.grid(row=0, column=0, sticky="nsew")
-        vertical.grid(row=0, column=1, sticky="ns")
-        horizontal.grid(row=1, column=0, sticky="ew")
+        if log_file.stem.lower() == 'stt':
+            progress_frame = ttk.Frame(frame)
+            progress_frame.grid(row=0, column=0, columnspan=2, sticky='ew', padx=10, pady=8)
+            progress_label = ttk.Label(progress_frame, text='Transcrição local: aguardando')
+            progress_label.pack(anchor='w')
+            progress_bar = ttk.Progressbar(progress_frame, maximum=100, mode='determinate')
+            progress_bar.pack(fill='x', pady=(4, 0))
+        text.grid(row=1, column=0, sticky="nsew")
+        vertical.grid(row=1, column=1, sticky="ns")
+        horizontal.grid(row=2, column=0, sticky="ew")
 
-        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_rowconfigure(1, weight=1)
         frame.grid_columnconfigure(0, weight=1)
 
         self.notebook.add(frame, text=log_file.stem)
@@ -116,6 +139,8 @@ class LogViewer:
             "frame": frame,
         }
 
+        if log_file.stem.lower() == 'stt':
+            self.tabs[log_file.name].update(progress_label=progress_label, progress_bar=progress_bar, progress_buffer='')
         self.positions[log_file.name] = 0
 
         self.load_initial_content(log_file.name)
@@ -134,6 +159,7 @@ class LogViewer:
                 content = file.read()
 
                 text.insert("end", content)
+                self.update_stt_progress(info, content)
                 text.see("end")
 
                 self.positions[filename] = file.tell()
@@ -171,6 +197,7 @@ class LogViewer:
                         should_scroll = text.yview()[1] >= 0.98
 
                         text.insert("end", new_content)
+                        self.update_stt_progress(info, new_content)
 
                         if should_scroll:
                             text.see("end")
@@ -179,6 +206,46 @@ class LogViewer:
                 pass
 
         self.root.after(POLL_INTERVAL, self.update_logs)
+
+    def update_stt_progress(self, info, content):
+        if 'progress_bar' not in info:
+            return
+        content = info.get('progress_buffer', '') + content
+        lines = content.split('\n')
+        info['progress_buffer'] = lines.pop()
+        for line in lines:
+            if '[STT_PROGRESS] ' not in line:
+                continue
+            try:
+                data = json.loads(line.split('[STT_PROGRESS] ', 1)[1])
+                state = data['state']
+                bar = info['progress_bar']
+                bar.stop()
+                if state == 'preparing':
+                    bar.configure(mode='indeterminate', value=0)
+                    bar.start(15)
+                    label = 'Local: carregando modelo / preparando áudio...'
+                elif state == 'transcribing':
+                    percent = max(0, min(99.9, float(data['percent'])))
+                    bar.configure(mode='determinate', value=percent)
+                    processed, duration = float(data['processed']), float(data['duration'])
+                    label = f'Local: {percent:.1f}% — {self.audio_time(processed)} / {self.audio_time(duration)}'
+                elif state == 'completed':
+                    bar.configure(mode='determinate', value=100)
+                    label = 'Local: transcrição concluída — 100%'
+                elif state == 'error':
+                    bar.configure(mode='determinate')
+                    label = 'Local: falha na transcrição; consulte o log'
+                else:
+                    continue
+                info['progress_label'].configure(text=label)
+            except (ValueError, TypeError, KeyError):
+                continue
+
+    @staticmethod
+    def audio_time(seconds):
+        seconds = max(0, int(seconds))
+        return f'{seconds // 3600:02}:{seconds // 60 % 60:02}:{seconds % 60:02}'
 
     def process_commands(self):
         try:
@@ -206,31 +273,98 @@ def terminate_server(server):
     if server.poll() is not None:
         return
 
-    subprocess.run(
-        [
-            "taskkill",
-            "/PID",
-            str(server.pid),
-            "/T",
-            "/F",
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=subprocess.CREATE_NO_WINDOW,
-    )
+    if IS_WINDOWS:
+        subprocess.run(
+            [
+                "taskkill",
+                "/PID",
+                str(server.pid),
+                "/T",
+                "/F",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    else:
+        try:
+            os.killpg(server.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
 
     try:
         server.wait(timeout=5)
     except subprocess.TimeoutExpired:
+        if not IS_WINDOWS:
+            try:
+                os.killpg(server.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def start_server():
+    if IS_WINDOWS:
+        return subprocess.Popen(
+            ["uv", "run", "python", "-m", "server"],
+            cwd=PROJECT_DIR,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+
+    python = sys.executable if not getattr(sys, "frozen", False) else "python3"
+    return subprocess.Popen(
+        [python, "-m", "server"],
+        cwd=PROJECT_DIR,
+        start_new_session=True,
+        preexec_fn=_die_with_parent,
+    )
+
+
+def _die_with_parent():
+    import ctypes
+
+    PR_SET_PDEATHSIG = 1
+    try:
+        ctypes.CDLL("libc.so.6").prctl(PR_SET_PDEATHSIG, signal.SIGTERM)
+    except OSError:
         pass
 
 
+def start_hotkeys():
+    script = PROJECT_DIR / "hotkeys.py"
+    if not script.exists():
+        return None
+
+    if IS_WINDOWS:
+        command = ["uv", "run", "python", str(script)]
+        flags = subprocess.CREATE_NO_WINDOW
+    else:
+        python = sys.executable if not getattr(sys, "frozen", False) else "python3"
+        command = [python, str(script)]
+        flags = 0
+
+    try:
+        return subprocess.Popen(command, cwd=PROJECT_DIR, creationflags=flags)
+    except OSError:
+        return None
+
+
+def stop_process(process):
+    if process is None or process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        process.kill()
+
+
 def main():
-    server = subprocess.Popen(
-        ["uv", "run", "python", "-m", "server"],
-        cwd=PROJECT_DIR,
-        creationflags=subprocess.CREATE_NO_WINDOW,
-    )
+    server = start_server()
+    hotkeys_process = start_hotkeys()
+
+    if not IS_WINDOWS:
+        signal.signal(signal.SIGTERM, lambda *_: commands.put("quit"))
+        signal.signal(signal.SIGHUP, lambda *_: commands.put("quit"))
 
     root = tk.Tk()
     root.withdraw()
@@ -241,17 +375,48 @@ def main():
         commands.put("show")
 
     def quit_application(icon, item):
+        stop_process(hotkeys_process)
         terminate_server(server)
 
         icon.stop()
 
         commands.put("quit")
 
+    def tray_action(action):
+        def handler(icon, item):
+            if IS_WINDOWS:
+                threading.Thread(
+                    target=hotkeys.run_action,
+                    args=(action, hotkeys.load_config()),
+                    daemon=True,
+                ).start()
+                return
+            # Runs out of process so its clipboard Tk instance doesn't clash with the log viewer's.
+            subprocess.Popen(
+                [sys.executable, str(PROJECT_DIR / "hotkeys.py"), action],
+                cwd=PROJECT_DIR,
+            )
+
+        return handler
+
+    def toggle_autostart(icon, item):
+        autostart.set_enabled(not autostart.is_enabled())
+
     tray_menu = pystray.Menu(
         pystray.MenuItem(
             "Abrir inspeção",
             show_viewer,
             default=True,
+        ),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Ditado (STT)", tray_action("dictation")),
+        pystray.MenuItem("Ler área de transferência (TTS)", tray_action("speak")),
+        pystray.MenuItem("Ler em modo história (TTS)", tray_action("storytelling")),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem(
+            "Inicializar",
+            toggle_autostart,
+            checked=lambda item: autostart.is_enabled(),
         ),
         pystray.MenuItem(
             "Encerrar PIA",
@@ -266,9 +431,17 @@ def main():
         tray_menu,
     )
 
-    tray_icon.run_detached()
+    if IS_WINDOWS:
+        tray_icon.run_detached()
+    else:
+        # The GTK/AppIndicator backends need their own GLib loop, which tkinter doesn't run.
+        threading.Thread(target=tray_icon.run, daemon=True).start()
 
-    root.mainloop()
+    try:
+        root.mainloop()
+    finally:
+        stop_process(hotkeys_process)
+        terminate_server(server)
 
 
 if __name__ == "__main__":

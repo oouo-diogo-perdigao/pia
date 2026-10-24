@@ -457,6 +457,8 @@ class TTSManager:
         story_id=None,
         story_index=None,
         story_total=None,
+        completion=None,
+        cancelled=None,
     ):
         backend = "qwen" if voice in self.qwen_voices() else "kokoro"
 
@@ -474,6 +476,8 @@ class TTSManager:
                     "story_id": story_id,
                     "story_index": story_index,
                     "story_total": story_total,
+                    "completion": completion,
+                    "cancelled": cancelled,
                 }
             )
 
@@ -564,7 +568,10 @@ class TTSManager:
         for job_queue in self.tts_job_queues.values():
             while True:
                 try:
-                    job_queue.get_nowait()
+                    removed = job_queue.get_nowait()
+                    completion = removed.get('completion')
+                    if completion is not None:
+                        completion.cancel()
                     job_queue.task_done()
 
                 except queue.Empty:
@@ -580,9 +587,14 @@ class TTSManager:
             except queue.Empty:
                 continue
 
-            if self._stop_event.is_set():
+            completion = job.get('completion')
+            cancelled = job.get('cancelled')
+            handed_to_player = False
+            if self._stop_event.is_set() or (cancelled is not None and cancelled.is_set()):
+                if completion is not None:
+                    completion.cancel()
                 job_queue.task_done()
-                break
+                continue
 
             try:
                 text = job["text"]
@@ -639,20 +651,27 @@ class TTSManager:
                         job_name,
                         wav_bytes,
                         device=device,
+                        completion=completion,
+                        cancelled=cancelled,
                     )
+                    handed_to_player = True
 
                     logging.info(
                         "[TTSManager] [%s] " "Áudio enviado para fila de reprodução.",
                         job_name,
                     )
 
-            except Exception:
+            except Exception as exc:
+                if completion is not None and not completion.done():
+                    completion.set_exception(exc)
                 logging.exception(
                     "[TTSManager] Erro processando parte " "na fila %s.",
                     backend,
                 )
 
             finally:
+                if completion is not None and not completion.done() and not handed_to_player:
+                    completion.cancel()
                 job_queue.task_done()
 
     def _add_story_result(
@@ -907,7 +926,7 @@ class TTSManager:
             for process in self.worker_processes.values()
         )
 
-    def add_audio_job(self, jobName, wav_bytes, device=None):
+    def add_audio_job(self, jobName, wav_bytes, device=None, completion=None, cancelled=None):
         with self.lock:
             self._stop_event.clear()
             self.queue.put(
@@ -915,6 +934,8 @@ class TTSManager:
                     "jobName": jobName,
                     "wav_bytes": wav_bytes,
                     "device": device,
+                    "completion": completion,
+                    "cancelled": cancelled,
                 }
             )
             self.status = "playing"
@@ -931,7 +952,11 @@ class TTSManager:
             self._stop_event.set()
             while not self.queue.empty():
                 try:
-                    self.queue.get_nowait()
+                    removed = self.queue.get_nowait()
+                    completion = removed.get('completion') if removed else None
+                    if completion is not None:
+                        completion.cancel()
+                    self.queue.task_done()
                 except queue.Empty:
                     break
             try:
@@ -943,53 +968,50 @@ class TTSManager:
     def _play_loop(self):
         import sounddevice as sd
         import numpy as np
-
         try:
             while not self._stop_event.is_set():
                 try:
                     item = self.queue.get(timeout=0.1)
                 except queue.Empty:
-                    if self._stop_event.is_set():
-                        break
                     continue
                 if not item:
                     continue
-
-                wav_bytes = item["wav_bytes"]
-                device = item["device"]
-                job_name = item["jobName"]
-
-                if self._stop_event.is_set() or not wav_bytes:
-                    continue
-
-                with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
-                    data = wf.readframes(wf.getnframes())
-                    audio_data = (
-                        int.from_bytes(data[i : i + 2], "little", signed=True) / 32768.0
-                        for i in range(0, len(data), 2)
-                    )
-                    arr = np.fromiter(audio_data, dtype=np.float32)
-                    target_device = self._resolve_output_device(device)
-
-                    logging.info(
-                        f"[PLAYER] [{job_name}] Iniciando reprodução do áudio..."
-                    )
-                    sd.play(arr, samplerate=wf.getframerate(), device=target_device)
-
-                    while sd.get_stream().active and not self._stop_event.is_set():
-                        threading.Event().wait(0.05)
-
-                    logging.info(f"[PLAYER] [{job_name}] Reprodução concluída.")
-
-                with self.lock:
-                    if self.queue.empty():
-                        self.status = "idle"
-        except Exception:
-            logging.exception("Erro durante a reprodução local.")
+                completion, cancelled = item.get('completion'), item.get('cancelled')
+                def stopped():
+                    return self._stop_event.is_set() or (cancelled is not None and cancelled.is_set())
+                try:
+                    if stopped() or not item['wav_bytes']:
+                        if completion is not None:
+                            completion.cancel()
+                        continue
+                    with wave.open(io.BytesIO(item['wav_bytes']), 'rb') as wf:
+                        samples = np.frombuffer(wf.readframes(wf.getnframes()), dtype='<i2').astype(np.float32) / 32768.0
+                        if wf.getnchannels() > 1:
+                            samples = samples.reshape(-1, wf.getnchannels())
+                        logging.info('[PLAYER] [%s] Iniciando reprodução do áudio...', item['jobName'])
+                        sd.play(samples, samplerate=wf.getframerate(), device=self._resolve_output_device(item['device']))
+                        while sd.get_stream().active and not stopped():
+                            threading.Event().wait(0.05)
+                        if stopped():
+                            sd.stop()
+                            if completion is not None:
+                                completion.cancel()
+                        elif completion is not None and not completion.done():
+                            completion.set_result(True)
+                        logging.info('[PLAYER] [%s] Reprodução concluída.', item['jobName'])
+                except Exception as exc:
+                    if completion is not None and not completion.done():
+                        completion.set_exception(exc)
+                    logging.exception('Erro durante a reprodução local.')
+                finally:
+                    self.queue.task_done()
+                    with self.lock:
+                        if self.queue.empty():
+                            self.status = 'idle'
         finally:
             with self.lock:
                 if self.queue.empty():
-                    self.status = "idle"
+                    self.status = 'idle'
 
     def _resolve_output_device(self, device_param):
         """

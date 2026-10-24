@@ -1,0 +1,4 @@
+id = "previsao_do_tempo"
+commands = ["previsão do tempo"]
+entrypoint = "plugin.py"
+enabled = true

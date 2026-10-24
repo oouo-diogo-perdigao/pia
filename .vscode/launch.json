@@ -9,7 +9,7 @@
       "runtimeArgs": [
         "run",
         "watchfiles",
-        "uv run python -m server"
+        "uv run python pia_launcher.py"
       ],
       "console": "integratedTerminal"
     }

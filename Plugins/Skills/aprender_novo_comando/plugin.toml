@@ -1,0 +1,4 @@
+id = "aprender_novo_comando"
+commands = ["aprender novo comando"]
+entrypoint = "plugin.py"
+enabled = true

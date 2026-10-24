@@ -12,6 +12,8 @@ from PyQt6.QtCore import (
     Q_ARG,
     qInstallMessageHandler,
     QtMsgType,
+    pyqtSignal,
+    pyqtSlot,
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QApplication, QWidget
@@ -39,8 +41,33 @@ WINDOW_SIZE = 500  # Tamanho do overlay em pixels
 
 
 class PiaOverlay(QWidget):
+    skill_action_requested = pyqtSignal(str, bool)
+
+    @pyqtSlot(str, bool)
+    def apply_skill_action(self, action, enabled):
+        if action == 'close':
+            self._is_thinking = False
+            self._is_speaking = False
+            self.hide()
+        elif action == 'blink':
+            self.blink()
+        elif action == 'thinking':
+            self.set_inner_orbit_fast(enabled)
+        elif action == 'processing':
+            self.set_outer_orbit_fast(enabled)
+        elif action == 'look':
+            self.set_eyes_moving(enabled)
+        elif action in ('look_left', 'look_right', 'center'):
+            offset = (-8 if action == 'look_left' else 8) if enabled and action != 'center' else 0
+            self.view.page().runJavaScript(
+                "document.querySelectorAll('.animation-looking-eyes').forEach(e => {e.style.animationPlayState='paused'; e.style.transform='translateX(" + str(offset) + "px)';});")
+        elif action == 'pulse':
+            val = 'running' if enabled else 'paused'
+            self.view.page().runJavaScript("document.querySelectorAll('.animation-pulse').forEach(e => e.style.animationPlayState='" + val + "');")
+
     def __init__(self, svg_content: str):
         super().__init__()
+        self.skill_action_requested.connect(self.apply_skill_action)
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint

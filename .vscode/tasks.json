@@ -3,8 +3,8 @@
   "tasks": [
     {
       "type": "shell",
-      "label": "sat: Rodar Servidor",
-      "command": "python -m server",
+      "label": "PIA: bandeja e API",
+      "command": "uv run python pia_launcher.py",
       "group": "none",
       "presentation": {
         "reveal": "always",

@@ -1,9 +1,61 @@
 """Top level server runner inside src package for the pia engine."""
 
 from __future__ import annotations
+import os
+import sys
 import time
 import threading
 import traceback
+import types
+from pathlib import Path
+
+
+def _ensure_xauthority() -> None:
+    """No Wayland o XWayland só aceita o cookie da sessão gráfica."""
+    current = os.environ.get("XAUTHORITY", "")
+    if current and os.path.isfile(current):
+        return
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    folder = Path(runtime)
+    if not folder.is_dir():
+        return
+    matches = sorted(
+        folder.glob(".mutter-Xwaylandauth.*"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if matches:
+        os.environ["XAUTHORITY"] = str(matches[0])
+
+
+def _keep_api_up_without_x_display() -> None:
+    """PyAutoGUI abre o X na importação e derruba o processo inteiro.
+
+    A API HTTP precisa continuar no ar. Colar na janela ativa é que depende do X.
+    """
+    if sys.platform == "win32":
+        return
+    _ensure_xauthority()
+    try:
+        import pyautogui  # noqa: F401
+        return
+    except ImportError:
+        return
+    except Exception as exc:
+        for name in list(sys.modules):
+            if name == "pyautogui" or name.startswith("pyautogui.") or name == "mouseinfo":
+                sys.modules.pop(name, None)
+        sys.modules["mouseinfo"] = types.ModuleType("mouseinfo")
+        x11 = types.ModuleType("pyautogui._pyautogui_x11")
+        x11._size = lambda: (0, 0)
+        x11.keyboardMapping = {}
+        sys.modules["pyautogui._pyautogui_x11"] = x11
+        import pyautogui  # noqa: F401
+        print(
+            f"[PIA] Display X indisponível ({exc}). A API continua no ar; "
+            "ações de teclado na tela ficam indisponíveis.",
+            file=sys.stderr,
+        )
 
 # Reuse the project's existing Gemini credential when a dedicated STT key was
 # not configured. Also normalize the unary model name to the Live variant used
@@ -24,6 +76,8 @@ from src.HybridSTTManager import STTManager as _HybridSTTManager
 
 _stt_module.STTManager = _HybridSTTManager
 
+_keep_api_up_without_x_display()
+
 from src.commands_loader import load_commands
 from src.HTTPServer import run_http_server
 from src.thread_wakeword import audio_listening_loop
@@ -39,7 +93,7 @@ def main() -> None:
     To avoid accidental process shutdown when a background thread crashes,
     the main thread keeps running while the overlay is active.
     """
-    load_commands("commands")
+    load_commands()
 
     # Keep HTTP server in background so overlay can stay in main thread.
     http_thread = threading.Thread(target=run_http_server, daemon=True)

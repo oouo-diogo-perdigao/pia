@@ -38,7 +38,10 @@ def _setup_windows_dlls():
 
 _setup_windows_dlls()
 
-import sherpa_onnx
+try:
+    import sherpa_onnx
+except ImportError:
+    sherpa_onnx = None
 
 import logging
 import shutil
@@ -233,11 +236,9 @@ def _start_continuous_session(stream, keyword_spotter) -> None:
 
     logging.info(">>> SESSÃO DE COMANDOS INICIADA <<<")
 
-    try:
-        from .commands import modo_ditado
-    except Exception:
-        logging.exception("[MODO DITADO] Falha ao importar módulo.")
-        modo_ditado = None
+    from .skills_runtime import get_runtime, is_stop_phrase
+    skills = get_runtime()
+    skills.cancel(close_interface=False)
 
     # play_sound(START_SOUND)
     # time.sleep(0.3)
@@ -303,35 +304,24 @@ def _start_continuous_session(stream, keyword_spotter) -> None:
 
                     for text in chunks:
                         text_lower = text.lower().strip()
-                        words = text_lower.split()
-
-                        if (
-                            len(words) <= 3
-                            and words
-                            and (
-                                words[-1] == "finalizar"
-                                or words[-1].startswith("encerra")
-                            )
-                        ):
-                            logging.info(f"[PARADA SOLICITADA]: '{text_lower}'")
-                            if modo_ditado:
-                                modo_ditado.disable_dictation()
+                        if not _state.SESSION_ACTIVE:
                             return
-
-                        if modo_ditado and modo_ditado.process_dictation_chunk(text):
+                        if is_stop_phrase(text_lower):
+                            skills.cancel()
+                            return
+                        if skills.dispatch(text):
                             continue
 
                         if text_lower:
                             logging.info(f"[COMANDO PROCESSADO]: {text_lower}")
-                            process_command(text_lower, send_to_agent)
+                            process_command(text, send_to_agent)
                 except queue.Empty:
                     break
                 except Exception as e:
                     logging.error(f"Erro ao processar evento SSE do SAT: {e}")
 
             if (
-                modo_ditado
-                and not modo_ditado.dictation_active
+                not skills.active
                 and not prompted_inactivity
                 and (now - last_speech_time >= 3.0)
             ):
@@ -363,8 +353,7 @@ def _start_continuous_session(stream, keyword_spotter) -> None:
                     if keyword:
                         logging.info(f"[CANCELAMENTO VIA PIA]: {keyword}")
 
-                        if modo_ditado:
-                            modo_ditado.disable_dictation()
+                        skills.cancel()
                         return
 
     finally:
@@ -373,8 +362,7 @@ def _start_continuous_session(stream, keyword_spotter) -> None:
         except Exception:
             pass
 
-        if modo_ditado and getattr(modo_ditado, "dictation_active", False):
-            modo_ditado.disable_dictation()
+        skills.cancel(close_interface=False)
 
         play_sound(END_SOUND)
 
@@ -388,6 +376,13 @@ def _start_continuous_session(stream, keyword_spotter) -> None:
 # Loop principal
 # ---------------------------------------------------------------------------
 def audio_listening_loop() -> None:
+    if sherpa_onnx is None:
+        logging.error(
+            "sherpa_onnx indisponível (libonnxruntime incompatível). "
+            "A palavra de ativação fica desligada; o restante da API continua no ar."
+        )
+        return
+
     # logging.info("Verificando/Baixando modelos do sherpa_onnx...")
     _ensure_keyword_model()  # <--- Adicione esta linha aqui
 

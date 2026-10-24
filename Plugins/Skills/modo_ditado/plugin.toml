@@ -1,0 +1,4 @@
+id = "modo_ditado"
+commands = ["modo ditado"]
+entrypoint = "plugin.py"
+enabled = true

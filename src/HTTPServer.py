@@ -1,3 +1,4 @@
+from .transcription import timed_result, render_subtitles
 import hmac
 import base64
 import json
@@ -233,7 +234,7 @@ class HTTPServer(BaseHTTPRequestHandler):
 
         return self.rfile.read(content_length)
 
-    def _read_body(self) -> dict | None:
+    def _read_body(self, *, raw: bool = False) -> dict | bytes | None:
         transfer_encoding = self.headers.get("Transfer-Encoding", "").lower()
 
         # aiohttp/Open WebUI may stream multipart file uploads using HTTP chunked
@@ -281,6 +282,8 @@ class HTTPServer(BaseHTTPRequestHandler):
                         raise ValueError("Invalid HTTP chunk terminator.")
 
                 data = b"".join(chunks)
+                if raw:
+                    return data
                 payload = json.loads(data.decode("utf-8"))
                 if not isinstance(payload, dict):
                     raise ValueError("O corpo JSON deve ser um objeto.")
@@ -314,6 +317,8 @@ class HTTPServer(BaseHTTPRequestHandler):
             return None
 
         data = self.rfile.read(content_length)
+        if raw:
+            return data
         payload = json.loads(data.decode("utf-8"))
         if not isinstance(payload, dict):
             raise ValueError("O corpo JSON deve ser um objeto.")
@@ -883,7 +888,11 @@ class HTTPServer(BaseHTTPRequestHandler):
                 self.send_json(404, {"ok": False, "error": "Ação inexistente."})
                 return
 
-            body = self._read_body()
+            raw_audio_upload = (
+                path == "/v1/audio/transcriptions"
+                and not self.headers.get("Content-Type", "").lower().startswith("application/json")
+            )
+            body = self._read_body(raw=raw_audio_upload)
             if body is None:
                 return
 
@@ -1117,10 +1126,10 @@ class HTTPServer(BaseHTTPRequestHandler):
                             )
                             return
 
-                    if response_format not in {"json", "text", "verbose_json"}:
+                    if response_format not in {"json", "text", "verbose_json", "srt", "vtt"}:
                         self.send_openai_error(
                             400,
-                            "This local server supports response_format=json, text, or verbose_json.",
+                            "Supported response_format values: json, text, verbose_json, srt, vtt.",
                             param="response_format",
                         )
                         return
@@ -1134,12 +1143,19 @@ class HTTPServer(BaseHTTPRequestHandler):
                         len(audio_bytes),
                     )
 
+                    requires_timing = response_format in {"verbose_json", "srt", "vtt"}
                     result = STT_MANAGER.transcribe_request(
                         audio_bytes,
                         language=language,
                         prompt=prompt,
                         temperature=temperature,
+                        require_timestamps=requires_timing,
                     )
+                    if result.get("ok") and requires_timing:
+                        try:
+                            result = timed_result(result)
+                        except ValueError as exc:
+                            result = {"ok": False, "error": str(exc)}
 
                     if not result.get("ok"):
                         logging.error("[OPENAI STT] Falha: %s", result.get("error"))
@@ -1152,6 +1168,12 @@ class HTTPServer(BaseHTTPRequestHandler):
 
                     text = result.get("text") or ""
 
+                    if response_format in {"srt", "vtt"}:
+                        self._send(200, render_subtitles(result["segments"], response_format).encode("utf-8"),
+                                   "text/vtt; charset=utf-8" if response_format == "vtt"
+                                   else "application/x-subrip; charset=utf-8")
+                        return
+
                     if response_format == "text":
                         self._send(
                             200, text.encode("utf-8"), "text/plain; charset=utf-8"
@@ -1163,10 +1185,10 @@ class HTTPServer(BaseHTTPRequestHandler):
                             200,
                             {
                                 "task": "transcribe",
-                                "language": language or "auto",
-                                "duration": None,
+                                "language": result.get("language") or language or "auto",
+                                "duration": result["duration"],
                                 "text": text,
-                                "segments": [],
+                                "segments": result["segments"],
                             },
                         )
                         return

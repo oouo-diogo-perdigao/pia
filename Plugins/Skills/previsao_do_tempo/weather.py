@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import os
 from datetime import date, timedelta
 import requests
-from src.utils import speak_tts
 
 # Variáveis exigidas pelo seu sistema principal
 COMMAND_NAME = "previsao do tempo"
@@ -81,32 +79,3 @@ def get_weather(location: str = DEFAULT_LOCATION, when: str = "hoje") -> dict:
         "precipitation_probability_max": daily["precipitation_probability_max"][0],
     }
 
-
-def execute(location: str = DEFAULT_LOCATION, when: str = "hoje"):
-    """Função invocada pelo carregador dinâmico de comandos."""
-    try:
-        data = get_weather(location, when)
-
-        mensagem = (
-            f"A previsão do tempo para {data['location']} é de "
-            f"mínima de {data['temperature_min_c']} graus e máxima de {data['temperature_max_c']} graus. "
-            f"A chance de chuva é de {data['precipitation_probability_max']} por cento."
-        )
-
-        print(f"[CLIMA]: {mensagem}")
-        speak_tts(mensagem)
-
-    except Exception as e:
-        erro_msg = f"Não foi possível obter a previsão do tempo. Erro: {e}"
-        print(f"[CLIMA ERRO]: {erro_msg}")
-        speak_tts("Desculpe, não consegui obter a previsão do tempo no momento.")
-
-
-# python comandos/clima.py
-if __name__ == "__main__":
-    print("\n--- TESTANDO EXECUÇÃO DIRETA DO COMANDO ---")
-    # Testa a função execute() diretamente
-    execute("Belo Horizonte", "hoje")
-
-    # Se quiser testar outro local ou data:
-    # execute("Rio de Janeiro", "amanhã")

@@ -9,6 +9,7 @@ import threading
 import time
 import wave
 
+from .transcription import timed_result
 from .STTManager import STTManager as LocalSTTManager, SATState
 from .config import (
     logging,
@@ -164,6 +165,7 @@ class STTManager(LocalSTTManager):
         language: str | None = None,
         prompt: str | None = None,
         temperature: float | None = None,
+        require_timestamps: bool = False,
     ) -> dict:
         if not audio_bytes:
             return {"ok": False, "error": "Arquivo de áudio vazio."}
@@ -175,10 +177,21 @@ class STTManager(LocalSTTManager):
             if not self._provider_available(provider):
                 continue
 
+            if provider == 'groq' and len(audio_bytes) > int(os.getenv('STT_GROQ_MAX_UPLOAD_BYTES', '25000000')):
+                reason = f'groq: arquivo de {len(audio_bytes)} bytes excede o limite local de upload; pulando sem enviar'
+                errors.append(reason)
+                logging.info('[STT] %s', reason)
+                continue
+
+            if require_timestamps and provider == "gemini":
+                errors.append("gemini: este provider não fornece timestamps reais")
+                continue
+
             if provider == "local":
                 self.active_provider = "local"
                 self._force_local_worker = True
                 try:
+                    logger_stt.info('[STT_PROGRESS] {"state":"preparing","processed":0,"duration":0,"percent":0}')
                     result = super().transcribe_request(
                         audio_bytes,
                         language=language,
@@ -187,22 +200,38 @@ class STTManager(LocalSTTManager):
                     )
                     if result.get("ok"):
                         result["provider"] = "local"
-                    return result
+                        if require_timestamps:
+                            result = timed_result(result)
+                        return result
+                    logger_stt.info('[STT_PROGRESS] {"state":"error","processed":0,"duration":0,"percent":0}')
+                    errors.append("local: " + str(result.get("error")))
+                except Exception as exc:
+                    logger_stt.info('[STT_PROGRESS] {"state":"error","processed":0,"duration":0,"percent":0}')
+                    errors.append(f"local: {exc}")
                 finally:
                     self._force_local_worker = False
+                continue
 
             try:
                 self.active_provider = provider
-                text = self._transcribe_remote(
-                    provider,
-                    audio_bytes,
-                    language=language,
-                    prompt=prompt,
-                )
+                if provider == "groq":
+                    result = self._transcribe_groq_litellm(
+                        audio_bytes, language=language, prompt=prompt,
+                        return_metadata=require_timestamps,
+                    )
+                else:
+                    result = {"text": self._transcribe_remote(
+                        provider, audio_bytes, language=language, prompt=prompt)}
+                if isinstance(result, str):
+                    result = {"text": result}
+                if require_timestamps:
+                    result = timed_result(result)
+                text = result.get("text")
                 if text:
                     logger_stt.info(text)
                 return {
                     "ok": True,
+                    **result,
                     "text": text or None,
                     "request_id": None,
                     "provider": provider,
@@ -215,7 +244,8 @@ class STTManager(LocalSTTManager):
         self.active_provider = None
         return {
             "ok": False,
-            "error": "Todos os providers STT falharam. " + " | ".join(errors),
+            "error": ("Não foi possível obter timestamps reais. " if require_timestamps else
+                      "Todos os providers STT falharam. ") + " | ".join(errors),
         }
 
     def get_status_payload(self) -> dict:
@@ -341,7 +371,10 @@ class STTManager(LocalSTTManager):
         *,
         language: str | None = None,
         prompt: str | None = None,
-    ) -> str:
+        return_metadata: bool = False,
+    ) -> str | dict:
+        if len(audio_bytes) > int(os.getenv('STT_GROQ_MAX_UPLOAD_BYTES', '25000000')):
+            raise RemoteSTTUnavailable('Arquivo excede o limite de 25 MB para upload ao Groq.')
         if not GROQ_API_KEY:
             raise RemoteSTTUnavailable("GROQ_API_KEY não configurada.")
 
@@ -361,15 +394,24 @@ class STTManager(LocalSTTManager):
                     "file": audio_file,
                     "api_key": GROQ_API_KEY,
                 }
+                if return_metadata:
+                    kwargs["response_format"] = "verbose_json"
                 if language:
                     kwargs["language"] = language
                 if prompt:
                     kwargs["prompt"] = prompt
                 response = litellm.transcription(**kwargs)
 
-            if isinstance(response, dict):
-                return str(response.get("text") or "").strip()
-            return str(getattr(response, "text", "") or "").strip()
+            data = response if isinstance(response, dict) else response.model_dump()
+            if return_metadata:
+                # Decode the uploaded file to measure its full duration, including trailing silence.
+                # Never infer duration from the last speech segment.
+                from faster_whisper.audio import decode_audio
+                samples = decode_audio(io.BytesIO(audio_bytes), sampling_rate=16000)
+                return {"text": str(data.get("text") or "").strip(),
+                        "segments": data.get("segments"), "duration": len(samples) / 16000,
+                        "language": data.get("language") or language or "auto"}
+            return str(data.get("text") or "").strip()
         finally:
             try:
                 os.unlink(tmp_path)
