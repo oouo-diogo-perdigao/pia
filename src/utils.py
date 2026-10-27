@@ -1,5 +1,6 @@
 import threading
 import re
+from urllib.parse import urlsplit
 from .config import logging, PUBLIC_BASE_URL
 from pathlib import Path
 from collections import defaultdict
@@ -42,6 +43,24 @@ def play_sound_async(sound_path: Path):
     threading.Thread(target=_play, daemon=True).start()
 
 
+_URL_RE = re.compile(r"https?://[^\s<>\[\]()\"'`]+", re.IGNORECASE)
+_HOST_SUFFIXES = {
+    "com", "org", "net", "io", "app", "dev", "ai", "co", "me", "tv", "info",
+    "xyz", "br", "pt", "uk", "us", "de", "fr", "es", "it", "nl", "eu", "gov",
+    "edu", "cloud", "page", "site", "online", "tech", "design", "gg", "ly",
+}
+
+
+def _link_alias(url):
+    host = (urlsplit(url.rstrip(".,;:!?)]}")).hostname or "").removeprefix("www.")
+    labels = [part for part in host.split(".") if part]
+    while len(labels) > 1 and labels[-1] in _HOST_SUFFIXES:
+        labels.pop()
+    if not labels or all(part.isdigit() for part in labels):
+        return "link"
+    return "link " + " ".join(labels)
+
+
 def clean_text(text):
     """
     Limpa o texto removendo caracteres indesejados e formatando Markdown.
@@ -53,6 +72,8 @@ def clean_text(text):
     text = re.sub(r"\r\n?", "\n", text)
     # Remove links Markdown, mantendo apenas o texto visível.
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    # URL crua vira o host falável: figma.com -> "link figma", dev.azure.com -> "link dev azure".
+    text = _URL_RE.sub(lambda match: _link_alias(match.group(0)), text)
     # Remove blocos de código Markdown.
     text = re.sub(r"```(?:\w+)?\s*([\s\S]*?)```", r"\1", text)
     # Remove código inline.

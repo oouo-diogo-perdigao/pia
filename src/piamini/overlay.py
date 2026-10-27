@@ -70,13 +70,18 @@ class PiaOverlay(QWidget):
     def __init__(self, svg_content: str):
         super().__init__()
         self.skill_action_requested.connect(self.apply_skill_action)
-        self.setWindowFlags(
+        flags = (
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
-            | Qt.WindowType.WindowTransparentForInput
             | Qt.WindowType.WindowDoesNotAcceptFocus
         )
+        # No Windows o cursor global funciona com a janela transparente a cliques.
+        # No Wayland esse cursor não acompanha o mouse, então a janela precisa
+        # receber enter/leave para o menu de auxílio aparecer.
+        if sys.platform == 'win32':
+            flags |= Qt.WindowType.WindowTransparentForInput
+        self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.resize(WINDOW_SIZE, WINDOW_SIZE)
 
@@ -89,7 +94,7 @@ class PiaOverlay(QWidget):
         self.view.page().setBackgroundColor(Qt.GlobalColor.transparent)
         self.view.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
         self.view.setHtml(svg_content, QUrl.fromLocalFile(str(Path(__file__).parent) + '/'))
-        self.view.loadFinished.connect(lambda _: self.view.page().runJavaScript("startStreaming();"))
+        self.view.loadFinished.connect(lambda _: self.view.page().runJavaScript("window.startStreaming&&startStreaming();"))
         self.view.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         # Faz o QWebEngineView ignorar os cliques do mouse para que o overlay principal receba
@@ -106,7 +111,7 @@ class PiaOverlay(QWidget):
         # Dispara o stream JS assim que a janela é exibida pela primeira vez
         if not self._streaming_started:
             self._streaming_started = True
-            self.view.page().runJavaScript("startStreaming();")
+            self.view.page().runJavaScript("window.startStreaming&&startStreaming();")
 
     def set_speaking(self, speaking: bool):
         self._is_speaking = speaking
