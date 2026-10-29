@@ -64,6 +64,11 @@ def route(handler):
                 respond(handler, 401, {'error': 'Sessão expirada. Recarregue a página.'})
                 return True
             service = get_service()
+            if path.startswith('/api/pia/music/files/') and handler.command=='GET':
+                from Plugins.Apps.music.service import audio_file
+                file=audio_file(path.rsplit('/',1)[1])
+                respond(handler,200,file.read_bytes(),mimetypes.guess_type(file.name)[0] or 'audio/mpeg')
+                return True
             if path.startswith('/api/pia/chat/assets/') and handler.command=='GET':
                 import re
                 name=path.rsplit('/',1)[-1]

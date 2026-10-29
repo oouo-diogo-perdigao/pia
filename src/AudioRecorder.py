@@ -32,6 +32,13 @@ class AudioRecorder:
 
         self.audio_queue = queue.Queue()
         self._raw_frames = []
+        from .voice_interrupt import SpeechOnset
+        self.speech_onset=SpeechOnset()
+        self.speech_started=Event()
+        try:
+            import webrtcvad
+            self.vad=webrtcvad.Vad(2)
+        except ImportError:self.vad=None
 
         # Configurações do Buffer de Fala (Estilo VTuber)
         self.speech_threshold = 0.0030  # Sensibilidade de captação de voz
@@ -49,7 +56,13 @@ class AudioRecorder:
 
         rms = float(np.sqrt(np.mean(indata**2)))
 
-        is_above_threshold = rms > self.speech_threshold
+        from .voice_interrupt import is_echo
+        is_above_threshold = rms > self.speech_threshold and not is_echo(indata,self.sample_rate)
+        if is_above_threshold and self.vad is not None and self.sample_rate in (8000,16000,32000,48000):
+            mono=np.mean(indata,axis=1) if indata.ndim>1 else indata
+            size=int(self.sample_rate*.03)
+            if len(mono)>=size:is_above_threshold=self.vad.is_speech((mono[:size].clip(-1,1)*32767).astype('<i2').tobytes(),self.sample_rate)
+        if self.speech_onset.feed(is_above_threshold,frames/self.sample_rate):self.speech_started.set()
 
         # Detecta se a pessoa está falando
         if is_above_threshold:
@@ -66,8 +79,8 @@ class AudioRecorder:
             if self.silence_counter >= self.silence_chunks_limit:
                 concat_data = np.vstack(self._raw_frames)
 
-                # Só envia se a frase tiver pelo menos 0.8s de áudio
-                if len(concat_data) >= int(self.sample_rate * 0.8):
+                # Preserva respostas curtas (sim/não), sem esperar 0.8s de áudio
+                if len(concat_data) >= int(self.sample_rate * 0.3):
                     chunk_rms = float(np.sqrt(np.mean(concat_data**2)))
                     logging.info(
                         "[TRANSCRICAO ENTRADA] (RMS: %.4f)",
@@ -95,6 +108,8 @@ class AudioRecorder:
         if self.is_recording:
             return
         self.is_recording = True
+        self.speech_started.clear()
+        self.speech_onset.active=0;self.speech_onset.fired=False
         self.is_speaking = False
         self.has_spoken = False
         self.silence_counter = 0

@@ -9,6 +9,9 @@ authors = [
 requires-python = ">=3.12,<3.13"
 
 dependencies = [
+    "opencv-python-headless>=4.10",
+    "jsonschema>=4.0",
+    "webrtcvad-wheels>=2.0.14",
     "faster-whisper>=1.2.1",
     "numpy>=2.5.3",
     "pyperclip>=1.11.0",

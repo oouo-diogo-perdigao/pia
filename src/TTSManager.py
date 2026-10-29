@@ -616,7 +616,7 @@ class TTSManager:
                     job_name=job_name,
                 )
 
-                if self._stop_event.is_set() or not wav_bytes:
+                if self._stop_event.is_set() or (cancelled is not None and cancelled.is_set()) or not wav_bytes:
                     continue
 
                 # ----------------------------------------------------------
@@ -989,6 +989,8 @@ class TTSManager:
                         if wf.getnchannels() > 1:
                             samples = samples.reshape(-1, wf.getnchannels())
                         logging.info('[PLAYER] [%s] Iniciando reprodução do áudio...', item['jobName'])
+                        from src.voice_interrupt import begin_playback
+                        begin_playback(samples,wf.getframerate())
                         sd.play(samples, samplerate=wf.getframerate(), device=self._resolve_output_device(item['device']))
                         while sd.get_stream().active and not stopped():
                             threading.Event().wait(0.05)
@@ -1004,6 +1006,8 @@ class TTSManager:
                         completion.set_exception(exc)
                     logging.exception('Erro durante a reprodução local.')
                 finally:
+                    from src.voice_interrupt import end_playback
+                    end_playback()
                     self.queue.task_done()
                     with self.lock:
                         if self.queue.empty():

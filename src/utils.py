@@ -188,12 +188,12 @@ def extension_for_content_type(content_type: str, fallback: str = ".png") -> str
     )
 
 
-def speak_tts(text: str):
+def speak_tts(text: str, conversation_epoch=None):
     """Envia texto para o servidor TTS reproduzir em áudio."""
     try:
         response = requests.post(
             f"{PUBLIC_BASE_URL}/tts/speak",
-            json={"text": text},
+            json={"text": text, "conversation_epoch":conversation_epoch},
             timeout=10,
         )
         response.raise_for_status()

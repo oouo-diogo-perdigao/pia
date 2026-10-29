@@ -198,21 +198,34 @@ class DesktopUI(QObject):
         threading.Thread(target=work, daemon=True).start()
 
     def send_mini(self, text):
+        previous=getattr(self,'_mini_voice_job',None)
+        if previous is not None:
+            previous.cancelled.set()
+            # Microphone capture keeps running while its dispatcher waits for
+            # the cancelled completion to release the chat lock.
+            with previous.changed:
+                while previous.status=='running':
+                    if self.backend.voice_stop.is_set():return
+                    previous.changed.wait(.2)
         chat = self.service.store.get('mini:chat')
         if not chat or not any(c['id'] == chat for c in self.service.store.chat_records()):
             chat = self.service.store.new_chat('Mini PIA')
             self.service.store.set('mini:chat', chat)
         job = self.service.send(chat, text)
+        self._mini_voice_job=self.service.jobs[job]
+        self.backend.cancel_voice_reply=lambda: self.service.jobs[job].cancelled.set()
         self.speak_job(job)
 
     def speak_job(self, identity):
         job = self.service.jobs[identity]
+        from .voice_interrupt import epoch
+        generation=epoch()
         def wait():
             with job.changed:
                 while job.status == 'running':
                     job.changed.wait(1)
-            if job.status == 'done' and job.text:
-                self.backend.speak(job.text)
+            if job.status == 'done' and job.text and not job.cancelled.is_set() and epoch()==generation:
+                self.backend.speak(job.text,conversation_epoch=generation)
         threading.Thread(target=wait, daemon=True).start()
 
     def app_native(self, identity, action, payload):

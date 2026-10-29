@@ -1,6 +1,7 @@
 """Native Mini controls: dragging, hover cooldown and a focus-safe HTML composer."""
 import ctypes
 import math
+import random
 import sys
 import time
 from PyQt6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF, QTimer, Qt, QVariantAnimation
@@ -119,7 +120,14 @@ class HoverBlink:
         self.inside = inside
         if should:
             self.last = now
-        return should
+            return random.choice((None,None,'blink','look_left','look_right'))
+        return None
+
+def hover_effect(overlay,action):
+    if action=='blink':overlay.blink()
+    elif action in ('look_left','look_right'):
+        overlay.skill_action_requested.emit(action,True)
+        QTimer.singleShot(650,lambda:overlay.skill_action_requested.emit('center',False))
 
 
 def _pop(t):
@@ -589,8 +597,7 @@ class MiniControls(QObject):
             return
         cursor = QCursor.pos()
         inside = self._over_mini(cursor)
-        if self.blink.update(inside, time.monotonic()):
-            self.overlay.blink()
+        hover_effect(self.overlay,self.blink.update(inside,time.monotonic()))
         if self.dragging or self.ui.composer.isVisible():
             if self.ui.composer.isVisible() and self.menu.isVisible():
                 self.menu.collapse()
@@ -624,8 +631,7 @@ class MiniControls(QObject):
         over_overlay = self._probe_hit and self._over_mini(QCursor.pos())
         over_menu = self.menu.hovered()
         self._clicks.pass_clicks(self.overlay)
-        if self.blink.update(over_overlay, time.monotonic()):
-            self.overlay.blink()
+        hover_effect(self.overlay,self.blink.update(over_overlay,time.monotonic()))
         if self.dragging:
             return
         if self.ui.composer.isVisible():

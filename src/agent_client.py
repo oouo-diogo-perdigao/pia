@@ -12,7 +12,7 @@ from .config import (
 )
 
 
-def _synthesize_and_speak(text_chunk: str) -> None:
+def _synthesize_and_speak(text_chunk: str, generation=None) -> None:
     """Envia um pedaço de texto para o SAT sintetizar e falar."""
     if not text_chunk or not text_chunk.strip():
         return
@@ -20,7 +20,7 @@ def _synthesize_and_speak(text_chunk: str) -> None:
         # Exemplo padrão de chamada ao SAT local
         requests.post(
             f"{PUBLIC_BASE_URL}/tts/speak",  # Ajuste para a rota real do seu SAT se necessário
-            json={"text": text_chunk},
+            json={"text": text_chunk, "conversation_epoch": generation},
             timeout=5.0,
         )
     except Exception as e:
@@ -29,6 +29,8 @@ def _synthesize_and_speak(text_chunk: str) -> None:
 
 def _consume_agent_stream(prompt_text: str) -> None:
     """Consome o stream SSE do agente e envia os trechos para o SAT de forma fluida."""
+    from .voice_interrupt import epoch
+    generation=epoch()
     try:
         logging.info(f"[AGENT] Iniciando stream para -> '{prompt_text}'")
 
@@ -52,6 +54,9 @@ def _consume_agent_stream(prompt_text: str) -> None:
         response.raise_for_status()
 
         for line in response.iter_lines():
+            if epoch()!=generation:
+                response.close()
+                return
             if not line:
                 continue
 
@@ -71,7 +76,7 @@ def _consume_agent_stream(prompt_text: str) -> None:
 
                         if content_fragment:
                             # Envia o pedaço imediatamente para o SAT falar
-                            _synthesize_and_speak(content_fragment)
+                            _synthesize_and_speak(content_fragment,generation)
                 except json.JSONDecodeError:
                     continue
 

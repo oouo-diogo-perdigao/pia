@@ -261,6 +261,7 @@ class DesktopBackendTests(unittest.TestCase):
         http = types.ModuleType('src.HTTPServer')
         stream = queue.Queue()
         http.STT_MANAGER = Mock()
+        http.STT_MANAGER.recorder.speech_started=threading.Event()
         http.STT_MANAGER.add_stream_queue.return_value = stream
         http.LOCAL_ACTIONS = Mock()
         def start(**kwargs):

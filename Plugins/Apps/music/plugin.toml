@@ -1,0 +1,7 @@
+id = "music"
+name = "Música"
+type = "app"
+icon = "music"
+[web]
+entrypoint = "index.html"
+api = "web_api.py"

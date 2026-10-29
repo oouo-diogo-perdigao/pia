@@ -294,6 +294,11 @@ def _start_continuous_session(stream, keyword_spotter) -> None:
             time.sleep(0.05)
             now = time.time()
 
+            from .HTTPServer import STT_MANAGER
+            if STT_MANAGER.recorder.speech_started.is_set():
+                STT_MANAGER.recorder.speech_started.clear()
+                from .voice_interrupt import interrupt
+                interrupt()
             while not event_queue.empty():
                 try:
                     data = event_queue.get_nowait()

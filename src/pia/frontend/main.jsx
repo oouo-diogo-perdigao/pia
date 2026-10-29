@@ -140,7 +140,7 @@ function MiniComposer() {
 }
 let standalone = null;
 const match = location.pathname.match(
-  /^\/apps\/(podcast_automation|screenshots|object_storage)\//,
+  /^\/apps\/(podcast_automation|screenshots|object_storage|music)\//,
 );
 if (match)
   standalone = {
