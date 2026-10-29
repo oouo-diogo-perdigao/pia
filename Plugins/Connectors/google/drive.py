@@ -28,6 +28,16 @@ class Drive:
         return response
     @staticmethod
     def escape(value):return str(value).replace('\\','\\\\').replace("'","\\'")
+    def folder_path(self,identity,account=None):
+        parts=[];seen=set()
+        while identity:
+            if identity in seen or len(seen)>=100:raise ValueError('Não foi possível resolver a hierarquia de pastas do Drive.')
+            seen.add(identity)
+            with self.request('GET','/'+quote(identity,safe=''),account,params={'fields':'id,name,parents','supportsAllDrives':True}) as response:
+                folder=response.json()
+            parts.append(folder.get('name') or 'Meu Drive')
+            identity=next(iter(folder.get('parents',[])),None)
+        return ' / '.join(reversed(parts))
     def list(self,account=None,folder=None,folders_only=False,cursor=None,search=None):
         query=['trashed = false']
         if folder:query.append("'"+self.escape(folder)+"' in parents")

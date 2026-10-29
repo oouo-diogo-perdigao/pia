@@ -367,11 +367,8 @@ def main() -> None:
         )
         print(f"* {arquivo['name']}{estado}")
 
-    pendentes = [
-        arquivo
-        for arquivo in drive_files
-        if not arquivo["name"].lower().endswith(("-ok.zip", "-ok-omitido.zip"))
-    ]
+    from Plugins.Apps.podcast_automation.recording_queue import pending_files
+    pendentes = pending_files(drive_files)
     pendentes.sort(key=data_criacao)
 
     if not pendentes:

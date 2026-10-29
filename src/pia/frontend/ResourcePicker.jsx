@@ -11,7 +11,8 @@ import {
 import { ChevronRight, ChevronDown, Folder, Database } from "lucide-react";
 import { api, appApi, report, safe } from "./api";
 
-function FolderNode({ node, account, selected, onSelect }) {
+function FolderNode({ node, account, selected, onSelect, parentPath = "" }) {
+  const path = parentPath ? parentPath + " / " + node.name : node.name;
   const [open, setOpen] = useState(false),
     [children, setChildren] = useState(null),
     [cursor, setCursor] = useState(null),
@@ -49,7 +50,7 @@ function FolderNode({ node, account, selected, onSelect }) {
           justify="start"
           variant={selected?.id === node.id ? "light" : "subtle"}
           leftSection={<Folder size={17} />}
-          onClick={() => onSelect(node)}
+          onClick={() => onSelect({ ...node, path })}
         >
           {node.name}
         </Button>
@@ -67,6 +68,7 @@ function FolderNode({ node, account, selected, onSelect }) {
             <FolderNode
               key={child.id}
               node={child}
+              parentPath={path}
               account={account}
               selected={selected}
               onSelect={onSelect}

@@ -275,8 +275,8 @@ class RadialMenu(QWidget):
 
     BUTTON = 44
     DRAG = 34
-    RADIUS = 112
-    SPREAD = 168
+    RADIUS = 104
+    SPREAD = 148
     SPAN = 320
 
     def __init__(self, controls):
@@ -322,7 +322,7 @@ class RadialMenu(QWidget):
                    for widget in self._widgets())
 
     def hovered(self):
-        return any(widget.underMouse() for widget in self._widgets())
+        return self.hits(QCursor.pos())
 
     def place(self):
         screen_widget = self.controls.overlay.screen()
@@ -357,6 +357,7 @@ class RadialMenu(QWidget):
         if not self.isVisible() or self._closing:
             return
         self._closing = True
+        self.controls._suppress_until = time.monotonic() + 3.16
         self._stop_anim()
         self._anim.setDuration(160)
         self._anim.setStartValue(self._progress)
@@ -367,6 +368,7 @@ class RadialMenu(QWidget):
         self._stop_anim()
         self._progress = 0.0
         self._closing = False
+        self.controls._suppress_until = time.monotonic() + 3.0
         super().hideEvent(event)
 
     def _finished(self):
@@ -469,6 +471,7 @@ class MiniControls(QObject):
         self._probe_pending = False
         self._probe_hit = False
         self._suppress_until = 0.0
+        self._last_menu_hover = 0.0
         self._clicks = _ClickThrough() if sys.platform != 'win32' else None
         self.menu = RadialMenu(self)
         self.handle = self.menu.handle
@@ -484,7 +487,7 @@ class MiniControls(QObject):
         if sys.platform != 'win32':
             self._hide_timer = QTimer(self)
             self._hide_timer.setSingleShot(True)
-            self._hide_timer.setInterval(280)
+            self._hide_timer.setInterval(3000)
             self._hide_timer.timeout.connect(self._hide_if_left)
             self.overlay.setMouseTracking(True)
             self.overlay.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
@@ -554,12 +557,21 @@ class MiniControls(QObject):
 
     def _hide_if_left(self):
         self._pointer_inside = False
-        if not self.dragging and not self.menu.hovered():
+        if not self.dragging and not self.menu.hovered() and not self._over_mini(QCursor.pos()):
             self.menu.collapse()
+
+    def _over_mini(self,point):
+        rect=self.overlay.frameGeometry()
+        # Transparent corners of the square overlay are not part of the orb.
+        radius=min(rect.width(),rect.height())*.42
+        return (point.x()-rect.center().x())**2+(point.y()-rect.center().y())**2<=radius**2
 
     def _present_menu(self):
         if time.monotonic() < self._suppress_until or self.ui.composer.isVisible() or not self.overlay.isVisible():
             return
+        cursor=QCursor.pos()
+        if not self._over_mini(cursor) and not self.menu.hits(cursor):return
+        self._last_menu_hover=time.monotonic()
         if self.menu.isVisible() and not self.menu._closing:
             self.menu.place()
             self.menu.raise_()
@@ -576,7 +588,7 @@ class MiniControls(QObject):
             self._probe_hover()
             return
         cursor = QCursor.pos()
-        inside = self.overlay.frameGeometry().contains(cursor)
+        inside = self._over_mini(cursor)
         if self.blink.update(inside, time.monotonic()):
             self.overlay.blink()
         if self.dragging or self.ui.composer.isVisible():
@@ -585,7 +597,7 @@ class MiniControls(QObject):
             return
         if inside or self.menu.hits(cursor):
             self._present_menu()
-        elif self.menu.isVisible():
+        elif self.menu.isVisible() and time.monotonic()-self._last_menu_hover>=3.0:
             self.menu.collapse()
 
     def _probe_hover(self):
@@ -609,7 +621,7 @@ class MiniControls(QObject):
         if not self.overlay.isVisible():
             self._clicks.pass_clicks(self.overlay)
             return
-        over_overlay = self._probe_hit
+        over_overlay = self._probe_hit and self._over_mini(QCursor.pos())
         over_menu = self.menu.hovered()
         self._clicks.pass_clicks(self.overlay)
         if self.blink.update(over_overlay, time.monotonic()):
@@ -626,7 +638,6 @@ class MiniControls(QObject):
             if time.monotonic() >= self._suppress_until:
                 self._present_menu()
         elif self._pointer_inside:
-            self._suppress_until = 0.0
             if not self._hide_timer.isActive():
                 self._hide_timer.start()
 
