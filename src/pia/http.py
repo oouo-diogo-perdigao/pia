@@ -30,7 +30,7 @@ def respond(handler, status, data, mime='application/json; charset=utf-8', heade
 def route(handler):
     url = urlsplit(handler.path)
     path = url.path
-    if path != '/' and not path.startswith(('/pia/', '/mini/', '/api/pia/', '/apps/', '/bots/')):
+    if path != '/' and not path.startswith(('/pia/', '/mini/', '/api/pia/', '/apps/', '/bots/', '/connectors/')):
         return False
     port = handler.server.server_address[1]
     host = handler.headers.get('Host', '')
@@ -75,7 +75,7 @@ def route(handler):
                 else:respond(handler,200,file.read_bytes(),mimetypes.guess_type(file.name)[0])
                 return True
             if handler.command == 'GET' and not path.startswith('/api/pia/events/') and path.removeprefix('/api/pia') not in {
-                '/state', '/chat/messages', '/settings', '/accounts', '/bots', '/bots/secretaria', '/logs'}:
+                '/state', '/chat/messages', '/settings', '/accounts', '/bots', '/bots/secretaria', '/logs', '/preferences'}:
                 respond(handler, 405, {'error': 'Use POST para esta operação.'})
                 return True
             if path.startswith('/api/pia/events/'):
@@ -115,7 +115,13 @@ def route(handler):
             return True
         if handler.command != 'GET':
             raise ValueError('Método não permitido.')
-        if path.startswith('/bots/'):
+        if path.startswith('/connectors/'):
+            import re
+            match=re.fullmatch(r'/connectors/([a-z][a-z0-9_]*)/web/([a-zA-Z0-9_.-]+)',path)
+            if not match:raise ValueError('Recurso inválido.')
+            base=ROOT.parent.parent/'Plugins/Connectors'/match[1]/'web'
+            relative=match[2]
+        elif path.startswith('/bots/'):
             import re
             match=re.fullmatch(r'/bots/([a-z][a-z0-9_]*)/(avatar\.svg|web/[a-zA-Z0-9_.-]+)',path)
             if not match:
@@ -139,7 +145,7 @@ def route(handler):
         else:
             mime = mimetypes.guess_type(file.name)[0] or 'application/octet-stream'
             respond(handler, 200, file.read_bytes(), mime + ('; charset=utf-8' if mime.startswith('text/') or mime == 'application/javascript' else ''))
-    except (BrokenPipeError, ConnectionResetError):
+    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
         pass
     except (ValueError, KeyError, StopIteration) as exc:
         respond(handler, 400, {'error': str(exc) or 'Solicitação inválida.'})

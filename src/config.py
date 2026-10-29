@@ -2,22 +2,22 @@ from pathlib import Path
 import logging
 from logging.handlers import RotatingFileHandler
 import os
-from dotenv import load_dotenv
+from src.env_types import load_dotenv
 
 
 def _bool_env(name: str, default: bool) -> bool:
     value = os.getenv(name)
-    if value is None:
+    if not value:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on", "sim"}
 
 
 def _int_env(name: str, default: int) -> int:
-    return int(os.getenv(name, str(default)).strip())
+    return int((os.getenv(name) or str(default)).strip())
 
 
 def _float_env(name: str, default: float) -> float:
-    return float(os.getenv(name, str(default)).strip())
+    return float((os.getenv(name) or str(default)).strip())
 
 
 def _str_env(name: str, default: str) -> str:
@@ -36,6 +36,8 @@ def _path_env(name: str, default: str) -> Path:
 from .config_paths import BASE_DIR, CONFIG_DIR, SOUNDS_DIR, initialize_config, sound_path
 initialize_config()
 load_dotenv(CONFIG_DIR / ".env")
+if not os.environ.get("HF_HOME"):
+    os.environ["HF_HOME"]=str(BASE_DIR/"cache/main/models/huggingface")
 
 # ============================================================
 # GENERIC
@@ -49,7 +51,8 @@ OPENAI_COMPAT_TIMEOUT_SECONDS = _int_env("OPENAI_COMPAT_TIMEOUT_SECONDS", 180)
 OPENAI_COMPAT_MAX_UPLOAD_BYTES = _int_env("OPENAI_COMPAT_MAX_UPLOAD_BYTES", 209715200)
 START_SOUND = sound_path(_str_env("START_SOUND", ""), "start.mp3")
 END_SOUND = sound_path(_str_env("END_SOUND", ""), "end.mp3")
-MODELS_DIR = _path_env("MODELS_DIR", str(BASE_DIR / "cache"))
+from .cache_paths import cache_path
+MODELS_DIR = cache_path(os.getenv('MODELS_DIR'),'main/stt')
 PUBLIC_BASE_URL = _str_env("PUBLIC_BASE_URL", f"http://{HOST}:{PORT}").rstrip("/")
 if not PUBLIC_BASE_URL.startswith(("http://", "https://")):
     PUBLIC_BASE_URL = "http://" + PUBLIC_BASE_URL
@@ -88,7 +91,7 @@ TTS_DEFAULT_SPEED = _float_env("TTS_DEFAULT_SPEED", 0.95)
 TTS_KOKORO_IDLE_TIMEOUT = _int_env("TTS_KOKORO_IDLE_TIMEOUT", 600)
 TTS_QWEN_IDLE_TIMEOUT = _int_env("TTS_QWEN_IDLE_TIMEOUT", 300)
 TTS_DEVICE = _str_env("TTS_DEVICE", "cuda")
-TTS_KOKORO_MODEL = _str_env("TTS_KOKORO_MODEL", "./cache/Kokoro-82M")
+TTS_KOKORO_MODEL = str(cache_path(os.getenv('TTS_KOKORO_MODEL'),'main/tts/kokoro'))
 TTS_LLM_MODEL = _str_env("TTS_LLM_MODEL", "")
 
 # ============================================================
@@ -131,9 +134,7 @@ ICE_IMAGE_VARIATION_PROMPT = _str_env(
 ICE_IMAGE_DEFAULT_SIZE = _str_env("ICE_IMAGE_DEFAULT_SIZE", "1024x1024")
 ICE_IMAGE_MAX_N = _int_env("ICE_IMAGE_MAX_N", 4)
 
-ICE_OUTPUT_CACHE_DIR = _path_env(
-    "ICE_OUTPUT_CACHE_DIR", str(BASE_DIR / "cache" / "ice_images")
-)
+ICE_OUTPUT_CACHE_DIR = cache_path(os.getenv("ICE_OUTPUT_CACHE_DIR"),"main/images/output")
 ICE_OUTPUT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 ICE_OUTPUT_CACHE_TTL_SECONDS = _int_env("ICE_OUTPUT_CACHE_TTL_SECONDS", 900)
 

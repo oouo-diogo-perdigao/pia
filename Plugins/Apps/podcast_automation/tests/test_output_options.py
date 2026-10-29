@@ -24,6 +24,7 @@ class OutputTests(unittest.TestCase):
             whisper.renomear_arquivos.return_value={'srt_path':str(srt),'vtt_path':str(vtt),'roteiro_path':str(script)}
             generator=Mock();generator.gerar_resumo.side_effect=lambda:(write(summary),'short','complete');generator.renomear_arquivos.return_value={'resumo_json_path':str(summary)}
             drive=Mock();drive.download_file.return_value=root/'recording.zip';storage=Mock();updater=Mock()
+            updater.updateRssTranscriptionFiles.return_value={'success':True,'folders':[{'folder':'campaign'}]}
             with patch.object(main,'get_config',return_value=config),patch.object(settings,'get_config',return_value=config),patch.object(main,'AudioManager',return_value=audio) as manager,patch.object(main,'GeradorResumoSessao',return_value=generator) as generate,patch.object(main,'extrair_zip',return_value=str(root)),patch.object(main,'criar_assinatura',return_value={}),patch.object(main,'localizar_duplicada',return_value=None),patch.object(main,'limpar_temporarios'),patch.object(main,'announce_publication'):
                 manager.obter_duracao_audio.return_value=7200
                 main.configure();main.processar_sessao({'name':'recording.zip','id':'recording'},drive,storage,updater,whisper,[])

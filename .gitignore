@@ -28,12 +28,15 @@ uv.lock
 /config/legacy/
 /config/*.json
 /data/
-/Plugins/Plugins/*/config.json
-/Plugins/Plugins/*/accounts.json
+/Plugins/Connectors/*/config.json
+/Plugins/Connectors/*/accounts.json
 /Plugins/Bot/*/config.json
 /Plugins/Apps/*/.env
 /Plugins/Apps/*/config/config.json
 /Plugins/Apps/*/secrets/
 /Plugins/Apps/*/data/
 
-/Plugins/Plugins/*/secrets/
+/Plugins/Connectors/*/secrets/
+
+/config/files/
+/Plugins/**/files/

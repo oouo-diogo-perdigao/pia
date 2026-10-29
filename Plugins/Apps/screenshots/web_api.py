@@ -28,7 +28,7 @@ def handle(action, data, context):
     if action == 'status' and context.native_handler is None:
         return {'available': False, 'captures': []}
     allowed = {'status', 'capture', 'image', 'cancel', 'copy', 'save',
-               'desktop', 'drag', 'print', 'edit', 'color', 'finalize', 'choose-folder', 'saved-image', 'list-saved', 'delete-saved', 'open-saved'}
+               'desktop', 'drag', 'print', 'edit', 'color', 'finalize', 'choose-folder', 'saved-image', 'list-saved', 'delete-saved', 'open-saved', 'copy-saved'}
     if action not in allowed:
         raise ValueError('Operação de captura desconhecida.')
     return context.native('app', {'id': 'screenshots', 'action': action, 'payload': data})

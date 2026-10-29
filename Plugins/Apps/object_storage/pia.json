@@ -1,0 +1,9 @@
+{
+  "nome": "Object Storage",
+  "app_id": "object_storage",
+  "info": "Navegue e transfira arquivos entre seus armazenamentos.",
+  "type": "app",
+  "lang": "lang/pt-BR.json",
+  "home": "index.html",
+  "about": "about.html"
+}

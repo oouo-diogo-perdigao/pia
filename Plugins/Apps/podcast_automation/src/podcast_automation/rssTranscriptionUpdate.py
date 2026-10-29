@@ -210,8 +210,8 @@ class RssTranscriptionUpdater:
 
             if existing_xml != xml:
                 self.obj_storage.putObject(
-                    chave=rss_key,
-                    dados=xml.encode("utf-8"),
+                    rss_key,
+                    xml.encode("utf-8"),
                     content_type="application/rss+xml",
                 )
 
@@ -257,8 +257,8 @@ class RssTranscriptionUpdater:
 
             if existing_html != pagina:
                 self.obj_storage.putObject(
-                    chave=transcripts_key,
-                    dados=pagina.encode("utf-8"),
+                    transcripts_key,
+                    pagina.encode("utf-8"),
                     content_type="text/html; charset=utf-8",
                 )
 
@@ -789,42 +789,8 @@ class RssTranscriptionUpdater:
         cover: str | None,
         details: dict,
     ) -> str:
-        title = str(details.get("title") or "")
-
-        body = (
-            "<!DOCTYPE html>\n"
-            '<html lang="pt-BR">\n'
-            "<head>\n"
-            '<meta charset="utf-8"/>\n'
-            f"<title>{html.escape(title)} "
-            "- Transcrições</title>\n"
-            "</head>\n"
-            "<body>\n"
-        )
-
-        if cover:
-            body += (
-                f'<img src="{html.escape(cover)}" '
-                'alt="Cover Image" '
-                'style="max-width: 300px; '
-                "height: auto; display: block; "
-                'margin-bottom: 20px;"/>\n'
-            )
-
-        body += f"<h1>{html.escape(title)}</h1>\n"
-
-        for ep in episodes:
-            body += "<section>\n"
-
-            body += f"<h3>{html.escape(ep['title'])}" "</h3>\n"
-
-            body += f"<pre>{html.escape(ep['content'])}" "</pre>\n"
-
-            body += "</section>\n<hr/>\n"
-
-        body += "</body>\n</html>"
-
-        return body
+        from podcast_automation.transcripts_page import render
+        return render(episodes,cover,details)
 
     # ============================================================
     # UTILITÁRIOS

@@ -301,7 +301,7 @@ def split_text(text, max_chars=420):
 # GERENCIADOR DO WORKER NO SERVIDOR PRINCIPAL
 # ==============================================================================
 class TTSManager:
-    CACHE_FILE = BASE_DIR / "logs" / "selectedVoices.json"
+    CACHE_FILE = BASE_DIR / "cache/main/tts/selectedVoices.json"
 
     # Acima deste número, consideramos que a voz já está
     # razoavelmente consolidada naquele personagem.

@@ -72,7 +72,7 @@ class ConnectorTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         root = Path(self.temp.name)
-        shutil.copytree(ROOT / 'Plugins/Plugins', root / 'connectors', ignore=shutil.ignore_patterns('config.json'))
+        shutil.copytree(ROOT / 'Plugins/Connectors', root / 'connectors', ignore=shutil.ignore_patterns('config.json'))
         self.vault, self.session = Vault(), Mock()
         self.plugins = ResourcePlugins(root / 'connectors', vault=self.vault, session=self.session)
         self.plugins.configure('google', 'client-id', 'client-secret')

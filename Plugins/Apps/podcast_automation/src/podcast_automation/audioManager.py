@@ -1,5 +1,6 @@
 import json
 from .settings import get_config
+from .ui_events import emit
 from .audioEditing import edit_pauses, save_timeline
 import os
 import re
@@ -379,7 +380,9 @@ class AudioManager:
             errors='replace',
         )
 
+        emit('progress',state='processing',label=descricao,processed=0,duration=duracao,percent=0)
         barra = tqdm(
+            disable=os.getenv('CRAIG_GUI_EVENTS')=='1',
             total=duracao,
             desc=f"{descricao} ({AudioManager.formatar_tempo(duracao)})",
             bar_format=(
@@ -408,6 +411,7 @@ class AudioManager:
                 if segundos > ultimo:
                     barra.update(segundos - ultimo)
                     ultimo = segundos
+                    emit('progress',state='processing',label=descricao,processed=segundos,duration=duracao,percent=100*segundos/duracao if duracao else 0)
 
         processo.wait()
         error_log.seek(0)
@@ -418,6 +422,7 @@ class AudioManager:
             barra.n = duracao
             barra.refresh()
         barra.close()
+        emit('progress',state='completed' if processo.returncode==0 else 'error',label=descricao,percent=100 if processo.returncode==0 else 0)
 
         if processo.returncode != 0:
             if stderr.strip():

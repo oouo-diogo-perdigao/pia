@@ -84,7 +84,8 @@ class ConfiguredFeedTests(unittest.TestCase):
         self.store = MagicMock()
         self.saved = {}
         self.store.getObjectIfExists.side_effect = self.saved.get
-        self.store.putObject.side_effect = lambda chave, dados, content_type: self.saved.update({chave: dados})
+        # Match ObjectStorageManager's actual signature, including keyword names.
+        self.store.putObject.side_effect = lambda key, data, content_type: self.saved.update({key: data})
         # Arquivos descendentes, mesmo devolvidos pelo prefixo S3, não pertencem à mesa pai.
         self.sources = [
             {'Key': 'custom/aberta/episode.mp3'}, {'Key': 'custom/aberta/episode.txt'},

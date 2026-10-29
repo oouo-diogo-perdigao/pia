@@ -7,8 +7,8 @@ import time
 from urllib.parse import urlsplit
 
 from PyQt6.QtCore import QObject, Qt, QTimer, QUrl, QEvent, pyqtSignal
-from PyQt6.QtGui import QIcon, QDesktopServices
-from PyQt6.QtWidgets import QApplication, QMainWindow, QSystemTrayIcon, QMenu
+from PyQt6.QtGui import QIcon, QDesktopServices, QKeySequence, QShortcut
+from PyQt6.QtWidgets import QApplication, QMainWindow, QSystemTrayIcon, QMenu, QFileDialog
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage
 
@@ -48,11 +48,25 @@ class WebShell(QMainWindow):
         self.view = QWebEngineView(self)
         self.view.setPage(LocalPage(self.view, origin))
         self.setCentralWidget(self.view)
+        self.inspector = None
+        if not composer:
+            shortcut = QShortcut(QKeySequence('F12'), self)
+            shortcut.activated.connect(self.inspect)
+            self.inspect_shortcut = shortcut
         self.resize(440, 205) if composer else self.resize(1280, 820)
         self.target = url
         self.retries = 0
         self.view.loadFinished.connect(self.loaded)
         self.view.setUrl(QUrl(url))
+
+    def inspect(self):
+        if self.inspector is None:
+            self.inspector = QWebEngineView()
+            self.inspector.setWindowTitle('PIA · Inspetor HTML / CSS / JavaScript')
+            self.inspector.resize(1100, 740)
+            self.view.page().setDevToolsPage(self.inspector.page())
+        self.inspector.show()
+        self.inspector.raise_()
 
     def loaded(self, success):
         if not success and self.retries < 15:
@@ -128,6 +142,10 @@ class DesktopUI(QObject):
         self.setup_tray()
         self.window.hidden.connect(lambda: self.main_action.setChecked(False))
         self.backend.secretary.start()
+        if hasattr(self.backend, 'start_connectors'):
+            self.backend.start_connectors()
+        if __import__('os').environ.pop('PIA_OPEN_MAIN', '')=='1':
+            QTimer.singleShot(800,lambda:self.set_main_visible(True))
         QApplication.instance().aboutToQuit.connect(self.shutdown)
 
     def setup_tray(self):
@@ -215,6 +233,34 @@ class DesktopUI(QObject):
         return self.native_apps[identity].handle(action, payload)
 
     def command(self, action, payload):
+        if action == 'restart':
+            import subprocess
+            import os
+            from .config_paths import BASE_DIR,CONFIG_DIR
+            from dotenv import dotenv_values
+            from .env_types import split_key
+            env=os.environ.copy()
+            for file in (CONFIG_DIR/'.env',CONFIG_DIR/'.env.example'):
+                for key in dotenv_values(file):
+                    env.pop(key,None)
+                    env.pop(split_key(key)[0],None)
+            env['PIA_OPEN_MAIN']='1'
+            flags=subprocess.CREATE_NO_WINDOW if sys.platform=='win32' else 0
+            subprocess.Popen([sys.executable,'-m','src.launcher','--restart-pid',str(os.getpid())],cwd=BASE_DIR,env=env,creationflags=flags,start_new_session=sys.platform!='win32')
+            QTimer.singleShot(700,QApplication.instance().quit)
+            return {'ok':True}
+        if action == 'inspect':
+            self.window.inspect()
+            return {'ok': True}
+        if action == 'choose-path':
+            mode = payload.get('mode', 'directory')
+            selected = QFileDialog.getOpenFileName(self.window, 'Selecionar arquivo')[0] if mode == 'file' else QFileDialog.getExistingDirectory(self.window, 'Selecionar pasta')
+            return {'path': selected}
+        if action == 'reveal-file':
+            from pathlib import Path
+            file = Path(payload['path']).expanduser().resolve()
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(file.parent)))
+            return {'ok': True}
         if action == 'clipboard-text':
             QApplication.clipboard().setText(str(payload['text']))
             return {'ok':True}

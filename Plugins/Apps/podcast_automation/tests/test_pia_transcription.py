@@ -14,6 +14,8 @@ spec.loader.exec_module(stt)
 
 class PiaTranscriptionTests(unittest.TestCase):
     def setUp(self):
+        temporary=tempfile.TemporaryDirectory();self.addCleanup(temporary.cleanup)
+        cache=patch.object(stt,'CHECKPOINT_ROOT',Path(temporary.name));cache.start();self.addCleanup(cache.stop)
         context=dict(url='http://localhost:8762',model='pia-default',max_upload_bytes=209715200,token='internal-fixture')
         first=patch.object(stt,'current',return_value=context);first.start();self.addCleanup(first.stop)
         second=patch('src.app_access.current',return_value=context);second.start();self.addCleanup(second.stop)
@@ -75,6 +77,19 @@ class PiaTranscriptionTests(unittest.TestCase):
                 self.assertEqual(send.call_args.args[0], Path('original.flac'))
             convert.assert_not_called()
 
+    def test_preparation_keeps_file_counter_without_duplicate_progress_labels(self):
+        transcriber=stt.PiaTranscription()
+        transcriber.progress_context={'label':'Transcrever','total':7,'completed':2}
+        def encode(command,**kwargs):
+            Path(command[-1]).write_bytes(b'fixture')
+            return Mock(returncode=0)
+        with patch.object(stt.subprocess,'run',side_effect=encode),patch.object(stt,'emit') as event:
+            with transcriber.prepare_audio('original.flac',105):pass
+        progress=event.call_args.kwargs
+        self.assertEqual(progress['total'],7)
+        self.assertEqual(progress['completed'],2)
+        self.assertEqual(progress['state'],'preparing')
+
     def test_mp3_size_threshold_falls_back_to_original_flac(self):
         for size, expected in ((24999999, '.mp3'), (25000000, '.flac')):
             def encode(command, **kwargs):
@@ -96,6 +111,48 @@ class PiaTranscriptionTests(unittest.TestCase):
 
     def test_silence(self):
         self.assertEqual(stt.PiaTranscription.parse_segments(self.response(text='', segments=[])), [])
+
+    def test_zero_interval_is_extended_without_requesting_audio_again(self):
+        data=self.response(text='Fim.',segments=[dict(start=100,end=100,text='Fim.')])
+        result=stt.PiaTranscription.parse_segments(data)
+        self.assertEqual(result[0].start,100)
+        self.assertAlmostEqual(result[0].end,100.02)
+        self.assertEqual(data['segments'][0]['end'],100)  # keep raw response
+
+    def test_response_is_saved_before_validation_and_reused_after_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'participant.flac';path.write_bytes(b'audio-fixture')
+            transcriber=stt.PiaTranscription()
+            response=Mock(status_code=200,json=Mock(return_value=self.response()))
+            with patch.object(stt.requests,'post',return_value=response) as post:
+                with patch.object(transcriber,'parse_segments',side_effect=RuntimeError('validation interrupted')):
+                    with self.assertRaisesRegex(RuntimeError,'preservada em'):
+                        list(transcriber.transcribe_file(path))
+                self.assertTrue(transcriber.response_path(path).is_file())
+                self.assertEqual(len(list(transcriber.transcribe_file(path))),2)
+                post.assert_called_once()
+                # Changing bytes with the same filename invalidates the checkpoint.
+                path.write_bytes(b'other-fixture')
+                list(transcriber.transcribe_file(path))
+                self.assertEqual(post.call_count,2)
+
+    def test_timestamp_error_identifies_segment_and_values(self):
+        with self.assertRaisesRegex(RuntimeError,r'Segmento 0.*start=5.*end=4'):
+            stt.PiaTranscription.parse_segments(self.response(segments=[dict(start=5,end=4,text='Fala')]))
+
+    def test_checkpoint_io_failure_does_not_discard_valid_response(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'participant.flac';path.write_bytes(b'fixture')
+            response=Mock(status_code=200,json=Mock(return_value=self.response()))
+            with patch.object(stt.requests,'post',return_value=response),patch.object(stt,'save_json',side_effect=PermissionError('fixture-only')):
+                self.assertEqual(len(list(stt.PiaTranscription().transcribe_file(path))),2)
+
+    def test_bounded_repeat_confirmed_by_server_is_not_rejected_again(self):
+        data=self.response(text='Não, '*6,segments=[dict(start=2,end=8,text='Não, '*6)])
+        self.assertEqual(len(stt.PiaTranscription.parse_segments(data)),1)
+        data=self.response(text='Não, '*80,segments=[dict(start=2,end=80,text='Não, '*80)])
+        with self.assertRaisesRegex(RuntimeError,'repetição suspeita'):
+            stt.PiaTranscription.parse_segments(data)
 
     def test_rejects_old_contract_and_invalid_times(self):
         invalid = [self.response(segments=[]), self.response(duration=None),

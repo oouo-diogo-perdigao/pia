@@ -6,10 +6,11 @@ from pathlib import Path
 import tempfile
 
 from .settings import project_path
+from src.config_paths import BASE_DIR
 
 
 # Incremente quando o formato do cache ou a renderização dos feeds mudar.
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 
 
 def signature(value):
@@ -33,7 +34,7 @@ def manifest(objects):
 
 class FeedCache:
     def __init__(self, scope):
-        root = project_path(os.getenv('FEED_CACHE_DIR', 'data/cache/feeds'))
+        root = Path(os.getenv('FEED_CACHE_DIR') or BASE_DIR/'cache/Apps/podcast_automation/feeds')
         self.path = root / (signature([CACHE_VERSION, scope]) + '.json')
         try:
             data = json.loads(self.path.read_text(encoding='utf-8'))

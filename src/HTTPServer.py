@@ -85,7 +85,7 @@ class HTTPServer(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
         self.send_header(
             "Access-Control-Allow-Headers",
-            "Content-Type, Authorization, X-Requested-With",
+            "Content-Type, Authorization, X-Requested-With, X-PIA-Transcription-ID",
         )
 
     def _send(
@@ -476,6 +476,13 @@ class HTTPServer(BaseHTTPRequestHandler):
             if not self._authorize_openai_request():
                 return
             # endregion
+            if path.startswith('/v1/audio/transcriptions/progress/'):
+                import hashlib
+                from src.transcription_jobs import get
+                owner=hashlib.sha256((self.headers.get('Authorization','')+'|'+self.headers.get('X-PIA-App-Token','')).encode()).hexdigest()
+                record=get(path.rsplit('/',1)[-1],owner)
+                self.send_json(200 if record else 404, record or {'error':'Transcrição não encontrada para este cliente.'})
+                return
             if path == "/v1/models":
                 logging.info("[IMAGE] Requisição de listagem de modelos recebida.")
                 models = (
@@ -1158,12 +1165,32 @@ class HTTPServer(BaseHTTPRequestHandler):
                     )
 
                     requires_timing = response_format in {"verbose_json", "srt", "vtt"}
+                    local_model=None
+                    if requested_model.startswith('local/'):
+                        local_model=requested_model.split('/',1)[1]
+                        if local_model not in {'tiny','base','small','medium','large-v2','large-v3','large-v3-turbo'}:
+                            self.send_openai_error(400,'Modelo local não suportado.',param='model')
+                            return
+                    import hashlib
+                    from src.transcription_jobs import create,update
+                    progress_id=self.headers.get('X-PIA-Transcription-ID','')
+                    if progress_id:
+                        owner=hashlib.sha256((self.headers.get('Authorization','')+'|'+self.headers.get('X-PIA-App-Token','')).encode()).hexdigest()
+                        try:create(progress_id,owner)
+                        except ValueError as exc:
+                            self.send_openai_error(400,str(exc))
+                            return
+                    options={}
+                    if local_model:options['local_model']=local_model
+                    if progress_id:options['progress']=lambda event:update(progress_id,**event)
+                    options['request_timeout']=int(os.getenv('STT_FILE_TIMEOUT_SECONDS') or '86400')
                     result = STT_MANAGER.transcribe_request(
                         audio_bytes,
                         language=language,
                         prompt=prompt,
                         temperature=temperature,
                         require_timestamps=requires_timing,
+                        **options,
                     )
                     if result.get("ok") and requires_timing:
                         try:
@@ -1172,6 +1199,7 @@ class HTTPServer(BaseHTTPRequestHandler):
                             result = {"ok": False, "error": str(exc)}
 
                     if not result.get("ok"):
+                        update(progress_id,state='error',error=result.get('error'))
                         logging.error("[OPENAI STT] Falha: %s", result.get("error"))
                         self.send_openai_error(
                             500,
@@ -1181,6 +1209,7 @@ class HTTPServer(BaseHTTPRequestHandler):
                         return
 
                     text = result.get("text") or ""
+                    update(progress_id,state='completed',percent=100,provider=result.get('provider'))
 
                     if response_format in {"srt", "vtt"}:
                         self._send(200, render_subtitles(result["segments"], response_format).encode("utf-8"),
@@ -1203,6 +1232,7 @@ class HTTPServer(BaseHTTPRequestHandler):
                                 "duration": result["duration"],
                                 "text": text,
                                 "segments": result["segments"],
+                                **({'timestamp_adjustments':result['timestamp_adjustments']} if result.get('timestamp_adjustments') else {}),
                             },
                         )
                         return

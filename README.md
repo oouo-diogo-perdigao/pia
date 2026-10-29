@@ -563,8 +563,8 @@ src/
 config/                     # configuração geral e exemplos
 Plugins/
   Apps/podcast_automation/   # processamento, UI e voice/ no mesmo app
-  Bots/
-  Plugins/
+  Bot/
+  Connectors/
   Skills/
   Browser/
 docs/                       # guias e TODO
@@ -608,3 +608,9 @@ Para uma NVIDIA com bibliotecas CUDA/cuDNN compatíveis, use `STT_DEVICE=cuda` e
 ## Skills de voz e plugins
 
 Os comandos agora são projetos em `Plugins/Skills`, com `plugin.toml` e uma função `execute` que recebe APIs da PIA. Leia [o guia das skills](docs/SKILLS.md) e veja [o projeto de exemplo](Plugins/Skills/exemplo/README.md). As integrações de navegador ficam em `Plugins/Browser`, incluindo o userscript IsekaiZero.
+
+
+[Interface, tipos de configuração, manifestos e internacionalização](docs/EXTENSIONS.md).
+
+
+A interface atual usa React/Mantine. Consulte [Workspace React e progresso do podcast](docs/REACT_WORKSPACE.md) para o build, navegação, cache, reinício e transcrição local medium.
