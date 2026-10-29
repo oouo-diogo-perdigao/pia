@@ -67,6 +67,10 @@ export default function Podcast({ sub = "principal" }) {
     [pipeline, setPipeline] = useState({ stages: [], artifacts: [] }),
     [running, setRunning] = useState(false),
     [job, setJob] = useState(null),
+    [preview, setPreview] = useState(null),
+    [previewError, setPreviewError] = useState(""),
+    [previewLoading, setPreviewLoading] = useState(false),
+    [previewVersion, setPreviewVersion] = useState(0),
     [monitor, setMonitor] = useState(false),
     [shutdownAfter, setShutdownAfter] = useState(false),
     [shutdownPending, setShutdownPending] = useState(false),
@@ -158,6 +162,35 @@ export default function Podcast({ sub = "principal" }) {
       source.current?.close();
     };
   }, []);
+  useEffect(() => {
+    if (!config) return;
+    let active = true;
+    setPreviewLoading(true);
+    setPreviewError("");
+    setPreview(null);
+    call("pending-preview", {
+      google_account: opts.google_account || "",
+      google_folder: opts.google_folder || "",
+    })
+      .then((value) => {
+        if (active) setPreview(value);
+      })
+      .catch((error) => {
+        if (active) setPreviewError(error.message);
+      })
+      .finally(() => {
+        if (active) setPreviewLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [
+    !!config,
+    opts.google_account,
+    opts.google_folder,
+    previewVersion,
+    running,
+  ]);
   async function start(task, data = {}) {
     const result = await call("start", {
       task,
@@ -262,7 +295,10 @@ export default function Podcast({ sub = "principal" }) {
               >
                 Unir VTT
               </Button>
-              <Button disabled={running || shutdownPending} onClick={safe(() => start("rebuild"))}>
+              <Button
+                disabled={running || shutdownPending}
+                onClick={safe(() => start("rebuild"))}
+              >
                 Reconstruir feeds
               </Button>
               <Icon
@@ -312,6 +348,50 @@ export default function Podcast({ sub = "principal" }) {
             )}
           </Paper>
           <Paper withBorder p="lg">
+            <Group justify="space-between">
+              <Title order={4}>
+                Gravações pendentes
+                {preview?.configured ? ` · ${preview.pending.length}` : ""}
+              </Title>
+              <Icon
+                icon={Search}
+                label="Atualizar gravações pendentes"
+                disabled={previewLoading}
+                onClick={() => setPreviewVersion((value) => value + 1)}
+              />
+            </Group>
+            {previewLoading ? (
+              <Text size="sm" c="dimmed" mt="sm">
+                Consultando arquivos da pasta…
+              </Text>
+            ) : previewError ? (
+              <Text size="sm" c="red" mt="sm">
+                {previewError}
+              </Text>
+            ) : !preview?.configured ? (
+              <Text size="sm" mt="sm">
+                {preview?.message || "Selecione a pasta de gravações."}
+              </Text>
+            ) : (
+              <>
+                <Text size="sm" c="dimmed" mt="sm">
+                  {preview.processed} já processadas · {preview.pending.length}{" "}
+                  sessões ZIP a processar
+                </Text>
+                <div style={{ maxHeight: 180, overflow: "auto", marginTop: 8 }}>
+                  {preview.pending.map((file) => (
+                    <Text size="sm" key={file.id}>
+                      {file.name}
+                    </Text>
+                  ))}
+                </div>
+                {!preview.pending.length && (
+                  <Text size="sm">Nenhuma gravação pendente.</Text>
+                )}
+              </>
+            )}
+          </Paper>
+          <Paper withBorder p="lg">
             <Title order={4}>Arquivos gerados</Title>
             <Group mt="sm">
               {["mp3", "resumo.json", "srt", "txt", "vtt"].map((format) => (
@@ -353,6 +433,7 @@ export default function Podcast({ sub = "principal" }) {
                         google_account: value || "",
                         google_folder: "",
                         google_folder_name: "",
+                        google_folder_path: "",
                       },
                     }))
                   }
@@ -370,8 +451,10 @@ export default function Podcast({ sub = "principal" }) {
                   onClick={() => setPicker("google")}
                 >
                   Pasta de gravações:{" "}
-                  {opts.google_folder_name ||
-                    opts.google_folder ||
+                  {(preview?.folder === opts.google_folder &&
+                    preview?.folder_path) ||
+                    opts.google_folder_path ||
+                    opts.google_folder_name ||
                     "Selecionar…"}
                 </Button>
                 <Icon
@@ -624,6 +707,7 @@ export default function Podcast({ sub = "principal" }) {
                       google_account: selection.account,
                       google_folder: selection.id,
                       google_folder_name: selection.name,
+                      google_folder_path: selection.path || selection.name,
                     }
                   : {
                       storage_account: selection.account,

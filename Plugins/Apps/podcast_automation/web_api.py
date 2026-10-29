@@ -7,6 +7,7 @@ from src.pia.service import Job
 from src.resource_plugins import save_json
 from .pipeline import initial, apply
 from . import power
+from .recording_queue import pending_files
 
 ROOT = Path(__file__).resolve().parent
 _latest = None
@@ -16,6 +17,34 @@ _lock = threading.Lock()
 
 def handle(action, data, context):
     global _latest
+    if action=='pending-preview':
+        from src.env_types import dotenv_values
+        config=handle('config',{},context)
+        options={**config.get('integrations',{}),**{key:data[key] for key in ('google_account','google_folder') if key in data}}
+        env=dotenv_values(ROOT/'.env')
+        if str(env.get('DRIVE_PROCESS','true')).lower() in ('false','0'):
+            folder=Path(env.get('LOCAL_DRIVE_FOLDER') or 'data/local-drive')
+            if not folder.is_absolute():folder=ROOT/folder
+            files=[{'id':str(file),'name':file.name} for file in folder.glob('*') if file.is_file() and file.suffix.lower()=='.zip']
+            path=str(folder)
+        else:
+            from Plugins.Connectors.google.drive import Drive
+            drive=Drive(context.backend.resources)
+            folder=options.get('google_folder') or drive.default_folder
+            if not folder or not drive.accounts():return {'configured':False,'pending':[],'message':'Selecione a conta e a pasta de gravações.'}
+            account=drive.account(options.get('google_account'))
+            files=[];cursor=None;seen=set()
+            while True:
+                page=drive.list(account,folder,cursor=cursor)
+                files.extend(file for file in page.get('files',[]) if file['name'].lower().endswith('.zip'))
+                cursor=page.get('nextPageToken')
+                if not cursor:break
+                if cursor in seen:raise ValueError('O Drive retornou uma página repetida ao consultar gravações.')
+                seen.add(cursor)
+            path=drive.folder_path(folder,account)
+        pending=pending_files(files)
+        return {'configured':True,'pending':[{'id':f['id'],'name':f['name']} for f in pending],
+                'total':len(files),'processed':len(files)-len(pending),'folder_path':path,'folder':str(folder)}
     if action == 'status':
         task = _tasks.get(_latest)
         return {'cursor': len(task['job'].events) if task else 0,'job': _latest, 'running': bool(task and task['job'].status == 'running'),
@@ -43,7 +72,7 @@ def handle(action, data, context):
         outputs=data.get('outputs',{})
         if not isinstance(outputs,dict) or set(outputs)-{'mp3','resumo.json','srt','vtt','txt'} or any(not isinstance(v,bool) for v in outputs.values()):raise ValueError('Formatos de saída inválidos.')
         integrations=data.get('integrations',{})
-        allowed={'google_account','google_folder','google_folder_name','storage_account','storage_bucket','announce','discord_notify','discord_channel','discord_channels'}
+        allowed={'google_account','google_folder','google_folder_name','google_folder_path','storage_account','storage_bucket','announce','discord_notify','discord_channel','discord_channels'}
         if not isinstance(integrations,dict) or set(integrations)-allowed:raise ValueError('Integrações inválidas.')
         for key,value in integrations.items():
             if key=='discord_channels':

@@ -39,12 +39,13 @@ with tempfile.TemporaryDirectory() as directory:
         on_delta(answer);store.append(chat,'assistant',answer);return answer
     backend=SimpleNamespace(store=store,reply=reply,speak=Mock(),resources=resources,secretary=secretary)
     calls=[]
-    config={'nomes_reais':{},'campaign_details':{},'publication':{},'audio':{},'processing':{},'integrations':{},'outputs':{}}
+    config={'nomes_reais':{},'campaign_details':{},'publication':{},'audio':{},'processing':{},'integrations':{'google_account':'work','google_folder':'old-folder'},'outputs':{}}
     class FakeApps(Apps):
         def call(self,identity,action,payload,context):
             calls.append((identity,action))
             if identity=='podcast_automation':
                 if action=='config':return config
+                if action=='pending-preview':return {'configured':True,'folder':payload.get('google_folder'),'folder_path':'Meu Drive / Antigas' if payload.get('google_folder')=='old-folder' else 'Meu Drive / Gravações','pending':[{'id':'one','name':'pending-one.zip'},{'id':'two','name':'pending-two.zip'}],'processed':3,'total':5}
                 if action=='save-options':
                     config.update(outputs=payload["outputs"],integrations=payload["integrations"]);return {"ok":True}
                 if action=='status':
@@ -104,6 +105,8 @@ with tempfile.TemporaryDirectory() as directory:
         assert js(shell,"document.querySelector('#prompt').value==='' && document.querySelector('.message.assistant strong').textContent==='React funciona.'")
         js(shell,"document.querySelector('.app-activities [aria-label=\"Podcast Automation\"]').click()")
         wait(lambda:js(shell,"!!document.querySelector('#process')"))
+        wait(lambda:js(shell,"document.body.textContent.includes('2 sessões ZIP a processar')"))
+        assert js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Pasta de gravações:')).textContent.includes('Meu Drive / Antigas')")
         # Shutdown and continuous monitoring are mutually exclusive run options.
         shutdown_toggle="document.querySelector('#shutdown-after-processing')"
         monitor_toggle="document.querySelector('#monitor-sessions')"
@@ -180,6 +183,7 @@ with tempfile.TemporaryDirectory() as directory:
         js(shell,"document.querySelector('[aria-label=\"Bots\"]').click()")
         wait(lambda:js(shell,"[...document.querySelectorAll('button')].some(b=>b.textContent==='Salvar preferências')"))
         assert js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='Salvar preferências').disabled")
+        assert js(shell,"(()=>{const boxes=['Principal','Destaque','Olhos'].map(name=>[...document.querySelectorAll('label')].find(label=>label.textContent===name).control.getBoundingClientRect());return boxes.every(box=>Math.abs(box.top-boxes[0].top)<2) && boxes[0].left<boxes[1].left && boxes[1].left<boxes[2].left;})()")
         toggle="[...document.querySelectorAll('label')].find(label=>label.textContent==='Ativar secretária').control.click()"
         js(shell,toggle)
         wait(lambda:js(shell,"![...document.querySelectorAll('button')].find(b=>b.textContent==='Salvar preferências').disabled"))

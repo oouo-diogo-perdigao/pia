@@ -12,6 +12,7 @@ import {
   Text,
   Group,
   Checkbox,
+  SimpleGrid,
 } from "@mantine/core";
 import { api, report, safe } from "../../../../src/pia/frontend/api";
 import { usePia } from "../../../../src/pia/frontend/shared";
@@ -33,41 +34,43 @@ export default function Secretary() {
       setData({ ...data, config: { ...config, [key]: value } });
   return (
     <Paper withBorder p="lg">
-      <Stack>
-        {Object.entries({
-          enabled: "Ativar secretária",
-          reminders: "Lembrar compromissos",
-          remind_minutes: "Antecedência dos lembretes (min)",
-          open_meetings: "Abrir Meet automaticamente",
-          meet_minutes: "Minutos antes de abrir o Meet",
-          important_email: "Avisar novos e-mails importantes",
-          speak: "Ler avisos em voz alta",
-          poll_seconds: "Intervalo de consulta (seg)",
-          calendar: "ID da agenda",
-        }).map(([key, label]) =>
-          typeof config[key] === "boolean" ? (
-            <Switch
-              key={key}
-              label={label}
-              checked={config[key]}
-              onChange={(event) => patch(key, event.currentTarget.checked)}
-            />
-          ) : typeof config[key] === "number" ? (
-            <NumberInput
-              key={key}
-              label={label}
-              value={config[key]}
-              onChange={(value) => patch(key, value)}
-            />
-          ) : (
-            <TextInput
-              key={key}
-              label={label}
-              value={config[key]}
-              onChange={(event) => patch(key, event.target.value)}
-            />
-          ),
-        )}
+      <Stack gap="sm">
+        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm" verticalSpacing="sm">
+          {Object.entries({
+            enabled: "Ativar secretária",
+            reminders: "Lembrar compromissos",
+            remind_minutes: "Antecedência dos lembretes (min)",
+            open_meetings: "Abrir Meet automaticamente",
+            meet_minutes: "Minutos antes de abrir o Meet",
+            important_email: "Avisar novos e-mails importantes",
+            speak: "Ler avisos em voz alta",
+            poll_seconds: "Intervalo de consulta (seg)",
+            calendar: "ID da agenda",
+          }).map(([key, label]) =>
+            typeof config[key] === "boolean" ? (
+              <Switch
+                key={key}
+                label={label}
+                checked={config[key]}
+                onChange={(event) => patch(key, event.currentTarget.checked)}
+              />
+            ) : typeof config[key] === "number" ? (
+              <NumberInput
+                key={key}
+                label={label}
+                value={config[key]}
+                onChange={(value) => patch(key, value)}
+              />
+            ) : (
+              <TextInput
+                key={key}
+                label={label}
+                value={config[key]}
+                onChange={(event) => patch(key, event.target.value)}
+              />
+            ),
+          )}
+        </SimpleGrid>
         <Select
           label="Quais e-mails acompanhar?"
           data={data.filters.map((item) => ({
@@ -85,14 +88,20 @@ export default function Secretary() {
           />
         )}
         <Text fw={600}>Cores do avatar</Text>
-        {["primary", "accent", "eyes"].map((color) => (
-          <ColorInput
-            key={color}
-            label={color}
-            value={config["avatar_" + color]}
-            onChange={(value) => patch("avatar_" + color, value)}
-          />
-        ))}
+        <SimpleGrid cols={3} spacing="sm">
+          {["primary", "accent", "eyes"].map((color) => (
+            <ColorInput
+              key={color}
+              label={
+                { primary: "Principal", accent: "Destaque", eyes: "Olhos" }[
+                  color
+                ]
+              }
+              value={config["avatar_" + color]}
+              onChange={(value) => patch("avatar_" + color, value)}
+            />
+          ))}
+        </SimpleGrid>
         <Text fw={600}>Contas Google autorizadas</Text>
         {data.accounts.map((account) => (
           <Checkbox
