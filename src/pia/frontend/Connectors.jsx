@@ -1,7 +1,13 @@
+import AgentsPanel from "./AgentsPanel";
 import React from "react";
 import { Stack, Text } from "@mantine/core";
 import SettingsPanel, { Accounts } from "./Settings";
 export const connectors = [
+  {
+    id: "agents",
+    name: "Agentes externos",
+    info: "Codex, Gemini e protocolos de ferramentas.",
+  },
   {
     id: "google",
     name: "Google",
@@ -18,7 +24,9 @@ export const connectors = [
 export default function Connectors({ connector = "google" }) {
   return (
     <Stack>
-      {["google", "microsoft"].includes(connector) ? (
+      {connector === "agents" ? (
+        <AgentsPanel />
+      ) : ["google", "microsoft"].includes(connector) ? (
         <Accounts key={connector} providerId={connector} />
       ) : (
         <SettingsPanel key={connector} section={"Connectors/" + connector} />

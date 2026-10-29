@@ -394,6 +394,16 @@ class WorkspaceService:
             return {'ok': True}
         if path.startswith('/integrations/'):
             _,_,plugin,action=path.split('/',3)
+            if plugin=='agents':
+                from Plugins.Connectors.agents.service import ask,status
+                if action=='status':return status()
+                if action=='ask':
+                    job=Job();self.jobs[job.id]=job
+                    def external():
+                        try:job.emit('done',result=ask(data['provider'],data['prompt']))
+                        except Exception as exc:job.emit('error',error=str(exc))
+                    threading.Thread(target=external,daemon=True).start()
+                    return {'job':job.id}
             if plugin=='object_storage' and action=='secrets':
                 from Plugins.Connectors.object_storage.service import ObjectStorage
                 storage=ObjectStorage()

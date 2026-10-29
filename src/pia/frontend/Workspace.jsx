@@ -1,3 +1,5 @@
+import Music from "../../../Plugins/Apps/music/web/Panel.jsx";
+import { Music2 } from "lucide-react";
 import { notify } from "./toasts";
 import Connectors, { connectors } from "./Connectors";
 import ToastCenter from "./ToastCenter";
@@ -53,6 +55,7 @@ import Storage from "../../../Plugins/Apps/object_storage/web/Panel.jsx";
 import Secretary from "../../../Plugins/Bot/secretaria/web/Panel.jsx";
 const appIcons = {
   podcast_automation: AudioLines,
+  music: Music2,
   screenshots: Camera,
   object_storage: HardDrive,
 };
@@ -367,6 +370,8 @@ export default function Workspace({ standalone = null }) {
       <Connectors connector={route.connector} />
     ) : route.view === "bots" ? (
       <Secretary />
+    ) : route.app === "music" ? (
+      <Music sub={route.sub} />
     ) : route.app === "podcast_automation" ? (
       <Podcast sub={route.sub} />
     ) : route.app === "screenshots" ? (
@@ -812,10 +817,10 @@ export default function Workspace({ standalone = null }) {
                     icon={Settings}
                     label={t("Configurações do aplicativo")}
                     onClick={() =>
-                      route.app === "podcast_automation"
+                      ["podcast_automation", "music"].includes(route.app)
                         ? navigate({
                             view: "settings",
-                            section: "Apps/podcast_automation",
+                            section: "Apps/" + route.app,
                           })
                         : route.app === "object_storage"
                           ? navigate({

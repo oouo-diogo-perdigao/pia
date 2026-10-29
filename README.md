@@ -614,3 +614,5 @@ Os comandos agora são projetos em `Plugins/Skills`, com `plugin.toml` e uma fun
 
 
 A interface atual usa React/Mantine. Consulte [Workspace React e progresso do podcast](docs/REACT_WORKSPACE.md) para o build, navegação, cache, reinício e transcrição local medium.
+
+Consulte [câmera, interrupção por voz, protocolos de agentes e música](INTEROPERABILITY.md) para os novos endpoints autenticados, integração com Codex/Gemini e preparação opcional do motor musical local.

@@ -463,6 +463,8 @@ class HTTPServer(BaseHTTPRequestHandler):
         self._send(204, b"", "text/plain; charset=utf-8")
 
     def do_GET(self) -> None:
+        from src.interop import route as interop_route
+        if interop_route(self):return
         from src.pia.http import route as web_route
         if web_route(self):
             return
@@ -764,6 +766,8 @@ class HTTPServer(BaseHTTPRequestHandler):
             iterator.close()
 
     def do_POST(self) -> None:
+        from src.interop import route as interop_route
+        if interop_route(self):return
         from src.pia.http import route as web_route
         if web_route(self):
             return
@@ -1363,6 +1367,8 @@ class HTTPServer(BaseHTTPRequestHandler):
                 parts = [p.strip() for p in text.split("\n\n") if p.strip()]
 
                 for i, part in enumerate(parts, start=1):
+                    from src.voice_interrupt import epoch,EpochCancellation
+                    if body.get('conversation_epoch') is not None and body['conversation_epoch']!=epoch():break
                     logger_tts.info(part)
                     TTS_MANAGER.add_tts_job(
                         text=part.strip(),
@@ -1371,6 +1377,7 @@ class HTTPServer(BaseHTTPRequestHandler):
                         style=style,
                         device=device,
                         job_name=f" ({i} de {len(parts)}) {textCuteName}",
+                        cancelled=(EpochCancellation(body['conversation_epoch']) if body.get('conversation_epoch') is not None else None),
                     )
 
                 logging.info(

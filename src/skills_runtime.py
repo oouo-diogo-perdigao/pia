@@ -98,7 +98,8 @@ class SkillSession:
             self.close()
 
     def call(self, execute):
-        apis = dict(piaClose=self.close, piaSTT=self.stt, piaTTS=self.tts,
+        from src.tool_registry import call as tool_call
+        apis = dict(piaTools=lambda name,arguments: tool_call(name,arguments), piaClose=self.close, piaSTT=self.stt, piaTTS=self.tts,
                     piaInterface=self.interface, piaView=self.view, piaInsert=self.insert,
                     piaKey=self.key, piaCancelled=self.cancelled, piaPlugins=self.plugins)
         try:

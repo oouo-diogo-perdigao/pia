@@ -71,7 +71,24 @@ function Message({ record, onAction }) {
             </Group>
           </Paper>
         ) : (
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              a: ({ href, children, ...props }) =>
+                href?.startsWith("/api/pia/music/files/") ? (
+                  <span>
+                    <audio controls preload="none" src={href} />
+                    <a href={href} download>
+                      {children}
+                    </a>
+                  </span>
+                ) : (
+                  <a href={href} {...props}>
+                    {children}
+                  </a>
+                ),
+            }}
+          >
             {record.content}
           </ReactMarkdown>
         )}
@@ -327,7 +344,24 @@ export default function Chat({ chat }) {
           <article className="message assistant">
             <div className="message-body">
               {streaming ? (
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    a: ({ href, children, ...props }) =>
+                      href?.startsWith("/api/pia/music/files/") ? (
+                        <span>
+                          <audio controls preload="none" src={href} />
+                          <a href={href} download>
+                            {children}
+                          </a>
+                        </span>
+                      ) : (
+                        <a href={href} {...props}>
+                          {children}
+                        </a>
+                      ),
+                  }}
+                >
                   {streaming}
                 </ReactMarkdown>
               ) : (
