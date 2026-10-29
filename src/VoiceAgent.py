@@ -7,7 +7,7 @@ import time
 import warnings
 from pathlib import Path
 
-from src.stt_recovery import recover_segments,segment_dict
+from src.stt_recovery import recover_segments,segment_dict,trim_left_context
 
 from faster_whisper import WhisperModel, download_model
 
@@ -27,11 +27,12 @@ warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub"
 
 
 class VoiceAgent:
-    def __init__(self, models_dir: Path):
+    def __init__(self, models_dir: Path, model_name=None):
         self.models_dir = models_dir
+        model_name=model_name or STT_MODEL
 
-        logging.info("[STT] Carregando modelo %s em %s (%s)...", STT_MODEL, STT_DEVICE, STT_COMPUTE_TYPE)
-        model_path = download_model(STT_MODEL, output_dir=str(self.models_dir))
+        logging.info("[STT] Carregando modelo %s em %s (%s)...", model_name, STT_DEVICE, STT_COMPUTE_TYPE)
+        model_path = download_model(model_name, output_dir=str(self.models_dir/model_name))
 
         self.model = WhisperModel(
             model_path,
@@ -45,7 +46,7 @@ class VoiceAgent:
     def ensure_model_downloaded(model_size: str, models_dir: Path) -> None:
         models_dir.mkdir(parents=True, exist_ok=True)
         logging.info("[MODELO] Verificando arquivos no disco (%s)...", model_size)
-        download_model(model_size, output_dir=str(models_dir))
+        download_model(model_size, output_dir=str(models_dir/model_size))
         logging.info("[MODELO] Arquivos confirmados no disco.")
 
     def transcribe_chunk(
@@ -56,6 +57,7 @@ class VoiceAgent:
         prompt: str | None = None,
         temperature: float | None = None,
         return_metadata: bool = False,
+        progress=None,
     ) -> str | dict:
         """Transcribe an in-memory audio file.
 
@@ -88,6 +90,8 @@ class VoiceAgent:
             transcribe_kwargs["initial_prompt"] = prompt
 
         def report(state, processed=0.0, duration=0.0):
+            if progress:
+                progress(dict(state=state,processed=processed,duration=duration,percent=(100 if state=='completed' else min(99.9,processed/duration*100)) if duration>0 else 0))
             if return_metadata:
                 logger_stt.info('[STT_PROGRESS] %s', json.dumps({
                     'state': state, 'processed': processed, 'duration': duration,
@@ -116,11 +120,23 @@ class VoiceAgent:
                 if samples is None:
                     from faster_whisper.audio import decode_audio
                     samples=decode_audio(io.BytesIO(audio_bytes),sampling_rate=16000)
-                first=max(0,round(start*16000));last=min(len(samples),round(end*16000))
+                first=max(0,round(max(0,start-2)*16000));last=min(len(samples),round(end*16000))
                 if last<=first:raise RuntimeError('Trecho de recuperação STT vazio.')
                 settings={**transcribe_kwargs,'language':language or info.language,'condition_on_previous_text':False,'vad_filter':True,'word_timestamps':True,
-                          'temperature':min(.6,(attempt-1)*.2),'repetition_penalty':1.05,'hallucination_silence_threshold':2.0}
+                          'temperature':min(.8,.2+.2*attempt),'repetition_penalty':1.15,'hallucination_silence_threshold':2.0}
                 # Never feed the generated/repeating transcript back as a prompt.
+                result,_=self.model.transcribe(samples[first:last],**settings)
+                rows=[]
+                try:
+                    for raw in result:
+                        rows.append(segment_dict(raw,first/16000))
+                        if len(rows)>10000:raise RuntimeError('Limite de segmentos excedido na recuperação STT.')
+                finally:
+                    if hasattr(result,'close'):result.close()
+                trimmed=trim_left_context(rows,start)
+                if trimmed is not None:return {'segments':trimmed,'offset':0}
+                # A word crossing the context seam cannot be clipped or dropped.
+                first=max(0,round(start*16000))
                 result,_=self.model.transcribe(samples[first:last],**settings)
                 return {'segments':result,'offset':first/16000}
             normalized=recover_segments(initial(),float(info.duration),retry,report=report)

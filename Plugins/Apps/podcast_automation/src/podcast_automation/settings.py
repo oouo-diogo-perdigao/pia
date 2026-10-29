@@ -4,7 +4,7 @@ import json
 import os
 from functools import lru_cache
 from pathlib import Path
-from dotenv import load_dotenv
+from src.env_types import load_dotenv
 
 ROOT = Path(
     os.getenv("PODCAST_ROOT", str(Path(__file__).resolve().parents[2]))

@@ -150,7 +150,7 @@ O computador deve estar acordado, com a PIA e conexão com as APIs ativas. A PIA
 não acorda o computador nem abre reuniões que já começaram. O botão Consultar
 agora mostra também erros e o horário da última consulta de cada conta.
 
-## Podcast Automation / Craig incorporado
+## Podcast Automation incorporado
 
 O código está em `Plugins/Apps/podcast_automation`; origem e commit estão em
 `UPSTREAM.md`, com licença preservada. A PIA instala os extras com `uv sync --extra
@@ -279,3 +279,9 @@ Há também uma proteção global contra excesso de janelas e contra geradores q
 O podcast valida caches de transcrição antes de reutilizá-los. Cache inválido ou repetitivo é reconstruído pela PIA quando a sessão for reprocessada, com substituição atômica após sucesso; os resumos derivados desse cache são invalidados para não reutilizar texto baseado no erro. Sessões já publicadas não são republicadas automaticamente por essa mudança.
 
 Os testes cobrem repetições dentro e entre segmentos, frases repetidas, preservação de prefixo, recortes em amostras, pausas, emendas de janelas, silêncio, timestamps inválidos, limites de recuperação, fallback e caches. São testes determinísticos com modelo/provedor simulado; não medem a qualidade de reconhecimento do áudio real de uma sessão.
+
+
+Consulte [Interface, configurações e extensões](EXTENSIONS.md) para o inspetor, campos tipados, uploads de credenciais, manifestos e idiomas.
+
+
+A interface atual usa React/Mantine. Consulte [Workspace React e progresso do podcast](REACT_WORKSPACE.md) para o build, navegação, cache, reinício e transcrição local medium.

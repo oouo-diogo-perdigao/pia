@@ -110,12 +110,12 @@ class RecoveryTests(unittest.TestCase):
         from test_transcription import voice
         agent=voice.VoiceAgent.__new__(voice.VoiceAgent);agent.model=Mock()
         initial=[SimpleNamespace(**seg(0,2,'Antes')),SimpleNamespace(**seg(10,15,'tá '*6))]
-        repair=[SimpleNamespace(**seg(2,3,'Recuperado.'))]
+        repair=[SimpleNamespace(**seg(4,5,'Recuperado.'))]
         agent.model.transcribe.side_effect=[(iter(initial),SimpleNamespace(duration=30,language='pt')),(iter(repair),SimpleNamespace(duration=20,language='pt'))]
         audio=types.ModuleType('faster_whisper.audio');samples=Samples(30*16000);audio.decode_audio=Mock(return_value=samples)
         with patch.dict(sys.modules,{'faster_whisper.audio':audio}):result=agent.transcribe_chunk(b'encoded',language=None,return_metadata=True)
         sent=agent.model.transcribe.call_args.args[0]
-        self.assertEqual(sent[0],10*16000);self.assertEqual(len(sent),20*16000)
+        self.assertEqual(sent[0],8*16000);self.assertEqual(len(sent),22*16000)
         self.assertEqual(result['duration'],30);self.assertEqual(result['segments'][-1]['start'],12)
         self.assertFalse(agent.model.transcribe.call_args.kwargs['condition_on_previous_text'])
         self.assertTrue(agent.model.transcribe.call_args.kwargs['word_timestamps'])

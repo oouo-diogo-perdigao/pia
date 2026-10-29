@@ -1,5 +1,5 @@
 id = "podcast_automation"
-name = "Podcast Automation / Craig"
+name = "Podcast Automation"
 type = "app"
 entrypoint = "src/podcast_automation/main.py"
 

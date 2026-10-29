@@ -378,6 +378,20 @@ class HTTPTests(unittest.TestCase):
         with patch.object(http, "OPENAI_COMPAT_MAX_UPLOAD_BYTES", 1):
             self.assertEqual(self.request("verbose_json", multipart=True)[0], 413)
 
+    def test_point_intervals_are_compatible_between_verbose_json_and_subtitles(self):
+        value=transcript()
+        value['segments'][0]['end']=value['segments'][0]['start']
+        status,body,_=self.request('verbose_json',result=value)
+        self.assertEqual(status,200)
+        parsed=json.loads(body)
+        self.assertEqual(parsed['segments'][0]['start'],2.25)
+        self.assertAlmostEqual(parsed['segments'][0]['end'],2.27)
+        self.assertEqual(parsed['timestamp_adjustments'][0]['original_end'],2.25)
+        for fmt in ('srt','vtt'):
+            status,body,_=self.request(fmt,result=value)
+            self.assertEqual(status,200)
+            self.assertIn('270',body)
+
     def test_chunked_multipart(self):
         status, body, _ = self.request("verbose_json", multipart=True, chunked=True)
         self.assertEqual(status, 200)

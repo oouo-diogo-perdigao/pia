@@ -94,7 +94,14 @@ class NativeApp:
     def __init__(self, ui, context):
         self.ui, self.context = ui, context
         from src.config_paths import BASE_DIR
-        self.folder = BASE_DIR / 'data/screenshots/raw'
+        self.folder = BASE_DIR / 'logs/screenshots'
+        legacy=BASE_DIR/'data/screenshots/raw'
+        if legacy.is_dir() and not legacy.is_symlink():
+            import shutil
+            target=self.folder/('legacy-'+uuid.uuid4().hex)
+            if legacy.resolve().is_relative_to(BASE_DIR.resolve()) and target.resolve().is_relative_to(BASE_DIR.resolve()):
+                target.parent.mkdir(parents=True,exist_ok=True)
+                shutil.move(str(legacy),str(target))
         self.records = {}
         self.shell = None
         self.stage = None
@@ -106,6 +113,12 @@ class NativeApp:
             self.ui.overlay.show()
         if self.ui.main_action.isChecked():
             self.ui.window.show()
+
+    def discard_raw(self):
+        if self.current:
+            record=self.records.pop(self.current,None)
+            if record:record['path'].unlink(missing_ok=True)
+            self.current=None
 
     def store_capture(self, image, title='', url='', mode='selection'):
         self.folder.mkdir(parents=True, exist_ok=True)
@@ -121,6 +134,7 @@ class NativeApp:
     def capture(self, mode):
         if mode not in ('selection', 'window'):
             raise ValueError('Modo de captura inválido.')
+        self.discard_raw()
         if self.shell:
             self.shell.hide()
             self.shell.deleteLater()
@@ -187,6 +201,12 @@ class NativeApp:
         return candidate
 
     def handle(self, action, data):
+        if action == 'copy-saved':
+            image = QImage(str(self.saved_path(data['name'])))
+            if image.isNull():
+                raise ValueError('Imagem inválida.')
+            QApplication.clipboard().setImage(image)
+            return {'ok': True}
         if action == 'choose-folder':
             directory = QFileDialog.getExistingDirectory(self.ui.window,'Pasta das capturas',str(self.output_directory()))
             return {'folder':directory}
@@ -214,6 +234,7 @@ class NativeApp:
             record = self.records[data['id']]
             return {**{k: v for k, v in record.items() if k != 'path'}, 'data': png_data(QImage(str(record['path']))), 'config': config()}
         if action == 'cancel':
+            self.discard_raw()
             if self.shell:
                 self.shell.hide()
             self.restore()
@@ -238,6 +259,7 @@ class NativeApp:
                 if prefs['auto_copy']: QApplication.clipboard().setImage(image)
                 path = self.output_directory() / name
                 if not prefs['auto_save']:
+                    self.discard_raw()
                     if self.shell: self.shell.hide()
                     self.restore()
                     return {'ok':True}
@@ -281,11 +303,15 @@ class NativeApp:
                     drag.exec(Qt.DropAction.CopyAction)
                 QTimer.singleShot(0, drag_image)
             if action == 'finalize':
+                self.discard_raw()
                 if self.shell: self.shell.hide()
                 self.restore()
+            elif action in ('save','desktop'):
+                self.discard_raw()
             return {'ok': True, 'name': path.name}
         raise ValueError('Operação desconhecida.')
 
     def shutdown(self):
+        self.discard_raw()
         if self.shell:
             self.shell.hide()

@@ -12,3 +12,8 @@ uv run python -m unittest discover -s tests -v
 ```
 
 O teste injeta mocks; não abre imagens, não reproduz áudio e não precisa importar o servidor. Copie o projeto para uma pasta nova, altere `plugin.toml` e implemente `execute`. Consulte [o contrato das APIs](../../../docs/SKILLS.md).
+
+
+## Manifesto e idioma
+
+Os metadados desta extensão ficam em `pia.json` e os textos em `lang/pt-BR.json`. Consulte o [padrão de extensões e variáveis tipadas](../../../docs/EXTENSIONS.md) para criar telas, campos de configuração e integrações compartilhadas.

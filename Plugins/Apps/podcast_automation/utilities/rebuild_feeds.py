@@ -25,6 +25,7 @@ def main() -> None:
 
         for erro in resultado["errors"]:
             print(f" - {erro['folder']}: {erro['erro']}")
+        raise RuntimeError('Reconstrução de feeds falhou; consulte os erros acima.')
     else:
         print("Nenhum erro encontrado.")
 

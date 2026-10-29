@@ -1,0 +1,7 @@
+{
+  "nome": "Modo Ditado",
+  "app_id": "modo_ditado",
+  "info": "Recursos e comandos de Modo Ditado.",
+  "type": "skill",
+  "lang": "lang/pt-BR.json"
+}

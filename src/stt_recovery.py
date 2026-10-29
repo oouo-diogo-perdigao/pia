@@ -39,8 +39,13 @@ class RepetitionDetector:
     def __init__(self,options=None):
         self.options=options or RecoveryOptions.from_env()
         self.history=deque(maxlen=self.options.repetitions*self.options.max_phrase)
+        self.previous_end=None
     def feed(self,segment,index):
         if not self.options.enabled:return None
+        start,end=segment.get('start'),segment.get('end')
+        if isinstance(start,(int,float)) and self.previous_end is not None and start-self.previous_end>3:
+            self.history.clear()
+        self.previous_end=end if isinstance(end,(int,float)) else None
         for local,match in enumerate(tokens(segment['text'])):
             self.history.append((normalized(match.group()),index,local,match.start()))
             history=list(self.history)
@@ -50,6 +55,11 @@ class RepetitionDetector:
                 values=[item[0] for item in history[-count:]]
                 if values==values[-size:]*self.options.repetitions:
                     first=history[-count]
+                    if first[1]==index and segment.get('_audio_retry') and bounded_aligned_repeat(segment,first[2],size,self.options.repetitions):
+                        # This bounded utterance was decoded again from audio, with
+                        # distinct word intervals. It is not an endless decoder loop.
+                        self.history.clear()
+                        continue
                     return Problem(first[1],first[2],first[3],size)
         return None
 
@@ -64,6 +74,7 @@ def segment_dict(segment,offset=0):
     if isinstance(segment,dict):get=segment.get
     else:get=lambda key,default=None:getattr(segment,key,default)
     result={'start':float(get('start'))+offset,'end':float(get('end'))+offset,'text':str(get('text') or '').strip()}
+    if get('_audio_retry') is True:result['_audio_retry']=True
     if not math.isfinite(result['start']) or not math.isfinite(result['end']) or result['start']<0 or result['end']<result['start']:raise RepetitionRecoveryError('Timestamps inválidos na transcrição STT.')
     words=get('_words') or get('words')
     if isinstance(words,(list,tuple)):
@@ -82,6 +93,35 @@ def aligned_words(segment):
         if not all(math.isfinite(word[k]) for k in ('start','end')) or word['start']<previous-.001 or word['end']<word['start'] or word['end']>segment['end']+.1:return None
         previous=word['end']
     return words
+
+def bounded_aligned_repeat(segment,first,size,repetitions):
+    words=aligned_words(segment)
+    if not words:return False
+    matches=tokens(segment['text']);pattern=[normalized(t.group()) for t in matches[first:first+size]]
+    last=first
+    while [normalized(t.group()) for t in matches[last:last+size]]==pattern and last+size<=len(matches):last+=size
+    if last-first>size*repetitions*2:return False
+    count=0;selected=[]
+    for word in words:
+        length=len(tokens(word['word']))
+        if count<last and count+length>first:selected.append(word)
+        count+=length
+    return bool(selected) and all(word['end']-word['start']>=.02 for word in selected)
+
+def trim_left_context(segments,start):
+    """Discard context using actual word boundaries; None asks the decoder to retry without it."""
+    result=[]
+    for segment in segments:
+        if segment['end']<=start:continue
+        if segment['start']<start:
+            words=aligned_words(segment)
+            if not words:return None
+            if any(word['start']<start<word['end'] for word in words):return None
+            kept=[word for word in words if word['start']>=start]
+            if not kept:continue
+            segment={**segment,'start':kept[0]['start'],'end':kept[-1]['end'],'text':''.join(w['word'] for w in kept).strip(),'_words':kept}
+        result.append({**segment,'_audio_retry':True})
+    return result
 
 def prefix_before_problem(segments,problem):
     prefix=list(segments[:problem.segment]);segment=segments[problem.segment]
@@ -149,7 +189,7 @@ def recover_segments(initial,duration,retry,*,options=None,report=None):
         report('recovering',start,duration)
         frontier=start
         while frontier<duration-.00001:
-            end=min(duration,frontier+options.window_seconds)
+            end=min(duration,frontier+max(5,options.window_seconds/(2**(attempts[position]-1))))
             windows+=1
             if windows>max_windows:raise RepetitionRecoveryError('Limite global de janelas de recuperação atingido; transcrição não concluída.')
             response=retry(frontier,end,attempts[position])

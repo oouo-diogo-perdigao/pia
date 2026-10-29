@@ -1,0 +1,7 @@
+{
+  "nome": "Secretária",
+  "app_id": "secretaria",
+  "info": "Agenda, lembretes e e-mails importantes.",
+  "type": "bot",
+  "lang": "lang/pt-BR.json"
+}

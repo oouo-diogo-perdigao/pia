@@ -51,7 +51,9 @@ class PodcastJob:
         env_file = self.project / '.env'
         if env_file.exists():
             for key in re.findall(r'^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=', env_file.read_text(encoding='utf-8'), re.MULTILINE):
+                from src.env_types import split_key
                 env.pop(key, None)
+                env.pop(split_key(key)[0], None)
         for key in ('VIRTUAL_ENV', 'UV_PROJECT_ENVIRONMENT', 'PYTHONHOME'):
             env.pop(key, None)
         from src.app_access import issue

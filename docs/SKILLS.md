@@ -92,7 +92,7 @@ Os testes usam stubs para programas, teclado, rede e reprodução. Não executam
 
 ## Plugins de recursos e múltiplas contas
 
-As integrações de recursos ficam em `Plugins/Plugins/` e são configuradas na
+As integrações de recursos ficam em `Plugins/Connectors/` e são configuradas na
 janela **Plugins** do desktop. São independentes das skills e dos userscripts.
 Uma skill pode declarar `piaPlugins`, que expõe apenas operações de leitura:
 

@@ -1,0 +1,22 @@
+{
+  "name": "pia-workspace-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "test": "node --test navigation.test.js forms.test.js"
+  },
+  "dependencies": {
+    "@mantine/core": "8.3.18",
+    "@mantine/hooks": "8.3.18",
+    "lucide-react": "^0.468.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.10",
+    "vite": "^7.1.0"
+  }
+}

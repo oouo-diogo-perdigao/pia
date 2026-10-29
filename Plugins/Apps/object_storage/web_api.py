@@ -7,7 +7,7 @@ import threading
 import time
 from src.config_paths import BASE_DIR
 from src.pia.service import Job
-from Plugins.Plugins.object_storage.service import ObjectStorage
+from Plugins.Connectors.object_storage.service import ObjectStorage
 _store=None
 _uploads={}
 _active_paths=set()
@@ -66,7 +66,7 @@ def handle(action,data,context):
     if action=='upload-begin':
         store.account(account);bucket=store.bucket(account,bucket);key=store.key(data['key']);total=int(data['size'])
         if not 0<=total<=100*1024**3:raise ValueError('Arquivo excede 100 GiB.')
-        identity=secrets.token_hex(24);folder=BASE_DIR/'cache/storage-uploads';folder.mkdir(parents=True,exist_ok=True)
+        identity=secrets.token_hex(24);folder=BASE_DIR/'cache/Apps/object_storage/uploads';folder.mkdir(parents=True,exist_ok=True)
         with _lock:
             known={r['path'] for r in _uploads.values()}|_active_paths
             for orphan in folder.glob('*.part'):

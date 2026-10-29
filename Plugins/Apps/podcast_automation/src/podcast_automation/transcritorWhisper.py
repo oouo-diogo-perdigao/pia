@@ -1,7 +1,9 @@
 from src.stt_recovery import find_repetition
+from src.transcription import repair_point_segments
 from .audioEditing import map_time
 import os
 import json
+import hashlib
 import math
 import re
 from tqdm import tqdm
@@ -83,7 +85,10 @@ class TranscritorWhisper:
                     with open(caminho_saida,encoding='utf-8') as cached:rows=json.load(cached)
                     if not isinstance(rows,list):raise ValueError('Cache de transcrição inválido.')
                     if any(not isinstance(row.get('texto'),str) or not all(isinstance(row.get(key),(int,float)) and math.isfinite(row[key]) for key in ('inicio','fim')) or row['inicio']<0 or row['fim']<row['inicio'] for row in rows):raise ValueError('Cache sem timestamps válidos.')
-                    healthy=not find_repetition([{'text':row['texto']} for row in rows])
+                    certificate=Path(caminho_saida).with_suffix('.stt-validated.json')
+                    digest=hashlib.sha256(Path(caminho_saida).read_bytes()).hexdigest()
+                    verified=json.loads(certificate.read_text(encoding='utf-8')) if certificate.exists() else {}
+                    healthy=(verified.get('version')==2 and verified.get('sha256')==digest) or not find_repetition([{'start':row['inicio'],'end':row['fim'],'text':row['texto']} for row in rows])
                     if healthy:
                         print(f'Pulando ({caminho_saida}) transcrição já existe e foi validada')
                         continue
@@ -101,6 +106,9 @@ class TranscritorWhisper:
             return
 
         self.carregar_modelo()
+
+        total_files=sum(len(files) for files in self.grupos_transcricao.values())
+        completed_files=total_files-sum(len(group[0]) for group in grupos_pendentes)
 
         total_jogadores = len(grupos_pendentes)
 
@@ -141,6 +149,7 @@ class TranscritorWhisper:
             return f"[{str_progresso}<{str_restante}] {str_duracao_total}"
 
         barra_total = tqdm(
+            disable=os.getenv('CRAIG_GUI_EVENTS')=='1',
             total=duracao_total_geral,
             desc="Transcrição Geral",
             position=0,
@@ -166,6 +175,7 @@ class TranscritorWhisper:
                 progresso_jogador = 0.0
 
                 barra_jogador = tqdm(
+                    disable=os.getenv('CRAIG_GUI_EVENTS')=='1',
                     total=duracao_total_jogador,
                     desc=f"Transcrevendo ({nome_jogador}) {indice_jogador}/{total_jogadores}",
                     position=1,
@@ -218,6 +228,7 @@ class TranscritorWhisper:
                     for caminho_arquivo in arquivos:
                         duracao_arquivo = duracoes_por_arquivo.get(caminho_arquivo, 0.0)
 
+                        self.pia.progress_context={'total':total_files,'completed':completed_files,'label':'Transcrever'}
                         segmentos = self.pia.transcribe(caminho_arquivo, duracao_arquivo)
                         informacoes = None
 
@@ -250,6 +261,10 @@ class TranscritorWhisper:
 
                         if restante_arquivo > 0:
                             atualizar_barras(restante_arquivo)
+
+                        completed_files+=1
+                        from podcast_automation.ui_events import emit
+                        emit('progress',state='completed',label='Transcrever',processed=duracao_arquivo,duration=duracao_arquivo,percent=100,total=total_files,completed=completed_files,speed=getattr(self.pia,'last_speed',0))
 
                         if informacoes is not None:
                             tqdm.write(
@@ -301,6 +316,9 @@ class TranscritorWhisper:
                     )
 
                 temporary.replace(caminho_saida)
+                certificate=Path(caminho_saida).with_suffix('.stt-validated.json')
+                from src.resource_plugins import save_json
+                save_json(certificate,{'version':2,'sha256':hashlib.sha256(Path(caminho_saida).read_bytes()).hexdigest()})
                 tqdm.write(
                     f"Arquivo JSON gerado para {nome_jogador}: {caminho_saida}\n"
                 )
@@ -323,9 +341,14 @@ class TranscritorWhisper:
                 continue
             with open(caminho_arquivo, encoding="utf-8") as f:
                 dados = json.load(f)
-                for item in dados:
-                    inicio = float(item.get("inicio", 0))
-                    fim = float(item.get("fim", inicio))
+                # Old participant caches may already contain point annotations.
+                # Repair before subtitle merging so their text is not dropped.
+                rows=sorted([{**item,'start':float(item.get('inicio',0)),
+                              'end':float(item.get('fim',item.get('inicio',0)))} for item in dados],key=lambda row:row['start'])
+                rows,_=repair_point_segments(rows,max((row['end'] for row in rows),default=0))
+                for item in rows:
+                    inicio = item['start']
+                    fim = item['end']
                     if self.edit_timeline:
                         inicio = map_time(inicio, self.edit_timeline)
                         fim = map_time(fim, self.edit_timeline)

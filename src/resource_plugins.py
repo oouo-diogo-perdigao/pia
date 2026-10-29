@@ -51,7 +51,7 @@ class KeyringVault:
 
 class ResourcePlugins:
     def __init__(self, root=None, vault=None, session=None):
-        self.root = Path(root or BASE_DIR / 'Plugins' / 'Plugins')
+        self.root = Path(root or BASE_DIR / 'Plugins' / 'Connectors')
         self._vault = vault
         self._session = session
         self.lock = threading.RLock()
@@ -73,6 +73,10 @@ class ResourcePlugins:
         result = []
         for path in sorted(self.root.glob('*/plugin.toml')):
             data = tomllib.loads(path.read_text(encoding='utf-8'))
+            meta=path.parent/'pia.json'
+            if meta.exists():
+                manifest=json.loads(meta.read_text(encoding='utf-8'))
+                data.update(name=manifest['nome'],description=manifest.get('info',''))
             if data.get('id') != path.parent.name or data.get('provider') not in ('google', 'microsoft'):
                 continue
             result.append(data)
@@ -227,21 +231,31 @@ class ResourcePlugins:
         return response.json()
 
     def call(self, plugin, operation, *, account=None, **params):
+        from src.plugin_logs import write
+        try:
+            result=self._call(plugin,operation,account=account,**params)
+        except Exception as exc:
+            write('Connectors/'+plugin,operation,type(exc).__name__)
+            raise
+        write('Connectors/'+plugin,operation)
+        return result
+
+    def _call(self, plugin, operation, *, account=None, **params):
         """No default account: a skill must explicitly select personal/work identity."""
         if plugin=='object_storage':
-            from Plugins.Plugins.object_storage.service import ObjectStorage
+            from Plugins.Connectors.object_storage.service import ObjectStorage
             storage=ObjectStorage(vault=self.vault)
             if operation=='accounts.list':return storage.accounts()
             if not account:raise ValueError('Selecione explicitamente uma conta de storage.')
             if operation=='files.list':return storage.list(account=account,**params)
             raise ValueError('Operação indisponível: '+operation)
         if plugin=='discord':
-            from Plugins.Plugins.discord.service import Discord
+            from Plugins.Connectors.discord.service import Discord
             if operation=='status':return Discord().public()
             if operation=='message.send':return Discord().send(**params)
             raise ValueError('Operação indisponível: '+operation)
         if plugin=='google' and operation=='drive.folders':
-            from Plugins.Plugins.google.drive import Drive
+            from Plugins.Connectors.google.drive import Drive
             if not account:raise ValueError('Selecione explicitamente uma conta Google.')
             return Drive(self).list(account=account,folders_only=True,**params)
         provider = self.manifest(plugin)['provider']

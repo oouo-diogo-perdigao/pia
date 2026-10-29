@@ -28,6 +28,10 @@ class DesktopBackend:
         self.chat_lock = threading.Lock()
         self.agent = None
 
+    def start_connectors(self):
+        from Plugins.Connectors.discord.runtime import get_runtime
+        get_runtime().start_if_enabled()
+
     def reply(self, chat, text, on_delta=None):
         from .commands_loader import process_command
         from .skills_runtime import get_runtime, is_stop_phrase
@@ -133,6 +137,8 @@ class DesktopBackend:
             return True
 
     def shutdown(self):
+        from Plugins.Connectors.discord.runtime import get_runtime as discord_runtime
+        discord_runtime().stop()
         from .skills_runtime import get_runtime
         get_runtime().cancel(close_interface=False)
         self.secretary.stop()
@@ -148,7 +154,7 @@ class DesktopBackend:
             if self.podcast_process and self.podcast_process.poll() is None:
                 raise RuntimeError('Já existe uma tarefa do podcast em execução.')
             folder = BASE_DIR / 'Plugins' / 'Apps' / 'podcast_automation'
-            from dotenv import dotenv_values
+            from src.env_types import dotenv_values
             env = os.environ.copy()
             env.update({k: v for k, v in dotenv_values(folder / '.env').items() if v is not None})
             env.update(PODCAST_ROOT=str(folder), PYTHONUTF8='1', PYTHONIOENCODING='utf-8',
@@ -185,11 +191,9 @@ class DesktopBackend:
 
 def environment_fields():
     """All distributed settings, with a setup/documentation link for each field."""
-    from dotenv import dotenv_values
-    values = dotenv_values(CONFIG_DIR / '.env')
-    examples = dotenv_values(CONFIG_DIR / '.env.example')
+    from src.env_types import fields
     result = []
-    for name, default in examples.items():
+    for name, value in fields(CONFIG_DIR / '.env.example', CONFIG_DIR / '.env'):
         if name.startswith(('AGE_GEMINI', 'GEMINI', 'STT_GEMINI')):
             link = 'https://aistudio.google.com/apikey'
         elif name.startswith(('GROQ', 'STT_GROQ')):
@@ -204,6 +208,6 @@ def environment_fields():
             link = 'https://ollama.com/download'
         else:
             link = 'https://github.com/oouo-diogo-perdigao/pia#readme'
-        result.append((name, values.get(name, default) or '', link,
+        result.append((name, value, link,
                        any(part in name for part in ('KEY', 'TOKEN', 'SECRET', 'PASSWORD'))))
     return result

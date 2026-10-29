@@ -167,6 +167,9 @@ class STTManager(LocalSTTManager):
         prompt: str | None = None,
         temperature: float | None = None,
         require_timestamps: bool = False,
+        local_model=None,
+        progress=None,
+        request_timeout=None,
     ) -> dict:
         if not audio_bytes:
             return {"ok": False, "error": "Arquivo de áudio vazio."}
@@ -174,7 +177,8 @@ class STTManager(LocalSTTManager):
         language = self._normalize_language(language)
         errors: list[str] = []
 
-        for provider in self.providers:
+        providers=('local',) if local_model else tuple(dict.fromkeys((*self.providers,'local')))
+        for provider in providers:
             if not self._provider_available(provider):
                 continue
 
@@ -189,6 +193,7 @@ class STTManager(LocalSTTManager):
                 continue
 
             if provider == "local":
+                if progress:progress(dict(state='preparing',label='Preparando Whisper '+(local_model or 'local'),percent=0,provider='local'))
                 self.active_provider = "local"
                 self._force_local_worker = True
                 try:
@@ -198,6 +203,7 @@ class STTManager(LocalSTTManager):
                         language=language,
                         prompt=prompt,
                         temperature=temperature,
+                        **(dict(local_model=local_model,progress=progress,request_timeout=request_timeout) if local_model or progress or request_timeout else {}),
                     )
                     if result.get("ok"):
                         result["provider"] = "local"

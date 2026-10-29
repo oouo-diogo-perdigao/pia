@@ -71,7 +71,7 @@ from .commands_loader import process_command
 # Modelo KWS
 # ---------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent.parent
-KWS_ROOT = BASE_DIR / "cache"
+KWS_ROOT = BASE_DIR / "cache/main/wakeword"
 # MODEL_NAME = "sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile" # chinese model
 MODEL_NAME = "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01"  # english model
 MODEL_URL = (

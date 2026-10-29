@@ -1,0 +1,7 @@
+{
+  "nome": "Aprender Novo Comando",
+  "app_id": "aprender_novo_comando",
+  "info": "Recursos e comandos de Aprender Novo Comando.",
+  "type": "skill",
+  "lang": "lang/pt-BR.json"
+}

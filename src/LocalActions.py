@@ -54,7 +54,7 @@ class LocalActions:
         )
         self._queued_audio_thread.start()
 
-        self._output_dir = BASE_DIR / "cache" / "local_actions"
+        self._output_dir = BASE_DIR / "cache/main/actions"
         self._output_dir.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------

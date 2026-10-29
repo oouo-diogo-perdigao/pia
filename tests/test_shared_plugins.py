@@ -8,9 +8,9 @@ import io
 import json
 import unittest
 from dotenv import dotenv_values
-from Plugins.Plugins.object_storage.service import ObjectStorage
-from Plugins.Plugins.google.drive import Drive
-from Plugins.Plugins.discord.service import Discord
+from Plugins.Connectors.object_storage.service import ObjectStorage
+from Plugins.Connectors.google.drive import Drive
+from Plugins.Connectors.discord.service import Discord
 from src.plugin_migration import migrate
 from src import app_access
 from src.pia.service import Apps
@@ -92,10 +92,10 @@ class SharedPluginTests(unittest.TestCase):
         (app/'.env').write_text('GOOGLE_APPLICATION_CREDENTIALS=key.json\nGOOGLE_DRIVE_FOLDER_ID=folder\nOBJECT_STORAGE_ACCESS_KEY_ID=key\nOBJECT_STORAGE_SECRET_ACCESS_KEY=secret\nDISCORD_BOT_TOKEN=bot\nLLM_API_KEY=obsolete\nWHISPER_MODEL=medium\nDRIVE_PROCESS=true\n')
         migrate(self.root);migrate(self.root)
         self.assertEqual(dict(dotenv_values(app/'.env')),{'DRIVE_PROCESS':'true'})
-        google=dotenv_values(self.root/'Plugins/Plugins/google/.env')
+        google=dotenv_values(self.root/'Plugins/Connectors/google/.env')
         self.assertTrue(Path(google['GOOGLE_APPLICATION_CREDENTIALS']).is_file())
-        self.assertEqual(dotenv_values(self.root/'Plugins/Plugins/object_storage/.env')['OBJECT_STORAGE_SECRET_ACCESS_KEY'],'secret')
-        self.assertEqual(dotenv_values(self.root/'Plugins/Plugins/discord/.env')['DISCORD_BOT_TOKEN'],'bot')
+        self.assertEqual(dotenv_values(self.root/'Plugins/Connectors/object_storage/.env')['OBJECT_STORAGE_SECRET_ACCESS_KEY'],'secret')
+        self.assertEqual(dotenv_values(self.root/'Plugins/Connectors/discord/.env')['DISCORD_BOT_TOKEN'],'bot')
     def test_internal_app_capability_is_scoped_loopback_and_revoked(self):
         context=app_access.issue('podcast_automation');token=json.loads(context)['token']
         request=SimpleNamespace(headers={'X-PIA-App-Token':token},client_address=('127.0.0.1',123),path='/v1/chat/completions')

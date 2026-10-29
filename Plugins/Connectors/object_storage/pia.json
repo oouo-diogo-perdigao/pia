@@ -1,0 +1,7 @@
+{
+  "nome": "Object Storage · S3, R2 e compatíveis",
+  "app_id": "object_storage",
+  "info": "Contas e credenciais de armazenamento S3, R2 e compatíveis.",
+  "type": "connector",
+  "lang": "lang/pt-BR.json"
+}

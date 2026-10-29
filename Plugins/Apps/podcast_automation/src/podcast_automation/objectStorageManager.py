@@ -1,6 +1,6 @@
 """Podcast-specific names/metadata over the shared Object Storage plugin."""
 from botocore.exceptions import ClientError
-from Plugins.Plugins.object_storage.service import ObjectStorage
+from Plugins.Connectors.object_storage.service import ObjectStorage
 from .settings import get_config
 
 class ObjectStorageManager:

@@ -1,6 +1,6 @@
 """Podcast adapter. Authentication, listing and downloads belong to the Google plugin."""
 from pathlib import Path
-from Plugins.Plugins.google.drive import Drive
+from Plugins.Connectors.google.drive import Drive
 from .settings import get_config,get_download_dir
 class GoogleDriveClient:
     def __init__(self):

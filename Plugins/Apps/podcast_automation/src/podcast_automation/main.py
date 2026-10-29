@@ -170,8 +170,34 @@ def publicar_sessao(
             chave,
             content_type,
         )
+        url=obj_storage.public_url(chave)
+        emit('artifact',name=nome_destino,url=url)
+        if caminho==item.get('audio_path'):item.setdefault('publication_links',{})['MP3']=url
+        elif caminho==item.get('roteiro_path'):item.setdefault('publication_links',{})['Transcrição TXT']=url
+
+
+def finalizar_publicacao(item, drive, obj_storage, rss_updater, sessoes_processadas, assinatura):
+    """Only commit the source/cleanup after both feed derivatives were rebuilt."""
+    folder_rss=item['rss_key'].rsplit('/',1)[0]
+    stage(9)
+    result=rss_updater.updateRssTranscriptionFiles(folder=folder_rss)
+    if (not isinstance(result,dict) or result.get('success') is not True
+            or not any(folder.get('folder')==folder_rss for folder in result.get('folders',[]))):
+        errors=result.get('errors',[]) if isinstance(result,dict) else []
+        detail='; '.join(str(error.get('erro',error)) for error in errors) or 'A campanha não foi atualizada.'
+        raise RuntimeError('Falha ao atualizar RSS e transcrições: '+detail+
+                           ' O ZIP e os arquivos locais foram preservados; a origem não foi marcada como processada.')
+    emit('artifact',name='RSS',url=obj_storage.public_url(item['rss_key']))
+    emit('artifact',name='Transcrições',url=obj_storage.public_url(folder_rss+'/transcripts.html'))
+    drive.rename_processed(item['id'],item['name'])
+    stage(10)
+    sessoes_processadas.append(assinatura)
+    limpar_temporarios(item['pasta_extraida'],item['local_zip'])
+    emit('complete')
     print("Sessão publicada com sucesso!")
-    announce_publication(item["nome_sessao"], item["campanha"])
+    links={**item.get('publication_links',{}),'RSS':obj_storage.public_url(item['rss_key']),
+           'Transcrições gerais':obj_storage.public_url(folder_rss+'/transcripts.html')}
+    announce_publication(item["nome_sessao"], item["campanha"],links)
 
 
 def processar_sessao(
@@ -309,25 +335,7 @@ def processar_sessao(
         item,
     )
 
-    folder_rss = item["rss_key"].rsplit("/", 1)[0]
-
-    stage(9)
-    rss_updater.updateRssTranscriptionFiles(folder=folder_rss)
-
-    drive.rename_processed(
-        item["id"],
-        item["name"],
-    )
-
-    stage(10)
-    sessoes_processadas.append(assinatura)
-
-    limpar_temporarios(
-        item["pasta_extraida"],
-        item["local_zip"],
-    )
-
-    emit('complete')
+    finalizar_publicacao(item,drive,obj_storage,rss_updater,sessoes_processadas,assinatura)
 
 
 def main() -> None:
@@ -406,7 +414,10 @@ def run() -> None:
         raise ValueError("POLL_INTERVAL_SECONDS deve ser positivo.")
     while True:
         if args.once:
-            main()
+            try:main()
+            except Exception as exc:
+                emit('failed',error=str(exc))
+                raise
             return
         try:
             main()

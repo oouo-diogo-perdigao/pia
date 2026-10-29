@@ -120,7 +120,7 @@ def _shortcut_value(item: dict, system: str, fallback: str) -> str:
 
 def load_config(path: Path | None = None) -> dict:
     try:
-        from dotenv import load_dotenv
+        from src.env_types import load_dotenv
 
         load_dotenv(CONFIG_DIR / ".env")
     except ImportError:

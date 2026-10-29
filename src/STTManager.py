@@ -8,6 +8,7 @@ from enum import Enum
 
 from .config import (
     STT_WHISPER_TIMEOUT,
+    STT_MODEL,
     logging,
     MODELS_DIR,
     OPENAI_COMPAT_TIMEOUT_SECONDS,
@@ -79,6 +80,7 @@ class STTManager:
             # stt
             "gpt-transcribe",
             "whisper-1",
+            "local/medium",
         )
 
     def ensure_worker_running(self):
@@ -131,6 +133,9 @@ class STTManager:
         prompt: str | None = None,
         temperature: float | None = None,
         require_timestamps: bool = False,
+        local_model=None,
+        progress=None,
+        request_timeout=None,
     ) -> dict:
         """Synchronously transcribe one OpenAI-compatible API request.
 
@@ -159,10 +164,11 @@ class STTManager:
                     "language": language or None,
                     "prompt": prompt or None,
                     "temperature": temperature,
+                      "model": local_model,
                 }
             )
 
-            deadline = time.monotonic() + self.timeout
+            deadline = time.monotonic() + (request_timeout or self.timeout)
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -172,16 +178,18 @@ class STTManager:
                     }
 
                 try:
-                    result = result_queue.get(timeout=remaining)
+                    result = result_queue.get(timeout=min(1,remaining))
                 except queue.Empty:
-                    return {
-                        "ok": False,
-                        "error": "Tempo limite excedido durante a transcrição.",
-                    }
+                    if self.worker_process is not None and not self.worker_process.is_alive():
+                        return {'ok':False,'error':'O processo de transcrição encerrou inesperadamente. Consulte logs/_main.log.'}
+                    continue
                 except Exception as exc:
                     return {"ok": False, "error": str(exc)}
 
                 if result.get("request_id") == request_id:
+                    if result.get('kind')=='progress':
+                        if progress:progress(result['event'])
+                        continue
                     return result
 
                 # A previous timed-out request may finish later. Discard that stale
@@ -401,8 +409,8 @@ def stt_worker_process(
     from src.VoiceAgent import VoiceAgent
 
     logging.info("[WORKER STT] Inicializando modelo de IA no processo filho...")
-    agent = VoiceAgent(models_dir)
-    logging.info("[WORKER STT] Modelo pronto para transcrição.")
+    agent = None
+    agent_model = None
 
     last_used = time.monotonic()
 
@@ -415,6 +423,7 @@ def stt_worker_process(
                 logging.info(
                     "[WORKER STT] Inatividade de %ds atingida. Finalizando processo e liberando memória...",
                     STT_WHISPER_TIMEOUT,
+    STT_MODEL,
                 )
                 break
             continue
@@ -444,12 +453,22 @@ def stt_worker_process(
         last_used = time.monotonic()
 
         try:
+            requested_model=task.get('model') or STT_MODEL
+            if agent is None or agent_model!=requested_model:
+                agent=None
+                import gc
+                gc.collect()
+                agent=VoiceAgent(models_dir,model_name=requested_model)
+                agent_model=requested_model
+                logging.info("[WORKER STT] Modelo %s pronto para transcrição.",requested_model)
+            progress_kwargs={'progress':lambda event:api_result_queue.put({'kind':'progress','request_id':request_id,'event':event})} if kind=='api' else {}
             transcription = agent.transcribe_chunk(
                 chunk,
                 language=language,
                 prompt=prompt,
                 temperature=temperature,
                 return_metadata=(kind == "api"),
+                **progress_kwargs,
             )
             metadata = transcription if isinstance(transcription, dict) else {"text": transcription or None}
             target_queue.put(

@@ -148,6 +148,8 @@ class Secretary:
                         errors.append(type(exc).__name__ + ': ' + str(exc))
                 self.store.set('secretary:status:' + account,
                                {'checked_at': now.isoformat(), 'errors': errors})
+                from src.plugin_logs import write
+                write('Bot/secretaria','Consulta de agenda e e-mails', 'erro' if errors else 'ok')
         finally:
             self.poll_lock.release()
 

@@ -19,6 +19,8 @@ def run_desktop():
         if sys.platform != 'win32' and os.getenv('WAYLAND_DISPLAY') and os.getenv('DISPLAY'):
             os.environ.setdefault('QT_QPA_PLATFORM', 'xcb')
         initialize_config()
+        from .cache_paths import migrate
+        migrate()
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
         listener = subprocess.Popen([sys.executable, '-m', 'src.hotkeys'], cwd=BASE_DIR, creationflags=flags)
         from .server import main as run_server
@@ -55,8 +57,18 @@ def start_background():
 def main():
     parser = argparse.ArgumentParser(description='Iniciar PIA')
     parser.add_argument('--foreground', action='store_true', help='Executar no terminal para diagnóstico')
+    parser.add_argument('--restart-pid',type=int)
     parser.add_argument('--dry-run', action='store_true', help='Exibir o comando sem iniciar')
     options = parser.parse_args()
+    if options.restart_pid:
+        for _ in range(600):
+            lock=InstanceLock(BASE_DIR/'data/pia.lock')
+            if lock.acquire():
+                lock.close();break
+            time.sleep(.25)
+        else:raise RuntimeError('A instância anterior não encerrou; reinício cancelado.')
+        start_background()
+        return
     if options.dry_run:
         print(f'Python: {sys.executable}\nProjeto: {BASE_DIR}\nComando: python -m src.launcher --foreground')
         return
