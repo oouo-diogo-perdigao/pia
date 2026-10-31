@@ -499,3 +499,112 @@ button:disabled {
 .folder-node button {
   text-align: left;
 }
+
+.env-row .env-name {
+  flex: 0 0 42%;
+  overflow-wrap: anywhere;
+}
+.env-row .grow {
+  min-width: 100px;
+}
+.notification-activity {
+  position: relative;
+}
+.notification-count {
+  position: absolute;
+  right: 0;
+  top: 0;
+  border-radius: 12px;
+  background: #7950f2;
+  color: white;
+  font-size: 10px;
+  min-width: 16px;
+  text-align: center;
+  pointer-events: none;
+}
+.rail-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+@media (max-width: 650px) {
+  .env-row {
+    flex-wrap: wrap !important;
+  }
+  .env-row .env-name {
+    flex-basis: 100%;
+  }
+}
+
+.media-dock {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(700px, 90vw);
+  z-index: 210;
+}
+.view-content {
+  padding-bottom: 100px;
+}
+
+.notification-target {
+  position: relative;
+  min-width: 0;
+}
+.notification-count {
+  background: #ef4444;
+  box-shadow: 0 0 0 2px #19171f;
+  font-weight: 700;
+  font-size: 10px;
+  line-height: 17px;
+  min-width: 17px;
+  padding: 0 4px;
+  right: -3px;
+  top: -3px;
+  z-index: 2;
+}
+.chat-name {
+  position: relative;
+  padding-right: 28px !important;
+}
+.chat-name .notification-count {
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.bot-card {
+  position: relative;
+}
+.settings-tree-folder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 9px 8px;
+  text-align: left;
+  border-radius: 6px;
+}
+.settings-tree-folder:hover {
+  background: #ffffff0b;
+}
+.settings-tree-children {
+  margin-left: 15px;
+  padding-left: 9px;
+  border-left: 1px solid #ffffff25;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.notification-menu {
+  min-width: 260px;
+}
+.notification-menu button {
+  justify-content: flex-start;
+  width: 100%;
+}

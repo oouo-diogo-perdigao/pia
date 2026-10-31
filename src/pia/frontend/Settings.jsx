@@ -1,3 +1,5 @@
+import { fieldGroup } from "./settings-groups";
+import LogsPanel from "./LogsPanel";
 import { fingerprint } from "./forms";
 import React, { useState, useEffect, useRef } from "react";
 import {
@@ -406,16 +408,11 @@ export default function SettingsPanel({ section = "general" }) {
     [values, setValues] = useState({}),
     [savedValues, setSavedValues] = useState(""),
     [logs, setLogs] = useState([]),
-    [notice, setNotice] = useState("");
+    [notice, setNotice] = useState(""),
+    [group, setGroup] = useState("Geral");
   useEffect(() => {
     let active = true;
-    if (section === "logs") {
-      api("/logs")
-        .then((result) => {
-          if (active) setLogs(result);
-        })
-        .catch(report);
-    } else if (section !== "accounts") {
+    if (section !== "logs" && section !== "accounts") {
       api("/settings")
         .then((result) => {
           if (!active) return;
@@ -434,37 +431,7 @@ export default function SettingsPanel({ section = "general" }) {
     };
   }, [section]);
   if (section === "accounts") return <Accounts />;
-  if (section === "logs")
-    return (
-      <Stack>
-        <Group justify="space-between">
-          <Title order={4}>{t("Inspeção e logs")}</Title>
-          <Icon
-            icon={Trash2}
-            label={t("Apagar todos os logs")}
-            onClick={async () => {
-              await api("/logs/clear", { all: true });
-              setLogs((old) => old.map((log) => ({ ...log, text: "" })));
-            }}
-          />
-        </Group>
-        {logs.map((log) => (
-          <LogViewer
-            key={log.name}
-            title={log.name}
-            text={log.text}
-            onClear={async () => {
-              await api("/logs/clear", { name: log.name });
-              setLogs((old) =>
-                old.map((item) =>
-                  item.name === log.name ? { ...item, text: "" } : item,
-                ),
-              );
-            }}
-          />
-        ))}
-      </Stack>
-    );
+  if (section === "logs") return <LogsPanel />;
   const selected = sections.find((s) => s.id === section) || sections[0];
   if (!selected) return <Text>{t("Carregando…")}</Text>;
   async function save() {
@@ -546,18 +513,57 @@ export default function SettingsPanel({ section = "general" }) {
               })}
             />
           )}{" "}
+          {selected.id === "general" && (
+            <Group gap="xs">
+              {[
+                "Geral",
+                "STT",
+                "TTS",
+                "Imagens · ICE",
+                "LLMs",
+                "Voz e áudio",
+              ].map((name) => (
+                <Button
+                  key={name}
+                  variant={group === name ? "light" : "subtle"}
+                  onClick={() => setGroup(name)}
+                >
+                  {t(name)}
+                </Button>
+              ))}
+            </Group>
+          )}
           {selected.fields
+            .filter(
+              (field) =>
+                selected.id !== "general" || fieldGroup(field) === group,
+            )
             .filter(
               (field) =>
                 selected.id !== "Connectors/discord" ||
                 field.base !== "DISCORD_CHANNEL_ID",
             )
             .map((field) => (
-              <Group key={field.name} wrap="nowrap" align="end">
+              <Group
+                key={field.name}
+                className="env-row"
+                wrap="nowrap"
+                align="center"
+                gap="xs"
+              >
+                <Text
+                  component="label"
+                  htmlFor={"env-" + field.name}
+                  size="xs"
+                  className="env-name"
+                >
+                  {field.name}
+                </Text>
                 <div className="grow">
                   {field.type === "bool" ? (
                     <Select
-                      label={field.name}
+                      id={"env-" + field.name}
+                      aria-label={field.name}
                       data={[
                         { value: "", label: '""' },
                         { value: "true", label: "true" },
@@ -570,7 +576,8 @@ export default function SettingsPanel({ section = "general" }) {
                     />
                   ) : field.sensitive ? (
                     <PasswordInput
-                      label={field.name}
+                      id={"env-" + field.name}
+                      aria-label={field.name}
                       value={values[field.name] || ""}
                       onChange={(event) =>
                         setValues({
@@ -581,7 +588,8 @@ export default function SettingsPanel({ section = "general" }) {
                     />
                   ) : (
                     <TextInput
-                      label={field.name}
+                      id={"env-" + field.name}
+                      aria-label={field.name}
                       type={
                         ["int", "float"].includes(field.type)
                           ? "number"

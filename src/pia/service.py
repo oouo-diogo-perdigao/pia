@@ -100,6 +100,10 @@ class WorkspaceService:
         self.backend = backend or DesktopBackend(self.notify)
         self.store = self.backend.store
         self.apps = apps or Apps()
+        from src.notifications import NotificationCenter
+        self.notifications=getattr(self.backend,'notifications',None) or NotificationCenter(self.store,self.notify,getattr(self.backend,'speak',lambda text:None))
+        from src.media import MediaSessions
+        self.media=MediaSessions()
 
     def notify(self, title, text, speak=False):
         if self.native_handler:
@@ -114,7 +118,26 @@ class WorkspaceService:
     def state(self):
         return {'boot':getattr(self,'boot','legacy'),'chats': self.store.chat_records(), 'folders': self.store.folders(), 'apps': sorted(self.apps.public(),key=lambda app:(self.store.get('ui:app-order',[]).index(app['id']) if app['id'] in self.store.get('ui:app-order',[]) else 999)),
                 'jobs': [{'id': j.id, 'chat': j.chat, 'status': j.status} for j in self.jobs.values() if j.status == 'running'],
-                'native': self.native_handler is not None}
+                'native': self.native_handler is not None,
+                'notifications':self.notification_counts(),'bots':self.bot_records()}
+
+    def notification_counts(self):
+        counts={k:v for k,v in self.notifications.snapshot().items() if k in ('counts','unread','settings')}
+        chats=self.store.unread_chats()
+        return {**counts,'chat_counts':chats,'chat_unread':sum(chats.values())}
+
+    def bot_records(self):
+        records=[]
+        for file in sorted((BASE_DIR/'Plugins/Bot').glob('*/pia.json')):
+            meta=json.loads(file.read_text(encoding='utf-8'))
+            identity=meta.get('app_id','')
+            if not re.fullmatch('[a-z][a-z0-9_]*',identity):continue
+            records.append({'id':identity,'name':meta['nome'],'avatar':f'/bots/{identity}/avatar.svg' if (file.parent/'avatar.svg').is_file() else None,'description':meta.get('info',''),'url':f'/bots/{identity}/web/'+meta.get('home','index.html')})
+        return records
+
+    def publish_notification(self,source,title,text,links=None):
+        if source not in dict(self.plugin_folders()):raise ValueError('Plugin não encontrado.')
+        return self.notifications.publish(source,title,text,links)
 
     def send(self, chat, text, request=None):
         if not isinstance(text, str) or not text.strip():
@@ -176,9 +199,11 @@ class WorkspaceService:
                 example = folder / 'docs' / 'examples' / '.env.example'
             rows = []
             for name, value in fields(example, folder / '.env'):
+                if identity=='Connectors/agents' and split_key(name)[0]=='AGENTS_GEMINI_EXECUTABLE':continue
                 if split_key(name)[0] in ('PODCAST_CONFIG','GOOGLE_APPLICATION_CREDENTIALS','GOOGLE_DRIVE_FOLDER_ID'):continue
                 sensitive = any(part in name for part in ('KEY', 'TOKEN', 'SECRET', 'PASSWORD', 'CREDENTIAL'))
-                link = ('https://console.cloud.google.com/apis/credentials' if name.startswith('GOOGLE') else
+                link = ('https://antigravity.google/docs/getting-started?tab=cli' if name.startswith('AGENTS_AGY_') else
+                        'https://console.cloud.google.com/apis/credentials' if name.startswith('GOOGLE') else
                         'https://dash.cloudflare.com/' if name.startswith('OBJECT_STORAGE') else
                         'https://huggingface.co/settings/tokens' if name.startswith('HF_') else
                         'https://discord.com/developers/applications' if name.startswith('DISCORD_') else
@@ -267,6 +292,35 @@ class WorkspaceService:
         return result
 
     def _dispatch(self, method, path, data, query):
+        if path=='/notifications/counts':
+            return self.notification_counts()
+        if path=='/chat/read':
+            self.store.read_chat(data['chat'],data['through'])
+            return {'ok':True}
+        if path=='/notifications':
+            value=self.notifications.snapshot()
+            value['sources']=[{'id':identity,'name':json.loads((folder/'pia.json').read_text(encoding='utf-8')).get('nome',identity) if (folder/'pia.json').is_file() else identity} for identity,folder in self.plugin_folders() if identity.startswith(('Apps/','Bot/'))]
+            return value
+        if path=='/notifications/settings':
+            self.notifications.configure(data)
+            return {'ok':True}
+        if path=='/notifications/read':
+            self.notifications.read(data.get('id'),data.get('source'));return {'ok':True}
+        if path=='/notifications/publish':
+            return self.publish_notification(data['source'],data['title'],data['text'],data.get('links'))
+        if path=='/media/state':
+            playing=self.media.update(data.get('client'),data.get('playing'))
+            if self.native_handler:self.native('media-state',{'playing':playing})
+            return {'ok':True}
+        if path=='/logs/read':
+            from src.log_reader import read_log
+            return read_log(data['name'],data.get('cursor'),data.get('identity'))
+        if path=='/logs/open':
+            from src.log_reader import log_path
+            from urllib.parse import quote
+            log_path(data['name'])
+            if self.native_handler:return self.native('open-log',{'name':data['name']})
+            return {'url':'/api/pia/logs/file?name='+quote(data['name'],safe='')}
         if path == '/settings/upload':
             return self.upload_setting(data)
         if path == '/preferences':
@@ -381,8 +435,7 @@ class WorkspaceService:
             self.backend.resources.disconnect(data['plugin'], data['account'])
             return {'ok': True}
         if path == '/bots':
-            meta=json.loads((BASE_DIR/'Plugins/Bot/secretaria/pia.json').read_text(encoding='utf-8'))
-            return [{'id': meta['app_id'], 'name': meta['nome'], 'avatar':'/bots/secretaria/avatar.svg', 'description': meta['info']}]
+            return self.bot_records()
         if path == '/bots/secretaria':
             if method == 'POST':
                 self.backend.secretary.configure(data)
@@ -460,6 +513,7 @@ class WorkspaceService:
                 cleared.append(file.relative_to(directory).as_posix())
             return {'cleared':cleared}
         if path == '/logs':
+            from src.log_reader import read_log
             result = []
             directory=BASE_DIR/'logs'
             for identity,_ in self.plugin_folders():
@@ -468,9 +522,7 @@ class WorkspaceService:
                 file.parent.mkdir(parents=True,exist_ok=True);file.touch(exist_ok=True)
             for file in sorted(directory.rglob('*.log')):
                 if not file.resolve().is_relative_to(directory.resolve()):continue
-                with file.open('rb') as stream:
-                    stream.seek(max(0, file.stat().st_size - 32000))
-                    result.append({'name': file.relative_to(directory).as_posix(), 'text': stream.read().decode('utf-8', errors='replace')})
+                result.append(read_log(file.relative_to(directory).as_posix()))
             return result
         raise ValueError('Operação não encontrada.')
 

@@ -43,6 +43,15 @@ with tempfile.TemporaryDirectory() as directory:
     class FakeApps(Apps):
         def call(self,identity,action,payload,context):
             calls.append((identity,action))
+            if identity=='music':
+                if action=='library':return {'items':getattr(self,'music_items',[]),'folder':'fixture/Music/PIA','job':None}
+                if action=='generate':
+                    job=Job();context.jobs[job.id]=job
+                    self.music_items=[{'file':f'{n:032x}.mp3','batch':'fixture-batch','variant':n,'prompt':payload['prompt'],'provider':'local','audio_url':f'/api/pia/music/files/{n:032x}.mp3'} for n in range(1,payload['count']+1)]
+                    for item in self.music_items:job.emit('track',item=item)
+                    job.emit('progress',value={'label':'Músicas concluídas','percent':100,'completed':payload['count'],'total':payload['count'],'state':'completed'})
+                    job.emit('done',result={'batch':'fixture-batch','items':self.music_items})
+                    return {'job':job.id}
             if identity=='podcast_automation':
                 if action=='config':return config
                 if action=='pending-preview':return {'configured':True,'folder':payload.get('google_folder'),'folder_path':'Meu Drive / Antigas' if payload.get('google_folder')=='old-folder' else 'Meu Drive / Gravações','pending':[{'id':'one','name':'pending-one.zip'},{'id':'two','name':'pending-two.zip'}],'processed':3,'total':5}
@@ -71,6 +80,7 @@ with tempfile.TemporaryDirectory() as directory:
     capture_image=QImage(32,32,QImage.Format.Format_ARGB32);capture_image.fill(QColor('#7755cc'))
     service=WorkspaceService(backend=backend,apps=FakeApps())
     def native(action,payload):
+        if action in ('notify','media-state'):return {'ok':True}
         if action=='dictate':
             job=Job();service.jobs[job.id]=job;job.emit('delta',text='texto ditado');job.emit('done');return {'job':job.id}
         raise ValueError('Native fixture action not allowed')
@@ -181,6 +191,8 @@ with tempfile.TemporaryDirectory() as directory:
         QTest.qWait(300);shell.view.grab().save(str(preview/'react-podcast.png'))
         # Secretary saves enable on change, disable on revert and reset after persistence.
         js(shell,"document.querySelector('[aria-label=\"Bots\"]').click()")
+        wait(lambda:js(shell,"!!document.querySelector('.bot-card')"))
+        js(shell,"document.querySelector('.bot-card button').click()")
         wait(lambda:js(shell,"[...document.querySelectorAll('button')].some(b=>b.textContent==='Salvar preferências')"))
         assert js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='Salvar preferências').disabled")
         assert js(shell,"(()=>{const boxes=['Principal','Destaque','Olhos'].map(name=>[...document.querySelectorAll('label')].find(label=>label.textContent===name).control.getBoundingClientRect());return boxes.every(box=>Math.abs(box.top-boxes[0].top)<2) && boxes[0].left<boxes[1].left && boxes[1].left<boxes[2].left;})()")
@@ -193,11 +205,26 @@ with tempfile.TemporaryDirectory() as directory:
         wait(lambda:js(shell,"![...document.querySelectorAll('button')].find(b=>b.textContent==='Salvar preferências').disabled"))
         js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='Salvar preferências').click()")
         wait(lambda:js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='Salvar preferências').disabled"))
-        js(shell,"document.querySelector('[aria-label=\"Conectores\"]').click()")
-        wait(lambda:js(shell,"document.querySelector('.view-title')?.textContent==='Conectores / Google'"))
+        js(shell,"document.querySelector('.rail-bottom [aria-label=\"Configurações\"]').click()")
+        wait(lambda:js(shell,"[...document.querySelectorAll('.sidebar button')].some(b=>b.textContent==='Conectores')"))
+        js(shell,"[...document.querySelectorAll('.sidebar button')].find(b=>b.textContent==='Conectores').click()")
+        wait(lambda:js(shell,"!!document.querySelector('.settings-tree-children')"))
+        js(shell,"[...document.querySelectorAll('.settings-tree-children button')].find(b=>b.textContent==='Google').click()")
+        wait(lambda:js(shell,"document.querySelector('.view-title')?.textContent==='Configurações / Conectores / Google'"))
         wait(lambda:js(shell,"[...document.querySelectorAll('label')].some(label=>label.textContent==='Client ID')"))
+        js(shell,"[...document.querySelectorAll('.settings-tree-children button')].find(b=>b.textContent==='Agentes externos').click()")
+        wait(lambda:js(shell,"!!document.querySelector('[aria-label=\"Como instalar e configurar o agente\"]')"))
+        js(shell,"document.querySelector('[aria-label=\"Como instalar e configurar o agente\"]').click()")
+        wait(lambda:js(shell,"document.body.textContent.includes('npm install -g @openai/codex') && document.body.textContent.includes('AGENTS_CODEX_EXECUTABLE')"))
+        js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='Entendi').click()")
+        js(shell,"[...document.querySelectorAll('label')].find(label=>label.textContent==='Agente').control.click()")
+        wait(lambda:js(shell,"!![...document.querySelectorAll('[role=option]')].find(option=>option.textContent==='Google Antigravity · AGY')"))
+        js(shell,"[...document.querySelectorAll('[role=option]')].find(option=>option.textContent==='Google Antigravity · AGY').click()")
+        js(shell,"document.querySelector('[aria-label=\"Como instalar e configurar o agente\"]').click()")
+        wait(lambda:js(shell,"document.body.textContent.includes('AGENTS_AGY_EXECUTABLE') && document.body.textContent.includes('antigravity.google/cli/install.ps1')"))
+        js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='Entendi').click()")
         # Environment settings use an isolated fixture and do not expose live secrets.
-        service.settings=lambda:[dict(id='general',name='PIA · Geral',fields=[dict(name='COUNT__INT',base='COUNT',type='int',value='1',sensitive=False,link='https://example.invalid')])]
+        service.settings=lambda:[dict(id='general',name='PIA · Geral',fields=[dict(name=name,base=name.split('__')[0],type='int',value='1',sensitive=False,link='https://example.invalid') for name in ('COUNT__INT','STT_THREADS__INT','TTS_SPEED__INT')])]
         js(shell,"document.querySelector('.rail-bottom [aria-label=\"Configurações\"]')?.click() || document.querySelector('[aria-label=\"Configurações\"]').click()")
         wait(lambda:js(shell,"[...document.querySelectorAll('button')].some(b=>b.textContent==='Salvar variáveis')"))
         assert js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='Salvar variáveis').disabled")
@@ -205,6 +232,54 @@ with tempfile.TemporaryDirectory() as directory:
         wait(lambda:js(shell,"![...document.querySelectorAll('button')].find(b=>b.textContent==='Salvar variáveis').disabled"))
         js(shell,"var field=[...document.querySelectorAll('label')].find(l=>l.textContent==='COUNT__INT').control;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(field,'1');field.dispatchEvent(new Event('input',{bubbles:true}));")
         wait(lambda:js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='Salvar variáveis').disabled"))
+        assert js(shell,"(()=>{const label=document.querySelector('label[for=\"env-COUNT__INT\"]').getBoundingClientRect(),input=document.querySelector('#env-COUNT__INT').getBoundingClientRect();return Math.abs(label.top+label.height/2-input.top-input.height/2)<5;})()")
+        js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='STT').click()")
+        wait(lambda:js(shell,"!!document.querySelector('#env-STT_THREADS__INT') && !document.querySelector('#env-COUNT__INT')"))
+        js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='TTS').click()")
+        wait(lambda:js(shell,"!!document.querySelector('#env-TTS_SPEED__INT')"))
+        # Resource preferences live in right-click menus, never switches in the inbox.
+        js(shell,"document.querySelector('.app-activities [aria-label=\"Música\"]').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:70,clientY:200}))")
+        wait(lambda:js(shell,"!!document.querySelector('.notification-menu')"))
+        js(shell,"document.querySelector('.notification-menu button').click()")
+        wait(lambda:'Apps/music' in service.notifications.snapshot()['settings']['muted'])
+        for expected in (True,False):
+            js(shell,"document.querySelector('[aria-label=\"Notificações\"]').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:70,clientY:300}))")
+            wait(lambda:js(shell,"!!document.querySelector('.notification-menu')"))
+            js(shell,"document.querySelector('.notification-menu button').click()")
+            wait(lambda:service.notifications.snapshot()['settings']['read_aloud']==expected)
+        service.store.append(chat,'assistant','Unseen fixture reply')
+        wait(lambda:js(shell,"!!document.querySelector('.activity-rail > .notification-activity [aria-label=\"Conversas\"]') && document.querySelector('.activity-rail > .notification-activity').textContent.includes('1')"))
+        js(shell,"document.querySelector('[aria-label=\"Conversas\"]').click()")
+        wait(lambda:js(shell,"!!document.querySelector('.chat-name .notification-count')"))
+        js(shell,"document.querySelector('.chat-name').click()")
+        wait(lambda:service.store.unread_chats()=={})
+        service.notifications.publish('Bot/secretaria','Fixture notification','Reunião',[{'label':'Abrir Meet','url':'https://meet.google.com/fixture'}])
+        js(shell,"document.querySelector('[aria-label=\"Notificações\"]').click()")
+        wait(lambda:js(shell,"document.body.textContent.includes('Fixture notification')"))
+        assert js(shell,"document.querySelector('a[href=\"https://meet.google.com/fixture\"]')?.textContent.includes('Abrir Meet')")
+        js(shell,"document.querySelector('[aria-label=\"Marcar como lida\"]').click()")
+        wait(lambda:js(shell,"document.body.textContent.includes('0 não lidas')"))
+        js(shell,"document.querySelector('.app-activities [aria-label=\"Música\"]').click()")
+        wait(lambda:js(shell,"[...document.querySelectorAll('label')].some(label=>label.textContent==='Descrição musical')"))
+        js(shell,"var promptField=[...document.querySelectorAll('label')].find(label=>label.textContent==='Descrição musical').control;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(promptField,'Piano fixture');promptField.dispatchEvent(new Event('input',{bubbles:true}));var countField=[...document.querySelectorAll('label')].find(label=>label.textContent==='Quantidade de músicas').control;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(countField,'2');countField.dispatchEvent(new Event('input',{bubbles:true}));")
+        wait(lambda:js(shell,"![...document.querySelectorAll('button')].find(button=>button.textContent==='Gerar música').disabled"))
+        js(shell,"[...document.querySelectorAll('button')].find(button=>button.textContent==='Gerar música').click()")
+        wait(lambda:js(shell,"!!document.querySelector('#music-batch-fixture-batch') && document.body.textContent.includes('100.0%')"))
+        assert js(shell,"document.querySelectorAll('#music-batch-fixture-batch [aria-label^=\"Tocar Versão\"]').length===2 && !document.querySelector('audio')")
+        log=root/'logs/plugins/Apps/fixture.log';log.parent.mkdir(parents=True);log.write_text(''.join(f'old {n}\n' for n in range(130)),encoding='utf-8')
+        with patch('src.pia.service.BASE_DIR',root),patch('src.log_reader.BASE_DIR',root):
+            js(shell,"document.querySelector('.rail-bottom [aria-label=\"Configurações\"]').click()")
+            wait(lambda:js(shell,"[...document.querySelectorAll('.sidebar button')].some(b=>b.textContent==='Inspeção e logs')"))
+            js(shell,"[...document.querySelectorAll('.sidebar button')].find(b=>b.textContent==='Inspeção e logs').click()")
+            wait(lambda:js(shell,"document.body.textContent.includes('Apps · 1')"))
+            assert js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='Apps · 1').getAttribute('aria-expanded')==='true'")
+            wait(lambda:js(shell,"[...document.querySelectorAll('button')].some(b=>b.textContent==='Apps/fixture')"))
+            assert js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='Apps/fixture').getAttribute('aria-expanded')==='true'")
+            wait(lambda:js(shell,"!!document.querySelector('.log-viewer')"))
+            assert js(shell,"document.querySelector('.log-viewer').textContent.startsWith('old 30\\n')")
+            with log.open('a',encoding='utf-8') as stream:stream.write('live appended\n')
+            wait(lambda:js(shell,"document.querySelector('.log-viewer').textContent.includes('live appended')"))
+        print('Compact env tabs, central notification links/read state, grouped live logs: OK')
         editor=WebShell(origin+'/apps/screenshots/capture.html?id=fixture',origin);editor.show()
         wait(lambda:js(editor,"!!window.piaCapture?.ready"))
         assert js(editor,"document.querySelector('#free').classList.contains('mantine-Button-root') && document.querySelector('#canvas').width>1")

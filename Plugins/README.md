@@ -5,8 +5,8 @@
 
 Veja [o contrato e o exemplo](../docs/SKILLS.md).
 
-- `Plugins/`: conectores OAuth com múltiplas contas Google/Microsoft; recursos para as skills.
-- `Bots/`: tarefas locais persistentes; a primeira é a secretária de agenda/Gmail.
+- `Connectors/`: conectores com múltiplas contas e recursos compartilhados, incluindo Google/Microsoft, Discord e Object Storage.
+- `Bot/`: tarefas locais persistentes; a primeira é a secretária de agenda/Gmail.
 - `Apps/podcast_automation/`: código completo do Podcast Automation incorporado à PIA,
   incluindo testes, utilitários e licença; nenhum clone externo é necessário na instalação.
 

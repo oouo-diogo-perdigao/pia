@@ -81,6 +81,9 @@ class WebShell(QMainWindow):
         self.view.setFocus()
 
     def closeEvent(self, event):
+        if QApplication.instance().property('pia_exiting'):
+            event.accept()
+            return
         event.ignore()
         self.hide()
         self.hidden.emit()
@@ -160,7 +163,8 @@ class DesktopUI(QObject):
         self.mini_action.setChecked(True)
         self.mini_action.toggled.connect(self.set_mini_visible)
         self.tray_menu.addSeparator()
-        self.tray_menu.addAction('Encerrar PIA').triggered.connect(QApplication.instance().quit)
+        self.tray_menu.addAction('Reiniciar PIA').triggered.connect(lambda: self.command('restart', {}))
+        self.tray_menu.addAction('Encerrar PIA').triggered.connect(self.request_exit)
         self.tray.setContextMenu(self.tray_menu)
         self.tray.activated.connect(lambda reason: self.set_main_visible(True)
             if reason == QSystemTrayIcon.ActivationReason.DoubleClick else None)
@@ -260,11 +264,26 @@ class DesktopUI(QObject):
             env['PIA_OPEN_MAIN']='1'
             flags=subprocess.CREATE_NO_WINDOW if sys.platform=='win32' else 0
             subprocess.Popen([sys.executable,'-m','src.launcher','--restart-pid',str(os.getpid())],cwd=BASE_DIR,env=env,creationflags=flags,start_new_session=sys.platform!='win32')
-            QTimer.singleShot(700,QApplication.instance().quit)
+            QTimer.singleShot(700,self.request_exit)
             return {'ok':True}
         if action == 'inspect':
             self.window.inspect()
             return {'ok': True}
+        if action == 'open-log':
+            from .log_reader import log_path
+            file=log_path(payload['name'])
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(file))):
+                raise ValueError('Não foi possível abrir o log.')
+            return {'ok':True}
+        if action == 'media-state':
+            playing=bool(payload.get('playing'))
+            self.overlay.skill_action_requested.emit('music',playing)
+            if not hasattr(self,'media_timer'):
+                self.media_timer=QTimer(self)
+                self.media_timer.setSingleShot(True)
+                self.media_timer.timeout.connect(lambda:self.overlay.skill_action_requested.emit('music',False))
+            self.media_timer.start(17000) if playing else self.media_timer.stop()
+            return {'ok':True}
         if action == 'choose-path':
             mode = payload.get('mode', 'directory')
             selected = QFileDialog.getOpenFileName(self.window, 'Selecionar arquivo')[0] if mode == 'file' else QFileDialog.getExistingDirectory(self.window, 'Selecionar pasta')
@@ -314,7 +333,16 @@ class DesktopUI(QObject):
             raise ValueError('Ação nativa desconhecida.')
         return {'ok': True}
 
+    def request_exit(self):
+        app=QApplication.instance()
+        app.setProperty('pia_exiting',True)
+        app.exit(0)
+
     def shutdown(self):
+        if getattr(self,'_shutdown_done',False):return
+        self._shutdown_done=True
+        from Plugins.Apps.music.service import stop_engine
+        stop_engine()
         for plugin in self.native_apps.values():
             if hasattr(plugin, 'shutdown'):
                 plugin.shutdown()

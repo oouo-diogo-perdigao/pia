@@ -130,5 +130,13 @@
   "Nova pasta de conversas": "New chat folder",
   "Fork: criar outra conversa": "Fork: create a new chat",
   "Preencha o nome da pasta": "Enter a folder name",
-  "No navegador, pressione F12 ou Ctrl+Shift+I para abrir o inspetor.": "In your browser, press F12 or Ctrl+Shift+I to open developer tools."
+  "No navegador, pressione F12 ou Ctrl+Shift+I para abrir o inspetor.": "In your browser, press F12 or Ctrl+Shift+I to open developer tools.",
+  "Notificações": "Notifications",
+  "Ler novas notificações automaticamente": "Read new notifications aloud automatically",
+  "Silenciar": "Mute",
+  "não lidas": "unread",
+  "Marcar todas como lidas": "Mark all as read",
+  "Nenhuma notificação ainda.": "No notifications yet.",
+  "Imagens · ICE": "Images · ICE",
+  "Voz e áudio": "Voice and audio"
 }

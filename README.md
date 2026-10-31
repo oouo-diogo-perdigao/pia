@@ -616,3 +616,9 @@ Os comandos agora são projetos em `Plugins/Skills`, com `plugin.toml` e uma fun
 A interface atual usa React/Mantine. Consulte [Workspace React e progresso do podcast](docs/REACT_WORKSPACE.md) para o build, navegação, cache, reinício e transcrição local medium.
 
 Consulte [câmera, interrupção por voz, protocolos de agentes e música](INTEROPERABILITY.md) para os novos endpoints autenticados, integração com Codex/Gemini e preparação opcional do motor musical local.
+
+Para contribuir com agentes de programação, comece por [AGENTS.md](AGENTS.md). O guia aponta para arquitetura, desenvolvimento, interface, configurações, testes e decisões arquiteturais. Instruções específicas ficam nas pastas correspondentes; `GEMINI.md` e `.github/copilot-instructions.md` encaminham para as mesmas regras.
+
+[Notificações, reprodução musical, logs e capturas](docs/PLATFORM_SERVICES.md) descreve os serviços compartilhados disponíveis aos apps e bots.
+
+Para disponibilizar as ferramentas da PIA ao Codex, veja [PIA como servidor MCP: conexão, autenticação e login](docs/MCP_CODEX.md).

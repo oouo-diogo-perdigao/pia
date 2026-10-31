@@ -1,3 +1,8 @@
+import Bots from "./Bots";
+import NotificationMenu, { CountBadge } from "./NotificationMenu";
+import Notifications from "./Notifications";
+import MediaPlayer from "./MediaPlayer";
+import { Bell } from "lucide-react";
 import Music from "../../../Plugins/Apps/music/web/Panel.jsx";
 import { Music2 } from "lucide-react";
 import { notify } from "./toasts";
@@ -59,6 +64,25 @@ const appIcons = {
   screenshots: Camera,
   object_storage: HardDrive,
 };
+function normalizeRoute(route) {
+  if (
+    route.view === "settings" &&
+    (route.section === "accounts" || route.section?.startsWith("Connectors/"))
+  )
+    return {
+      view: "settings",
+      section: "connectors",
+      connector:
+        route.section === "accounts" ? "google" : route.section.split("/")[1],
+    };
+  return route.view === "connectors"
+    ? {
+        view: "settings",
+        section: "connectors",
+        connector: route.connector || "google",
+      }
+    : route;
+}
 function parseRoute() {
   try {
     return (
@@ -99,8 +123,11 @@ export default function Workspace({ standalone = null }) {
       folders: [],
       apps: [],
       jobs: [],
+      bots: [],
     }),
-    [route, setRoute] = useState(() => standalone || parseRoute()),
+    [route, setRoute] = useState(() =>
+      normalizeRoute(standalone || parseRoute()),
+    ),
     [ready, setReady] = useState(false),
     [language, setLanguage] = useState("pt-BR"),
     [catalog, setCatalog] = useState({}),
@@ -114,17 +141,21 @@ export default function Workspace({ standalone = null }) {
     [moveFolder, setMoveFolder] = useState(""),
     [drop, setDrop] = useState(null),
     [restarting, setRestarting] = useState(false),
-    [folded, setFolded] = useState({});
+    [folded, setFolded] = useState({}),
+    [connectorsOpen, setConnectorsOpen] = useState(false);
   const historyRef = useRef(new ScreenHistory(50)),
+    latestState = useRef(state),
     routeRef = useRef(route),
     [historyVersion, setHistoryVersion] = useState(0);
   const t = (text) => catalog[text] || text;
+  latestState.current = state;
   async function refresh() {
     const value = await api("/state");
     setState(value);
     return value;
   }
   function navigate(next) {
+    next = normalizeRoute(next);
     if (JSON.stringify(next) === JSON.stringify(routeRef.current)) return;
     const entry = historyRef.current.push(next);
     window.history.pushState(
@@ -183,6 +214,69 @@ export default function Workspace({ standalone = null }) {
     };
   }, []);
   useEffect(() => {
+    if (!ready) return;
+    let active = true;
+    const timer = setInterval(
+      () =>
+        api("/notifications/counts")
+          .then((value) => {
+            if (
+              active &&
+              Object.keys(value.chat_counts || {}).some(
+                (id) =>
+                  !latestState.current.chats.some((chat) => chat.id === id),
+              )
+            ) {
+              refresh().catch(report);
+              return;
+            }
+            if (active)
+              setState((old) =>
+                JSON.stringify(old.notifications) === JSON.stringify(value)
+                  ? old
+                  : { ...old, notifications: value },
+              );
+          })
+          .catch(() => {}),
+      3000,
+    );
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [ready]);
+  useEffect(() => {
+    if (!ready) return;
+    const source =
+      route.view === "app"
+        ? "Apps/" + route.app
+        : route.view === "bots" && route.bot
+          ? "Bot/" + route.bot
+          : null;
+    const mark = () => {
+      if (
+        source &&
+        state.notifications?.counts?.[source] > 0 &&
+        document.visibilityState === "visible" &&
+        document.hasFocus()
+      )
+        api("/notifications/read", { source })
+          .then(() => refresh())
+          .catch(report);
+    };
+    mark();
+    document.addEventListener("visibilitychange", mark);
+    window.addEventListener("focus", mark);
+    return () => {
+      document.removeEventListener("visibilitychange", mark);
+      window.removeEventListener("focus", mark);
+    };
+  }, [ready, route.view, route.app, route.bot, state.notifications?.counts]);
+  useEffect(() => {
+    if (route.view === "settings" && route.section === "connectors")
+      setConnectorsOpen(true);
+  }, [route.view, route.section]);
+  useEffect(() => {
     fetch("/pia/lang/" + language + ".json")
       .then((response) => response.json())
       .then(setCatalog)
@@ -197,19 +291,29 @@ export default function Workspace({ standalone = null }) {
     return () => document.removeEventListener("pointerdown", close);
   }, []);
   const currentApp = state.apps.find((app) => app.id === route.app),
+    currentBot = (state.bots || []).find((bot) => bot.id === route.bot),
     currentChat = state.chats.find((chat) => chat.id === route.chat),
     title =
       route.view === "chat"
         ? currentChat?.title || "PIA"
         : route.view === "settings"
-          ? t("Configurações")
+          ? t("Configurações") +
+            (route.section === "connectors"
+              ? " / Conectores / " +
+                (connectors.find((item) => item.id === route.connector)?.name ||
+                  "Google")
+              : "")
           : route.view === "connectors"
             ? "Conectores / " +
               (connectors.find((c) => c.id === route.connector)?.name ||
                 "Google")
             : route.view === "bots"
-              ? "Bots / " + t("Secretária")
-              : currentApp?.name || "PIA";
+              ? currentBot
+                ? "Bots / " + currentBot.name
+                : "Bots"
+              : route.view === "notifications"
+                ? "Notificações"
+                : currentApp?.name || "PIA";
   useEffect(() => {
     document.title = title + " · PIA";
   }, [title]);
@@ -330,6 +434,7 @@ export default function Workspace({ standalone = null }) {
             }
           >
             {chat.pinned && <Pin size={12} />} {chat.title}
+            <CountBadge count={state.notifications?.chat_counts?.[chat.id]} />
           </button>
         )}
         <Icon
@@ -359,8 +464,8 @@ export default function Workspace({ standalone = null }) {
     route.view === "chat" ? (
       <Chat key={route.chat || "blank"} chat={route.chat} />
     ) : route.view === "settings" ? (
-      route.section === "accounts" ? (
-        <Connectors />
+      ["accounts", "connectors"].includes(route.section) ? (
+        <Connectors connector={route.connector || "google"} />
       ) : route.section?.startsWith("Connectors/") ? (
         <Connectors connector={route.section.split("/")[1]} />
       ) : (
@@ -368,8 +473,16 @@ export default function Workspace({ standalone = null }) {
       )
     ) : route.view === "connectors" ? (
       <Connectors connector={route.connector} />
+    ) : route.view === "notifications" ? (
+      <Notifications />
     ) : route.view === "bots" ? (
-      <Secretary />
+      !route.bot ? (
+        <Bots />
+      ) : route.bot === "secretaria" ? (
+        <Secretary />
+      ) : (
+        <iframe title={currentBot?.name || "Bot"} src={currentBot?.url} />
+      )
     ) : route.app === "music" ? (
       <Music sub={route.sub} />
     ) : route.app === "podcast_automation" ? (
@@ -407,6 +520,7 @@ export default function Workspace({ standalone = null }) {
     >
       <ErrorAlert />
       <ToastCenter />
+      <MediaPlayer />
       {!standalone && (
         <nav className="page-menu">
           <Menu>
@@ -470,30 +584,37 @@ export default function Workspace({ standalone = null }) {
         {!standalone && (
           <>
             <nav className="activity-rail">
-              <Icon
-                icon={MessageCircle}
-                label={t("Conversas")}
-                variant={route.view === "chat" ? "light" : "subtle"}
-                onClick={() => navigate({ view: "chat", chat: route.chat })}
-              />
-              <Icon
-                icon={Bot}
-                label="Bots"
-                variant={route.view === "bots" ? "light" : "subtle"}
-                onClick={() => navigate({ view: "bots" })}
-              />
-              <Icon
-                icon={Plug}
-                label="Conectores"
-                variant={route.view === "connectors" ? "light" : "subtle"}
-                onClick={() =>
-                  navigate({ view: "connectors", connector: "google" })
-                }
-              />
+              <div className="notification-activity">
+                <Icon
+                  icon={MessageCircle}
+                  label={t("Conversas")}
+                  variant={route.view === "chat" ? "light" : "subtle"}
+                  onClick={() => navigate({ view: "chat", chat: route.chat })}
+                />
+                <CountBadge count={state.notifications?.chat_unread} />
+              </div>
+              <div className="notification-activity">
+                <Icon
+                  icon={Bot}
+                  label="Bots"
+                  variant={route.view === "bots" ? "light" : "subtle"}
+                  onClick={() => navigate({ view: "bots" })}
+                />
+                {Object.entries(state.notifications?.counts || {})
+                  .filter(([key]) => key.startsWith("Bot/"))
+                  .reduce((sum, [, count]) => sum + count, 0) > 0 && (
+                  <span className="notification-count">
+                    {Object.entries(state.notifications.counts)
+                      .filter(([key]) => key.startsWith("Bot/"))
+                      .reduce((sum, [, count]) => sum + count, 0)}
+                  </span>
+                )}
+              </div>
               <div className="app-activities">
                 {state.apps.map((app) => (
                   <div
                     key={app.id}
+                    style={{ position: "relative" }}
                     draggable
                     onDragStart={(event) =>
                       event.dataTransfer.setData(
@@ -515,22 +636,48 @@ export default function Workspace({ standalone = null }) {
                     onDrop={safe((event) => reorder(event, app.id))}
                     className={drop === app.id ? "app-drop" : ""}
                   >
-                    <Icon
-                      icon={appIcons[app.id] || Grid2X2}
-                      label={app.name}
-                      variant={
-                        route.app === app.id && route.view === "app"
-                          ? "light"
-                          : "subtle"
-                      }
-                      onClick={() =>
-                        navigate({ view: "app", app: app.id, sub: "principal" })
-                      }
-                    />
+                    <NotificationMenu source={"Apps/" + app.id}>
+                      <Icon
+                        icon={appIcons[app.id] || Grid2X2}
+                        label={app.name}
+                        variant={
+                          route.app === app.id && route.view === "app"
+                            ? "light"
+                            : "subtle"
+                        }
+                        onClick={() =>
+                          navigate({
+                            view: "app",
+                            app: app.id,
+                            sub: "principal",
+                          })
+                        }
+                      />
+                    </NotificationMenu>
+                    {state.notifications?.counts?.["Apps/" + app.id] > 0 && (
+                      <span className="notification-count">
+                        {state.notifications.counts["Apps/" + app.id]}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
               <div className="rail-bottom">
+                <NotificationMenu className="notification-activity">
+                  <Icon
+                    icon={Bell}
+                    label="Notificações"
+                    variant={
+                      route.view === "notifications" ? "light" : "subtle"
+                    }
+                    onClick={() => navigate({ view: "notifications" })}
+                  />
+                  {state.notifications?.unread > 0 && (
+                    <span className="notification-count">
+                      {state.notifications.unread}
+                    </span>
+                  )}
+                </NotificationMenu>
                 <Icon
                   icon={Settings}
                   label={t("Configurações")}
@@ -702,27 +849,68 @@ export default function Workspace({ standalone = null }) {
                     </div>
                   </>
                 ) : route.view === "settings" ? (
-                  <Stack gap={4}>
-                    {[
-                      ["general", "Geral"],
-                      ["connectors", "Conectores"],
-                      ["plugins", "Variáveis dos plugins"],
-                      ["logs", "Inspeção e logs"],
-                    ].map(([section, label]) => (
-                      <Nav
-                        key={section}
-                        active={route.section === section}
-                        onClick={() =>
-                          navigate(
-                            section === "connectors"
-                              ? { view: "connectors", connector: "google" }
-                              : { view: "settings", section },
-                          )
-                        }
-                      >
-                        {t(label)}
-                      </Nav>
-                    ))}
+                  <Stack gap={2} role="tree" aria-label="Configurações">
+                    <Nav
+                      active={route.section === "general"}
+                      onClick={() =>
+                        navigate({ view: "settings", section: "general" })
+                      }
+                    >
+                      {t("Geral")}
+                    </Nav>
+                    <button
+                      className="settings-tree-folder"
+                      role="treeitem"
+                      aria-expanded={connectorsOpen}
+                      onClick={() => setConnectorsOpen((value) => !value)}
+                    >
+                      {connectorsOpen ? (
+                        <ChevronDown size={15} />
+                      ) : (
+                        <ChevronRight size={15} />
+                      )}
+                      <FolderInput size={16} />
+                      {t("Conectores")}
+                    </button>
+                    {connectorsOpen && (
+                      <div className="settings-tree-children" role="group">
+                        {connectors.map((item) => (
+                          <Nav
+                            key={item.id}
+                            active={
+                              route.section === "connectors" &&
+                              route.connector === item.id
+                            }
+                            onClick={() =>
+                              navigate({
+                                view: "settings",
+                                section: "connectors",
+                                connector: item.id,
+                              })
+                            }
+                          >
+                            <Plug size={15} />
+                            {item.name}
+                          </Nav>
+                        ))}
+                      </div>
+                    )}
+                    <Nav
+                      active={route.section === "plugins"}
+                      onClick={() =>
+                        navigate({ view: "settings", section: "plugins" })
+                      }
+                    >
+                      {t("Variáveis dos plugins")}
+                    </Nav>
+                    <Nav
+                      active={route.section === "logs"}
+                      onClick={() =>
+                        navigate({ view: "settings", section: "logs" })
+                      }
+                    >
+                      {t("Inspeção e logs")}
+                    </Nav>
                   </Stack>
                 ) : route.view === "connectors" ? (
                   <Stack gap={4}>
@@ -740,10 +928,32 @@ export default function Workspace({ standalone = null }) {
                     ))}
                   </Stack>
                 ) : route.view === "bots" ? (
-                  <Nav active onClick={() => navigate({ view: "bots" })}>
-                    <Avatar />
-                    {t("Secretária")}
-                  </Nav>
+                  <Stack gap={4}>
+                    {(state.bots || []).map((bot) => (
+                      <NotificationMenu key={bot.id} source={"Bot/" + bot.id}>
+                        <div className="notification-activity">
+                          <Nav
+                            active={route.bot === bot.id}
+                            onClick={() =>
+                              navigate({ view: "bots", bot: bot.id })
+                            }
+                          >
+                            {bot.id === "secretaria" ? (
+                              <Avatar />
+                            ) : (
+                              <Bot size={18} />
+                            )}{" "}
+                            {bot.name}
+                          </Nav>
+                          <CountBadge
+                            count={
+                              state.notifications?.counts?.["Bot/" + bot.id]
+                            }
+                          />
+                        </div>
+                      </NotificationMenu>
+                    ))}
+                  </Stack>
                 ) : (
                   <Stack gap={4}>
                     {[
@@ -794,7 +1004,9 @@ export default function Workspace({ standalone = null }) {
                   />
                 )}
                 <Text className="view-title" fw={600}>
-                  {route.view === "bots" && <Avatar />}
+                  {route.view === "bots" && route.bot === "secretaria" && (
+                    <Avatar />
+                  )}
                   {title}
                 </Text>
               </Group>

@@ -19,7 +19,10 @@ class DesktopBackend:
         self.notify = notify
         self.store = WorkspaceStore(BASE_DIR / 'data' / 'workspace.sqlite3')
         self.resources = get_resources()
+        from .notifications import NotificationCenter
+        self.notifications=NotificationCenter(self.store,notify,self.speak)
         self.secretary = Secretary(self.resources, self.store, notify)
+        self.secretary.bind_notifications(self.notifications)
         self.podcast_process = None
         self.podcast_lock = threading.Lock()
         self.voice_stop = threading.Event()
