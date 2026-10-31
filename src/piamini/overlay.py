@@ -66,6 +66,15 @@ class PiaOverlay(QWidget):
         elif action == 'pulse':
             val = 'running' if enabled else 'paused'
             self.view.page().runJavaScript("document.querySelectorAll('.animation-pulse').forEach(e => e.style.animationPlayState='" + val + "');")
+        elif action == 'music':
+            self.view.page().runJavaScript("""(()=>{
+              let notes=document.getElementById('pia-music-notes');
+              if(!notes){
+                const style=document.createElement('style');style.textContent='@keyframes pia-note{0%,100%{opacity:0;transform:translate(0,8px) scale(.6)}30%,60%{opacity:1}90%{opacity:0;transform:translate(12px,-16px) scale(1.1)}}#pia-music-notes{position:fixed;right:8%;top:34%;pointer-events:none;color:#bfa0ff;font-size:20px;z-index:999}#pia-music-notes span{position:absolute;animation:pia-note 2s infinite}#pia-music-notes span:nth-child(2){right:15px;top:-10px;animation-delay:.65s;color:#65d9ff}#pia-music-notes span:nth-child(3){right:28px;top:10px;animation-delay:1.3s}';document.head.append(style);
+                notes=document.createElement('div');notes.id='pia-music-notes';notes.innerHTML='<span>♪</span><span>♫</span><span>♪</span>';document.body.append(notes);
+              }
+              notes.style.display="""+ ('"block"' if enabled else '"none"')+""";
+            })()""")
 
     def __init__(self, svg_content: str):
         super().__init__()

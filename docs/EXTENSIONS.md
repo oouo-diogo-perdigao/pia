@@ -55,13 +55,13 @@ MODEL=meu-modelo
 | `__SECRET` | Senha com botão de mostrar/ocultar. |
 | Sem sufixo / `__STRING` | Texto livre. |
 
-Todos aceitam vazio. Apagar um segredo e salvar limpa o valor. Campos numéricos e booleanos vazios usam os padrões do programa no próximo início. A aplicação valida todos os valores enviados antes de gravar a seção. Reinicie a PIA para aplicar variáveis de inicialização.
+Todos aceitam vazio. Apagar um segredo e salvar limpa o valor. Campos numéricos e booleanos vazios usam os padrões do programa no próximo início. A aplicação valida todos os valores enviados antes de gravar a seção. Salvar solicita reinício pelo launcher, aguardando jobs em execução; uma instância sem sessão gráfica informa a limitação. Veja [o fluxo de reinício](REACT_WORKSPACE.md).
 
 Os consumidores Python usam `src.env_types.load_dotenv` ou `dotenv_values`: uma chave `PORT__INT` é entregue ao código como `PORT`. Os nomes antigos continuam aceitos. O editor apresenta o tipo declarado em `.env.example` também para um valor legado e, ao salvar, substitui sua chave antiga pela tipada. Variáveis desconhecidas sem tipo mantêm o comportamento de texto.
 
 Uploads têm limite de **5 MiB** e ficam na subpasta privada `files/` junto ao `.env` da respectiva seção. O nome é `<app-ou-conector>_<VARIAVEL>.<extensão>`, por exemplo `google_GOOGLE_APPLICATION_CREDENTIALS.json`. O caminho é salvo automaticamente no `.env`. O botão de pasta abre o diretório do arquivo. Arquivos selecionados pelo caminho externo não são copiados.
 
-Para Google, carregue o JSON de uma conta de serviço válido ou conecte uma conta via OAuth. Depois use o seletor de pastas em `GOOGLE_DRIVE_FOLDER_ID`, com busca e paginação. A lista contém somente pastas acessíveis à conta escolhida; uma conta de serviço precisa receber permissão nas pastas desejadas. O Podcast Automation usa a mesma integração.
+O exemplo FILE acima ilustra o tipo de campo, não uma exigência do Podcast Automation. Para o fluxo atual do podcast, conecte a conta pelo conector Google e selecione a pasta no app. Não recrie GOOGLE_APPLICATION_CREDENTIALS ou GOOGLE_DRIVE_FOLDER_ID no app: ele usa as contas e o seletor de pastas da integração compartilhada. A lista contém somente pastas acessíveis à conta escolhida.
 
 Na atualização da antiga pasta `Plugins/Plugins`, a migração preserva configurações locais ignoradas pelo Git copiando as ausentes para `Plugins/Connectors`, sem sobrescrever destinos existentes.
 

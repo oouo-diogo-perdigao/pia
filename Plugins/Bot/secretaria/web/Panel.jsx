@@ -43,7 +43,6 @@ export default function Secretary() {
             open_meetings: "Abrir Meet automaticamente",
             meet_minutes: "Minutos antes de abrir o Meet",
             important_email: "Avisar novos e-mails importantes",
-            speak: "Ler avisos em voz alta",
             poll_seconds: "Intervalo de consulta (seg)",
             calendar: "ID da agenda",
           }).map(([key, label]) =>

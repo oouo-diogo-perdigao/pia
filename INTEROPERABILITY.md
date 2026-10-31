@@ -4,7 +4,7 @@ Implementado na branch `codex/camera-voice-agent-music`.
 
 ## Câmera
 
-`POST /action/camera` exige a mesma autenticação Bearer das rotas OpenAI e retorna `image/png`. Corpo JSON opcional: `{"device":0,"width":1280,"height":720}`. Requer câmera disponível e OpenCV; a câmera é liberada após cada captura. O chat também aceita pedidos explícitos como “Tire uma foto pela câmera”.
+`POST /action/camera` usa o mesmo verificador de autenticação das rotas OpenAI (Bearer quando a chave está preenchida) e retorna `image/png`. Corpo JSON: `{"device":0,"width":1280,"height":720}`; esses campos são opcionais. Requer câmera disponível e OpenCV; a câmera é liberada após cada captura. O chat também aceita pedidos explícitos como “Tire uma foto pela câmera”.
 
 ```sh
 curl -X POST http://localhost:8762/action/camera \
@@ -18,17 +18,14 @@ No modo conversação, início sustentado de fala cancela a resposta anterior e 
 
 ## Protocolos
 
-Todos exigem Bearer, inclusive descoberta. Registro compartilhado de ferramentas: contas/recursos, câmera, imagem, música e delegação aos CLIs. Skills podem chamar `piaTools(nome, argumentos)`. O chat disponibiliza ferramentas conforme o pedido e limita a seis etapas de execução.
+A autenticação usa o mesmo verificador Bearer da API: quando OPENAI_COMPAT_API_KEY está preenchida, envie Authorization; quando está vazia, a autenticação fica desabilitada. Não há login OAuth MCP. O [guia PIA como MCP no Codex](docs/MCP_CODEX.md) detalha cadastro, tokens, configuração desktop e diagnóstico. Registro compartilhado de ferramentas: contas/recursos, câmera, imagem, música e delegação aos CLIs. Skills podem chamar `piaTools(nome, argumentos)`. O chat disponibiliza ferramentas conforme o pedido e limita a seis etapas de execução.
 
 | Perfil | Endpoint | Escopo |
 |---|---|---|
 | MCP Streamable HTTP, stateless | `/protocols/mcp` | initialize, ping, tools/list, tools/call; JSON-RPC, sem SSE/resume |
-| A2A 0.3.0 síncrono | `/protocols/a2a` | message/send, tasks/get; tarefas concluídas em memória (até 200) |
-| Agent Card | `/.well-known/agent-card.json` | descoberta do perfil A2A |
-| ACP legado | `/protocols/acp/agents`, `/protocols/acp/runs` | subconjunto síncrono; Agent Communication Protocol, hoje incorporado ao A2A |
 | AG-UI | `/protocols/ag-ui` | entrada RunAgentInput, SSE com eventos de início/texto/fim/erro |
 
-Esses são perfis limitados, não implementações completas ou certificadas. ACP aqui não é o Agent Client Protocol de editores. A2A/AG-UI preservam o contexto entre chamadas pelo contextId/threadId. Não há transporte de arquivos arbitrários, tarefas distribuídas nem streaming A2A.
+Esses são perfis limitados, não implementações completas ou certificadas. AG-UI preserva contexto por threadId. ACP legado, A2A síncrono e Agent Card foram removidos; suas rotas não são mais disponibilizadas. Não há transporte de arquivos arbitrários nem tarefas distribuídas.
 
 ```sh
 curl http://localhost:8762/protocols/mcp \
@@ -36,11 +33,11 @@ curl http://localhost:8762/protocols/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-No Gemini CLI, configure um servidor MCP com `httpUrl` apontando para esse endpoint e header Authorization. Clientes que exigem descoberta anônima podem precisar de configuração explícita. As ferramentas usam as permissões das contas locais; compartilhe o token somente com clientes autorizados.
+Configure o cliente MCP com esse endpoint HTTP e header Authorization, conforme o formato de configuração do próprio cliente. Clientes que exigem descoberta anônima podem precisar de configuração explícita. As ferramentas usam as permissões das contas locais; compartilhe o token somente com clientes autorizados.
 
-## Codex e Gemini
+## Codex e Google Antigravity (AGY)
 
-Em Conectores / Agentes externos, use os CLIs oficiais instalados e previamente autenticados. A PIA executa Codex em read-only e Gemini em plan, com prompt por stdin, diretório isolado e limite de 300 segundos. A disponibilidade é detectada localmente. Não é integração com a janela de desktop nem compartilhamento automático do histórico do Codex.
+Em Configurações → Conectores → Agentes externos, use os CLIs oficiais instalados e previamente autenticados. A PIA executa Codex em read-only e Antigravity (`agy`) em plan, com prompt por stdin, diretório separado e limite de 300 segundos. AGY recebe um evento user em NDJSON e retorna um evento result com status SUCCESS. A disponibilidade é detectada localmente; configure AGENTS_AGY_EXECUTABLE para um caminho específico. A antiga variável AGENTS_GEMINI_EXECUTABLE não é reutilizada. Não é integração com a janela de desktop nem compartilhamento automático do histórico do Codex. Veja o README do conector para instalação e login.
 
 ## Música
 

@@ -108,9 +108,6 @@ class NativeApp:
         self.current = None
 
     def restore(self):
-        self.ui.overlay.capture_hidden = False
-        if not self.ui.overlay.user_hidden:
-            self.ui.overlay.show()
         if self.ui.main_action.isChecked():
             self.ui.window.show()
 
@@ -140,12 +137,6 @@ class NativeApp:
             self.shell.deleteLater()
             self.shell = None
         result = Future()
-        self.ui.overlay.capture_hidden = True
-        self.ui.overlay.hide()
-        self.ui.controls.menu.hide()
-        self.ui.composer.hide()
-        if self.shell:
-            self.shell.hide()
         def take():
             try:
                 prefs = config()
@@ -176,7 +167,7 @@ class NativeApp:
             except Exception as exc:
                 self.restore()
                 result.set_exception(exc)
-        QTimer.singleShot(180, take)
+        QTimer.singleShot(0, take)
         return result
 
     def output_directory(self):

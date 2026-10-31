@@ -208,7 +208,7 @@ O menu de conversa (também acessível pelo botão direito no título) permite f
 
 ## Capturas
 
-O app screenshots solicita `GET /action/screen-all`; essa rota retorna o PNG de todos os monitores e toca `src/sounds/print.mp3`. A interface principal permanece visível na captura, enquanto a Mini PIA é temporariamente ocultada. Print Screen inicia uma seleção nova; Alt+Print Screen captura a janela ativa.
+O app screenshots solicita `GET /action/screen-all`; essa rota retorna o PNG de todos os monitores e toca `src/sounds/print.mp3`. A interface principal e a Mini PIA permanecem visíveis na captura, sem espera artificial para ocultação. Print Screen inicia uma seleção nova; Alt+Print Screen captura a janela ativa.
 
 Os controles ficam sobre a imagem. Ctrl+roda amplia no cursor, sem mudar a função dos botões: esquerdo recorta, direito anota, e pressionar o outro botão cancela o gesto em andamento. O botão do meio copia a cor HTML do pixel, mostrada no canto inferior direito. Cada captura começa com posição e zoom redefinidos.
 

@@ -6,7 +6,7 @@ export const connectors = [
   {
     id: "agents",
     name: "Agentes externos",
-    info: "Codex, Gemini e protocolos de ferramentas.",
+    info: "Codex, Google Antigravity e protocolos de ferramentas.",
   },
   {
     id: "google",

@@ -1,3 +1,4 @@
+import { MediaTrack } from "./MediaPlayer";
 import React, { useState, useEffect, useRef } from "react";
 import {
   Button,
@@ -77,7 +78,7 @@ function Message({ record, onAction }) {
               a: ({ href, children, ...props }) =>
                 href?.startsWith("/api/pia/music/files/") ? (
                   <span>
-                    <audio controls preload="none" src={href} />
+                    <MediaTrack url={href} title="Música gerada" />
                     <a href={href} download>
                       {children}
                     </a>
@@ -184,7 +185,39 @@ export default function Chat({ chat }) {
     follow = useRef(true),
     source = useRef(),
     draftTimer = useRef(),
-    activeChat = useRef(chat);
+    activeChat = useRef(chat),
+    seenMessage = useRef(0),
+    readTimer = useRef();
+  async function markVisible() {
+    if (
+      !chat ||
+      activeChat.current !== chat ||
+      document.visibilityState !== "visible" ||
+      !document.hasFocus() ||
+      !scroll.current
+    )
+      return;
+    const viewport = scroll.current.getBoundingClientRect();
+    const visible = [
+      ...scroll.current.querySelectorAll(".message.assistant[data-message]"),
+    ]
+      .filter((node) => {
+        const box = node.getBoundingClientRect();
+        return box.bottom > viewport.top && box.top < viewport.bottom;
+      })
+      .map((node) => Number(node.dataset.message))
+      .filter(Number.isInteger);
+    const through = Math.max(0, ...visible);
+    if (through <= seenMessage.current) return;
+    seenMessage.current = through;
+    try {
+      await api("/chat/read", { chat, through });
+      await refresh();
+    } catch (error) {
+      seenMessage.current = 0;
+      report(error);
+    }
+  }
   async function load(loadDraft = false) {
     if (!chat) {
       setMessages([]);
@@ -213,20 +246,34 @@ export default function Chat({ chat }) {
   }
   useEffect(() => {
     activeChat.current = chat;
+    seenMessage.current = 0;
     setRunning(null);
     setStreaming("");
     load(true).catch(report);
     const running = state.jobs.find((job) => job.chat === chat);
     if (running) watch(running.id);
     return () => {
+      activeChat.current = null;
       source.current?.close();
       clearTimeout(draftTimer.current);
+      clearTimeout(readTimer.current);
     };
   }, [chat]);
   useEffect(() => {
     if (follow.current && scroll.current)
       scroll.current.scrollTop = scroll.current.scrollHeight;
   }, [messages, streaming]);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => markVisible());
+    const visibility = () => markVisible();
+    document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("focus", visibility);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("focus", visibility);
+    };
+  }, [messages, chat]);
   async function send() {
     if (running) {
       await api("/chat/cancel", { job: running });
@@ -321,6 +368,8 @@ export default function Chat({ chat }) {
           const node = scroll.current;
           follow.current =
             node.scrollHeight - node.scrollTop - node.clientHeight < 100;
+          clearTimeout(readTimer.current);
+          readTimer.current = setTimeout(markVisible, 150);
         }}
       >
         {!messages.length && !running && (
@@ -350,7 +399,7 @@ export default function Chat({ chat }) {
                     a: ({ href, children, ...props }) =>
                       href?.startsWith("/api/pia/music/files/") ? (
                         <span>
-                          <audio controls preload="none" src={href} />
+                          <MediaTrack url={href} title="Música gerada" />
                           <a href={href} download>
                             {children}
                           </a>

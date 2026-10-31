@@ -19,6 +19,7 @@ def test_music_only_loopback(monkeypatch):
 
 
 def test_local_music_polls_and_saves(monkeypatch,tmp_path):
+    monkeypatch.setattr(service,'settings',lambda:{})
     class Response:
         status_code=200
         content=b'fake mp3 bytes'

@@ -1,6 +1,12 @@
 # Música
 
-App React/Mantine com Principal e Sobre. O manifesto `pia.json` identifica o app; `web_api.py` oferece jobs de instalação e geração, cancelamento da espera e biblioteca. Arquivos ficam em `data/music`, motor/modelos em `cache/Apps/music` e logs em `logs/plugins/Apps/music-engine.log`.
+App React/Mantine com Principal e Sobre. O manifesto `pia.json` identifica o app; `web_api.py` oferece jobs de instalação e geração, cancelamento da espera e biblioteca. Arquivos ficam na pasta Música do sistema/PIA por padrão; `MUSIC_OUTPUT_DIR__PATH` seleciona outro destino. A biblioteca ainda consulta `data/music` para arquivos antigos. Motor/modelos ficam em `cache/Apps/music` e logs em `logs/plugins/Apps/music-engine.log`.
+
+Escolha de 1 a 10 músicas por pedido, agrupadas em um card. Percentual indica faixas concluídas; o provedor não fornece percentual confiável da inferência individual. O player é compartilhado da PIA e continua ao navegar. A conclusão publica uma notificação e rola até o card se a tela Principal estiver aberta.
+
+O ícone **Reutilizar prompt** do card preenche descrição, letra, provedor, duração solicitada e quantidade de versões, e retorna ao formulário. Ele não inicia uma nova geração automaticamente. Arquivos antigos sem algum desses metadados usam os padrões do formulário.
+
+A PIA solicita o encerramento do processo do motor local ao terminar cada geração; um servidor externo já iniciado não é encerrado. No Windows, processos filhos do interpretador podem sobreviver ao processo principal: a liberação completa de VRAM ainda precisa de correção e validação com hardware. A próxima geração pode demorar para recarregar os modelos.
 
 ## Local
 

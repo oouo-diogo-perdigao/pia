@@ -22,7 +22,7 @@ def allowed_tools(text):
     plain=unicodedata.normalize('NFKD',text.lower()).encode('ascii','ignore').decode()
     tools=set()
     if re.search(r'\b(agenda|compromissos?|email|gmail|drive|arquivos|contas|calendario)\b',plain):tools.update(('pia_accounts','pia_resources'))
-    if re.search(r'\b(codex|gemini cli)\b',plain):tools.add('pia_delegate')
+    if re.search(r'\b(codex|agy|antigravity)\b',plain):tools.add('pia_delegate')
     return tools
 
 def image_intent(text):

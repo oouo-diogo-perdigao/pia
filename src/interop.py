@@ -1,11 +1,8 @@
-"""Authenticated, deliberately scoped MCP, A2A 0.3, ACP legacy and AG-UI adapters."""
+"""Authenticated MCP and AG-UI adapters sharing the PIA tool registry."""
 import json
-import threading
 import uuid
 from urllib.parse import urlsplit
 
-_tasks={}
-_lock=threading.Lock()
 
 def run(text,chat=None,on_delta=None,context=None):
     if not isinstance(text,str) or not text.strip() or len(text)>100000:raise ValueError('Mensagem inválida.')
@@ -24,6 +21,7 @@ def run(text,chat=None,on_delta=None,context=None):
 def rpc(body,protocol):
     if not isinstance(body,dict) or body.get('jsonrpc')!='2.0' or not isinstance(body.get('method'),str):
         return {'jsonrpc':'2.0','id':None,'error':{'code':-32600,'message':'Requisição JSON-RPC inválida.'}}
+    if protocol!='mcp':return {'jsonrpc':'2.0','id':body.get('id'),'error':{'code':-32601,'message':'Protocolo não suportado.'}}
     identity=body.get('id');method=body['method'];params=body.get('params') or {}
     def ok(result):return {'jsonrpc':'2.0','id':identity,'result':result}
     def error(code,message):return {'jsonrpc':'2.0','id':identity,'error':{'code':code,'message':message}}
@@ -45,45 +43,19 @@ def rpc(body,protocol):
                     content=[{'type':'image',**result}] if isinstance(result,dict) and result.get('mimeType')=='image/png' else [{'type':'text','text':json.dumps(result,ensure_ascii=False,default=str)}]
                     return ok({'content':content,'isError':False})
                 except Exception as exc:return ok({'content':[{'type':'text','text':str(exc)}],'isError':True})
-        else:
-            if method=='message/send':
-                message=params['message']
-                if message.get('role')!='user':raise ValueError('A mensagem deve ter role user.')
-                text='\n'.join(p['text'] for p in message.get('parts',[]) if p.get('kind')=='text')
-                context=message.get('contextId') or uuid.uuid4().hex
-                answer=run(text,context=context)
-                task={'kind':'task','id':uuid.uuid4().hex,'contextId':context,'status':{'state':'completed'},'history':[message],'artifacts':[{'artifactId':uuid.uuid4().hex,'parts':[{'kind':'text','text':answer}]}]}
-                with _lock:
-                    if len(_tasks)>=200:_tasks.pop(next(iter(_tasks)))
-                    _tasks[task['id']]=task
-                return ok(task)
-            if method=='tasks/get':
-                with _lock:task=_tasks.get(params.get('id'))
-                return ok(task) if task else error(-32001,'Tarefa não encontrada.')
-            if method=='tasks/cancel':return error(-32002,'Este perfil síncrono retorna tarefas já finalizadas; não há tarefa pendente para cancelar.')
         return error(-32601,'Método não suportado por este perfil da PIA.')
     except (ValueError,KeyError,TypeError) as exc:return error(-32602,str(exc))
     except Exception:return error(-32603,'O agente não concluiu a operação. Consulte os logs da PIA.')
 
-def card(port):
-    return {'name':'PIA','description':'Assistente local com ferramentas e conectores. Perfil A2A síncrono 0.3.',
-            'url':f'http://localhost:{port}/protocols/a2a','version':'1.0.0','protocolVersion':'0.3.0',
-            'preferredTransport':'JSONRPC','capabilities':{'streaming':False,'pushNotifications':False},
-            'defaultInputModes':['text/plain'],'defaultOutputModes':['text/plain'],
-            'securitySchemes':{'bearer':{'type':'http','scheme':'bearer'}},'security':[{'bearer':[]}],
-            'skills':[{'id':'pia-chat','name':'Conversar com a PIA','description':'Texto e ferramentas habilitadas na PIA.','tags':['chat','tools']}]}
-
 def route(handler):
     path=urlsplit(handler.path).path
-    if path not in ('/protocols/mcp','/protocols/a2a','/.well-known/agent-card.json','/protocols/ag-ui','/protocols/acp/agents','/protocols/acp/runs','/action/camera','/v1/music/generations') and not path.startswith('/v1/music/files/'):return False
+    if path not in ('/protocols/mcp','/protocols/ag-ui','/action/camera','/v1/music/generations') and not path.startswith('/v1/music/files/'):return False
     if not handler._authorize_openai_request():return True
     if handler.headers.get('Origin'):
         port=handler.server.server_address[1]
         if handler.headers['Origin'] not in (f'http://localhost:{port}',f'http://127.0.0.1:{port}'):
             handler.send_json(403,{'error':'Origem não autorizada.'});return True
     try:
-        if path=='/.well-known/agent-card.json' and handler.command=='GET':handler.send_json(200,card(handler.server.server_address[1]));return True
-        if path=='/protocols/acp/agents' and handler.command=='GET':handler.send_json(200,{'agents':[{'name':'pia','description':'PIA local','input_content_types':['text/plain'],'output_content_types':['text/plain']} ]});return True
         if path.startswith('/v1/music/files/') and handler.command=='GET':
             from Plugins.Apps.music.service import audio_file
             file=audio_file(path.rsplit('/',1)[1]);handler._send(200,file.read_bytes(),'audio/mpeg' if file.suffix=='.mp3' else 'audio/wav');return True
@@ -99,15 +71,10 @@ def route(handler):
             from Plugins.Apps.music.service import generate
             if set(body)-{'prompt','lyrics','provider','duration'}:raise ValueError('Parâmetros musicais desconhecidos.')
             result=generate(**body);handler.send_json(200,{**result,'audio_url':'/v1/music/files/'+result['file']})
-        elif path in ('/protocols/mcp','/protocols/a2a'):
+        elif path=='/protocols/mcp':
             result=rpc(body,path.rsplit('/',1)[-1])
             if result is None:handler._send(202,b'','application/json')
             else:handler.send_json(200,result)
-        elif path=='/protocols/acp/runs':
-            if body.get('agent_name')!='pia' or body.get('mode','sync')!='sync':raise ValueError('Este perfil ACP legado oferece somente pia em modo sync. Prefira A2A.')
-            text='\n'.join(p.get('content','') for m in body.get('input',[]) for p in m.get('parts',[]) if p.get('content_type')=='text/plain')
-            answer=run(text)
-            handler.send_json(200,{'run_id':str(uuid.uuid4()),'agent_name':'pia','status':'completed','output':[{'role':'agent','parts':[{'content_type':'text/plain','content':answer}]}]})
         else:
             messages=body.get('messages',[])
             if not messages or messages[-1].get('role')!='user':raise ValueError('Envie uma mensagem user no RunAgentInput.')

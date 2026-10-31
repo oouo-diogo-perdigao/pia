@@ -16,6 +16,7 @@ uv.lock
 
 # Projetos pessoais/externos ficam em repositórios próprios; exemplos distribuídos são versionados.
 /Plugins/Skills/*
+!/Plugins/Skills/AGENTS.md
 !/Plugins/Skills/abrir_bloco_de_notas/
 !/Plugins/Skills/abrir_navegador/
 !/Plugins/Skills/previsao_do_tempo/
@@ -23,6 +24,7 @@ uv.lock
 !/Plugins/Skills/exemplo/
 !/Plugins/Skills/aprender_novo_comando/
 /Plugins/Browser/*
+!/Plugins/Browser/AGENTS.md
 !/Plugins/Browser/isekai0/
 
 /config/legacy/

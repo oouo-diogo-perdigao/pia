@@ -61,11 +61,47 @@ class AgentBridgeTests(unittest.TestCase):
         with TemporaryDirectory() as directory,patch.object(agents,'BASE_DIR',Path(directory)),patch.object(agents,'executable',return_value='codex.exe'),patch.object(agents.subprocess,'run',side_effect=execute) as run,patch.dict('os.environ',{'AGE_GEMINI_API_KEY':'fixture'}):
             result=agents.ask('codex','Mensagem; $(no shell)')
             self.assertEqual(result['text'],'Resposta');self.assertIn('read-only',run.call_args.args[0])
-    def test_gemini_plan_and_missing_cli(self):
-        with patch.object(agents,'executable',return_value=None),self.assertRaises(RuntimeError):agents.ask('gemini','Olá')
-        with TemporaryDirectory() as directory,patch.object(agents,'BASE_DIR',Path(directory)),patch.object(agents,'executable',return_value='gemini'),patch.object(agents.subprocess,'run',return_value=SimpleNamespace(returncode=0,stdout='{"response":"Olá"}')) as run:
-            self.assertEqual(agents.ask('gemini','Teste')['text'],'Olá')
-            self.assertIn('plan',run.call_args.args[0]);self.assertEqual(run.call_args.kwargs['input'],'Teste')
+    def test_agy_plan_stdin_stream_and_missing_cli(self):
+        with patch.object(agents,'executable',return_value=None),self.assertRaises(RuntimeError):agents.ask('agy','Olá')
+        output='{"event":"init"}\n{"event":"step_update","step_update":{"text_delta":"Rascunho"}}\n{"event":"result","result":{"status":"SUCCESS","response":"Olá"}}\n'
+        with TemporaryDirectory() as directory,patch.object(agents,'BASE_DIR',Path(directory)),patch.object(agents,'executable',return_value='agy.exe'),patch.object(agents.subprocess,'run',return_value=SimpleNamespace(returncode=0,stdout=output)) as run:
+            self.assertEqual(agents.ask('agy','Teste\n$(sem shell)')['text'],'Olá')
+            command=run.call_args.args[0]
+            self.assertIn('plan',command);self.assertIn('stream-json',command)
+            self.assertNotIn('--dangerously-skip-permissions',command)
+            self.assertNotIn('Teste',command)
+            self.assertEqual(json.loads(run.call_args.kwargs['input']),{'event':'user','message':{'content':'Teste\n$(sem shell)'}})
+            self.assertNotIn('shell',run.call_args.kwargs)
+
+    def test_agy_rejects_failed_malformed_or_missing_terminal_result(self):
+        for output in ('not-json','{"event":"step_update"}',
+                       '{"event":"result","result":{"status":"ERROR","response":"partial","error":"secret"}}',
+                       '{"event":"result","result":{"status":"SUCCESS","response":""}}'):
+            with self.subTest(output=output),self.assertRaises(RuntimeError) as raised:agents.agy_response(output)
+            self.assertNotIn('secret',str(raised.exception))
+
+    def test_agy_configuration_does_not_reuse_gemini_executable(self):
+        with patch.object(agents,'dotenv_values',return_value={'AGENTS_GEMINI_EXECUTABLE':'old-gemini.exe','AGENTS_AGY_EXECUTABLE':'new-agy.exe'}):
+            self.assertEqual(agents.executable('agy'),'new-agy.exe')
+        with patch.object(agents,'executable',return_value='fixture.exe'):
+            self.assertEqual(set(agents.status()),{'codex','agy'})
+        with self.assertRaises(ValueError):agents.ask('gemini','Teste')
+
+    def test_agy_timeout_and_unsafe_windows_shim(self):
+        with TemporaryDirectory() as directory,patch.object(agents,'BASE_DIR',Path(directory)),patch.object(agents,'executable',return_value='agy.exe'),patch.object(agents.subprocess,'run',side_effect=agents.subprocess.TimeoutExpired('agy',300)):
+            with self.assertRaisesRegex(RuntimeError,'cinco minutos'):agents.ask('agy','Teste')
+        with TemporaryDirectory() as directory,patch.object(agents,'BASE_DIR',Path(directory)),patch.object(agents,'executable',return_value=str(Path(directory)/'agy.cmd')),patch.object(agents.subprocess,'run') as run:
+            with self.assertRaisesRegex(RuntimeError,'agy.exe nativo'):agents.ask('agy','Teste')
+            run.assert_not_called()
+
+    def test_agy_is_exposed_to_chat_and_tool_schema(self):
+        from src.chat_tools import allowed_tools
+        from src.tool_registry import TOOLS
+        self.assertIn('pia_delegate',allowed_tools('Consulte o Antigravity sobre isso.'))
+        self.assertIn('pia_delegate',allowed_tools('Pergunte ao agy.'))
+        self.assertNotIn('pia_delegate',allowed_tools('Configure a API Gemini.'))
+        delegate=next(tool for tool in TOOLS if tool['name']=='pia_delegate')
+        self.assertEqual(delegate['inputSchema']['properties']['provider']['enum'],['codex','agy'])
 
 class ProtocolTests(unittest.TestCase):
     def request(self,method,params=None,protocol='mcp'):
@@ -77,11 +113,12 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(result['result']['isError'])
         self.assertEqual(self.request('unknown')['error']['code'],-32601)
         self.assertIsNone(interop.rpc({'jsonrpc':'2.0','method':'notifications/initialized'},'mcp'))
-    def test_a2a_send_and_get_task(self):
-        with patch.object(interop,'run',return_value='Resposta'):
-            result=self.request('message/send',{'message':{'role':'user','messageId':'abc','parts':[{'kind':'text','text':'Olá'}]}},'a2a')['result']
-        self.assertEqual(result['status']['state'],'completed')
-        self.assertEqual(self.request('tasks/get',{'id':result['id']},'a2a')['result'],result)
+    def test_removed_protocols_are_not_routed_or_executed(self):
+        with patch.object(interop,'run') as run:
+            for path in ('/protocols/a2a','/protocols/acp/agents','/protocols/acp/runs','/.well-known/agent-card.json'):
+                self.assertFalse(interop.route(self.handler(path,{})))
+            self.assertEqual(self.request('message/send',{},'a2a')['error']['code'],-32601)
+            run.assert_not_called()
     def handler(self,path,body,auth=True):
         encoded=json.dumps(body).encode()
         handler=Mock(path=path,command='POST',headers={'Content-Length':str(len(encoded))},rfile=io.BytesIO(encoded),wfile=io.BytesIO())
