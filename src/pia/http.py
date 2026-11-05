@@ -1,3 +1,4 @@
+from src.user_paths import user_path
 """Same-origin, loopback-only workspace routes, independent of /v1 Bearer APIs."""
 import json
 import mimetypes
@@ -25,6 +26,39 @@ def respond(handler, status, data, mime='application/json; charset=utf-8', heade
         handler.send_header(key, value)
     handler.end_headers()
     handler.wfile.write(body)
+
+
+def audio_response(handler,file):
+    """Stream local audio and honor byte ranges for seek without a full reload."""
+    import re
+    size=file.stat().st_size;start=0;end=size-1;status=200
+    requested=handler.headers.get('Range')
+    if requested:
+        match=re.fullmatch(r'bytes=(\d*)-(\d*)',requested)
+        try:
+            if not match or not any(match.groups()):raise ValueError()
+            left,right=match.groups()
+            if left:start=int(left);end=min(int(right),end) if right else end
+            else:start=max(0,size-int(right))
+            if start>=size or end<start:raise ValueError()
+            status=206
+        except ValueError:
+            respond(handler,416,b'',headers={'Content-Range':f'bytes */{size}'})
+            return
+    handler.send_response(status)
+    handler.send_header('Content-Type',mimetypes.guess_type(file.name)[0] or 'audio/mpeg')
+    handler.send_header('Content-Length',str(max(0,end-start+1)))
+    handler.send_header('Accept-Ranges','bytes')
+    handler.send_header('Cache-Control','private, no-store')
+    handler.send_header('X-Content-Type-Options','nosniff')
+    if status==206:handler.send_header('Content-Range',f'bytes {start}-{end}/{size}')
+    handler.end_headers()
+    with file.open('rb') as stream:
+        stream.seek(start);remaining=end-start+1
+        while remaining>0:
+            chunk=stream.read(min(65536,remaining))
+            if not chunk:break
+            handler.wfile.write(chunk);remaining-=len(chunk)
 
 
 def route(handler):
@@ -64,23 +98,28 @@ def route(handler):
                 respond(handler, 401, {'error': 'Sessão expirada. Recarregue a página.'})
                 return True
             service = get_service()
+            if path=='/api/pia/logs/file' and handler.command=='GET':
+                from src.log_reader import log_path
+                file=log_path(parse_qs(url.query).get('name',[''])[0])
+                respond(handler,200,file.read_bytes(),'text/plain; charset=utf-8')
+                return True
             if path.startswith('/api/pia/music/files/') and handler.command=='GET':
                 from Plugins.Apps.music.service import audio_file
                 file=audio_file(path.rsplit('/',1)[1])
-                respond(handler,200,file.read_bytes(),mimetypes.guess_type(file.name)[0] or 'audio/mpeg')
+                audio_response(handler,file)
                 return True
             if path.startswith('/api/pia/chat/assets/') and handler.command=='GET':
                 import re
                 name=path.rsplit('/',1)[-1]
                 if not re.fullmatch(r'[a-f0-9]{32}\.(png|jpg|webp)',name):raise ValueError('Imagem não encontrada.')
                 from src.config_paths import BASE_DIR
-                file=BASE_DIR/'data/chat-images'/name
+                file=user_path('chat')/name
                 if not file.is_file():
                     respond(handler,404,{'error':'Imagem não encontrada.'})
                 else:respond(handler,200,file.read_bytes(),mimetypes.guess_type(file.name)[0])
                 return True
             if handler.command == 'GET' and not path.startswith('/api/pia/events/') and path.removeprefix('/api/pia') not in {
-                '/state', '/chat/messages', '/settings', '/accounts', '/bots', '/bots/secretaria', '/logs', '/preferences'}:
+                '/state', '/chat/messages', '/settings', '/accounts', '/bots', '/bots/secretaria', '/logs', '/preferences', '/notifications', '/notifications/counts','/settings/documents','/settings/credentials','/settings/storage'}:
                 respond(handler, 405, {'error': 'Use POST para esta operação.'})
                 return True
             if path.startswith('/api/pia/events/'):

@@ -44,3 +44,7 @@
     sessions.forEach(session => observer.observe(session));
   }
 })();
+document.getElementById('campaign')?.addEventListener('change',event=>{
+  const url=new URL(event.target.value,location.href);
+  if(['https:','http:'].includes(url.protocol)) location.assign(url.href);
+});

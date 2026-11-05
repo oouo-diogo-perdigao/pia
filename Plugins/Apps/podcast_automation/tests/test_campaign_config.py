@@ -1,3 +1,4 @@
+from src.settings_store import get_store,save_document,document
 import copy
 import hashlib
 import json
@@ -32,7 +33,7 @@ class CampaignConfigTests(unittest.TestCase):
                 data = copy.deepcopy(EXAMPLE)
                 next(iter(data['campaign_details'].values())).update(change)
                 path = Path(directory) / 'config.json'
-                path.write_text(json.dumps(data))
+                path.write_text(json.dumps(data));save_document('Apps/podcast_automation/campaigns',data)
                 with patch.dict(os.environ, {'PODCAST_CONFIG': str(path)}):
                     settings.get_config.cache_clear()
                     try:
@@ -81,6 +82,7 @@ class ConfiguredFeedTests(unittest.TestCase):
         self.addCleanup(self.temp_cache.cleanup)
         self.env_patch = patch.dict(os.environ, {'OWNER_EMAIL': 'test@example.invalid', 'SKIP_CLOSED': 'true', 'FEED_CACHE_DIR': self.temp_cache.name, 'FEED_FORCE_REBUILD': 'false'})
         self.env_patch.start()
+        get_store().save('Apps/podcast_automation',{'FEED_CACHE_DIR':self.temp_cache.name,'FEED_FORCE_REBUILD':'false','SKIP_CLOSED':'true'})
         self.store = MagicMock()
         self.saved = {}
         self.store.getObjectIfExists.side_effect = self.saved.get
@@ -124,7 +126,7 @@ class ConfiguredFeedTests(unittest.TestCase):
         self.assertEqual(self.updater.build_episode.call_args.args[0]['Key'], 'custom/aberta/episode.mp3')
 
     def test_explicit_unknown_folder_is_ignored_even_with_override(self):
-        with patch.dict(os.environ, {'SKIP_CLOSED': 'false'}):
+        with patch('podcast_automation.rssTranscriptionUpdate.env_bool',side_effect=lambda name,default=False: False if name=='SKIP_CLOSED' else default):
             self.assertEqual(self.updater.updateRssTranscriptionFiles('campaigns/desconhecida')['foldersProcessed'], 0)
             self.updater.rebuild_podcast_feed('campaigns/desconhecida')
         self.store.list_objects.assert_not_called()
@@ -134,7 +136,7 @@ class ConfiguredFeedTests(unittest.TestCase):
     def test_closed_folder_is_skipped_and_override_remains_scoped(self):
         self.updater.updateRssTranscriptionFiles('custom/fechada')
         self.store.list_objects.assert_not_called()
-        with patch.dict(os.environ, {'SKIP_CLOSED': 'false'}):
+        with patch('podcast_automation.rssTranscriptionUpdate.env_bool',side_effect=lambda name,default=False: False if name=='SKIP_CLOSED' else default):
             self.updater.updateRssTranscriptionFiles('custom/fechada')
         self.assertTrue(all(call.args == ('custom/fechada/',) for call in self.store.list_objects.call_args_list))
 
@@ -183,7 +185,7 @@ class ConfiguredFeedTests(unittest.TestCase):
     def test_force_rebuild_bypasses_fast_skip(self):
         self.updater.updateRssTranscriptionFiles('custom/aberta')
         self.updater.build_episode.reset_mock()
-        with patch.dict(os.environ, {'FEED_FORCE_REBUILD': 'true'}):
+        with patch('podcast_automation.rssTranscriptionUpdate.env_bool',return_value=True):
             self.updater.updateRssTranscriptionFiles('custom/aberta')
         self.updater.build_episode.assert_called_once()
 

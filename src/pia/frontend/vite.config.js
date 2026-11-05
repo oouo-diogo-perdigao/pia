@@ -26,6 +26,7 @@ export default defineConfig({
       cssFileName: "workspace",
     },
     rollupOptions: {
+      external: ["/pia/media.js"],
       onwarn(warning, handler) {
         if (warning.code !== "MODULE_LEVEL_DIRECTIVE") handler(warning);
       },

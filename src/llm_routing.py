@@ -1,5 +1,6 @@
 """Ordered model catalog and selection expressions for chat-capable LLMs."""
 from __future__ import annotations
+from src.settings_store import get as setting
 
 from dataclasses import dataclass
 import json
@@ -31,27 +32,27 @@ class Model:
 
     def params(self):
         if self.tier == "local":
-            base = os.getenv(self.api_base_env, "") if self.api_base_env else config.LLM_LOCAL_API_BASE
+            base = setting(self.api_base_env, "") if self.api_base_env else config.LLM_LOCAL_API_BASE
             return {"model": self.model, "api_base": base or config.LLM_LOCAL_API_BASE}
         key_name = self.api_key_env or {
             "gemini": "AGE_GEMINI_API_KEY", "groq": "GROQ_API_KEY",
         }.get(self.provider, self.provider.upper() + "_API_KEY")
-        key = os.getenv(key_name, "").strip()
+        key = setting(key_name, "").strip()
         if self.provider == "gemini" and not self.api_key_env:
-            key = config.AGE_GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "").strip()
+            key = config.AGE_GEMINI_API_KEY or setting("GEMINI_API_KEY", "").strip()
         if self.provider == "groq" and not self.api_key_env:
             key = config.GROQ_API_KEY
         if not key:
             return None
         params = {"model": self.model, "api_key": key}
         base_name = self.api_base_env or "LLM_" + self.provider.upper() + "_API_BASE"
-        if base := os.getenv(base_name, "").strip():
+        if base := setting(base_name, "").strip():
             params["api_base"] = base
         return params
 
 
 def _names(name, default):
-    return tuple(value.strip() for value in os.getenv(name, default).split(",") if value.strip())
+    return tuple(value.strip() for value in setting(name, default).split(",") if value.strip())
 
 
 def catalog():

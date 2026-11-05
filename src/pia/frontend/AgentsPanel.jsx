@@ -12,12 +12,16 @@ import {
 } from "@mantine/core";
 import { api, report, safe, watchJob } from "./api";
 import SettingsPanel from "./Settings";
+import AgentSetup from "./AgentSetup";
+import { CircleHelp } from "lucide-react";
+import { Icon } from "./shared";
 export default function AgentsPanel() {
   const [status, setStatus] = useState({}),
     [provider, setProvider] = useState("codex"),
     [prompt, setPrompt] = useState(""),
     [result, setResult] = useState(""),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [help, setHelp] = useState(false);
   useEffect(() => {
     api("/integrations/agents/status", {}).then(setStatus).catch(report);
   }, []);
@@ -25,7 +29,12 @@ export default function AgentsPanel() {
     <Stack>
       <Paper withBorder p="lg">
         <Stack>
-          <Title order={4}>Codex e Gemini</Title>
+          <Icon
+            icon={CircleHelp}
+            label="Como instalar e configurar o agente"
+            onClick={() => setHelp(true)}
+          />
+          <Title order={4}>Codex e Google Antigravity</Title>
           <Text>
             Os CLIs usam os próprios logins existentes. A PIA não lê nem copia
             tokens de autenticação. As consultas usam os modos read-only/plan
@@ -33,7 +42,10 @@ export default function AgentsPanel() {
           </Text>
           <Select
             label="Agente"
-            data={["codex", "gemini"]}
+            data={[
+              { value: "codex", label: "Codex" },
+              { value: "agy", label: "Google Antigravity · AGY" },
+            ]}
             value={provider}
             onChange={setProvider}
           />
@@ -47,7 +59,7 @@ export default function AgentsPanel() {
             href={
               provider === "codex"
                 ? "https://developers.openai.com/codex/cli"
-                : "https://geminicli.com/docs/get-started/authentication/"
+                : "https://antigravity.google/docs/install?tab=cli"
             }
           >
             Instalação e login ↗
@@ -91,21 +103,23 @@ export default function AgentsPanel() {
       <Paper withBorder p="lg">
         <Title order={4}>Protocolos da PIA</Title>
         <Text>
-          MCP stateless HTTP, A2A síncrono 0.3, ACP legado síncrono e AG-UI com
-          SSE. Todos exigem o Bearer configurado na PIA.
+          MCP stateless HTTP e AG-UI com SSE. Todos exigem o Bearer configurado
+          na PIA.
         </Text>
-        <Code block>
-          {
-            "/protocols/mcp\n/.well-known/agent-card.json\n/protocols/a2a\n/protocols/acp/agents\n/protocols/acp/runs\n/protocols/ag-ui"
-          }
-        </Code>
+        <Code block>{"/protocols/mcp\n/protocols/ag-ui"}</Code>
         <Text size="sm">
-          Cadastre o endpoint MCP no Codex/Gemini para disponibilizar as
+          Cadastre o endpoint MCP no Codex/Antigravity para disponibilizar as
           ferramentas da PIA ao outro agente. Isso não altera automaticamente a
           configuração dos CLIs.
         </Text>
       </Paper>
       <SettingsPanel section="Connectors/agents" />
+      <AgentSetup
+        opened={help}
+        onClose={() => setHelp(false)}
+        provider={provider}
+        status={status[provider]}
+      />
     </Stack>
   );
 }

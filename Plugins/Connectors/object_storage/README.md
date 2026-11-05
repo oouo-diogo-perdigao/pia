@@ -1,8 +1,15 @@
 # Plugin Object Storage
 
+Cada conta recebe uma cor aleatória persistente. Edite **Cor da conta** em
+Configurações / Conectores / Object Storage ao editar a conta. Nas configurações do
+conector, `OBJECT_STORAGE_ACCOUNT_COLORS` permite sobrescrever por ID:
+`{"ID_DA_CONTA":"#8257e5","legacy":"#54c7ec"}`. Use cores hexadecimais
+`#RRGGBB`. Os IDs ficam nos metadados privados no SQLite do conector, junto às
+contas; a conta migrada usa `legacy`. Não são necessários novos segredos.
+
 Integra contas Amazon S3, Cloudflare R2 e outros serviços compatíveis com S3. A interface está no app `Plugins/Apps/object_storage`; as contas, credenciais e operações compartilhadas ficam neste plugin.
 
-Cadastre várias conexões na interface do app ou em Configurações → Plugins · object_storage → Gerenciar contas. Metadados ficam em `config.json`; novas chaves ficam no cofre do sistema. A conta migrada usa o `.env` local deste plugin. Região `auto` é apropriada para R2; AWS usa sua região real (ou us-east-1 quando não configurada).
+Cadastre várias conexões na interface do app ou em Configurações → Plugins · object_storage → Gerenciar contas. Metadados ficam no SQLite; novas chaves ficam no cofre do sistema. A conta migrada usa o cofre do sistema, como as outras contas. Região `auto` é apropriada para R2; AWS usa sua região real (ou us-east-1 quando não configurada).
 
 API Python: `ObjectStorage().accounts()`, `.client(account)`, `.list(account, bucket, prefix, cursor)`, `.upload(path,key,account,bucket)`, `.get(...)`, `.put(...)`, `.copy(...,move=True)`, `.delete(keys,account,bucket)` e `.public_url(key,account)`. Transferências usam boto3 e uploads multipart gerenciados. Cópia entre contas faz streaming pelo computador; mover só exclui a origem depois do envio terminar.
 
@@ -14,3 +21,5 @@ Dependência: boto3 (instalada com a PIA). Referências: [S3/Boto3](https://boto
 ## Manifesto e idioma
 
 Os metadados desta extensão ficam em `pia.json` e os textos em `lang/pt-BR.json`. Consulte o [padrão de extensões e variáveis tipadas](../../../docs/EXTENSIONS.md) para criar telas, campos de configuração e integrações compartilhadas.
+
+Configuração e dados usam o [perfil SQLite/cofre](../../../docs/PROFILE_MIGRATION.md).

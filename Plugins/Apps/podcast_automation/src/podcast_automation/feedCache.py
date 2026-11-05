@@ -34,7 +34,8 @@ def manifest(objects):
 
 class FeedCache:
     def __init__(self, scope):
-        root = Path(os.getenv('FEED_CACHE_DIR') or BASE_DIR/'cache/Apps/podcast_automation/feeds')
+        from src.settings_store import get
+        root = Path(get('FEED_CACHE_DIR',section='Apps/podcast_automation') or BASE_DIR/'cache/Apps/podcast_automation/feeds')
         self.path = root / (signature([CACHE_VERSION, scope]) + '.json')
         try:
             data = json.loads(self.path.read_text(encoding='utf-8'))

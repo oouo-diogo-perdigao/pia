@@ -1,3 +1,5 @@
+from .settings import option
+from src.user_paths import user_path
 from .settings import get_config, env_bool
 from .feedCache import FeedCache, manifest, object_signature, signature
 import html
@@ -23,10 +25,10 @@ class RssTranscriptionUpdater:
     def __init__(self, obj_storage: ObjectStorageManager):
         self.obj_storage = obj_storage
 
-        self.owner_email = os.environ["OWNER_EMAIL"]
+        self.owner_email = option("OWNER_EMAIL","")
         self.owner_name = get_config()["publication"]["brand"]
 
-        self.transcripts_file = os.getenv(
+        self.transcripts_file = option(
             "TRANSCRIPTS_FILE",
             "transcripts.html",
         )
@@ -151,6 +153,8 @@ class RssTranscriptionUpdater:
         self._duration_failed = False
         objects = self.folder_objects(folder)
         config_signature = signature({
+            'reader_version': 2,
+            'campaigns': self.configured_podcasts(),
             "details": details,
             "publication": get_config()["publication"],
             "owner_email": self.owner_email,
@@ -790,7 +794,10 @@ class RssTranscriptionUpdater:
         details: dict,
     ) -> str:
         from podcast_automation.transcripts_page import render
-        return render(episodes,cover,details)
+        campaigns=[{'title':item.get('title') or item['Campanha'],'rss_key':item['rss_key'],
+                    'url':self.obj_storage.public_url(folder+'/'+self.transcripts_file)}
+                   for folder,item in self.configured_podcasts().items()]
+        return render(episodes,cover,details,campaigns)
 
     # ============================================================
     # UTILITÁRIOS

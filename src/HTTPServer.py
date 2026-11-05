@@ -1,3 +1,4 @@
+from src.settings_store import get as setting
 from .transcription import timed_result, render_subtitles
 import hmac
 import base64
@@ -1187,7 +1188,7 @@ class HTTPServer(BaseHTTPRequestHandler):
                     options={}
                     if local_model:options['local_model']=local_model
                     if progress_id:options['progress']=lambda event:update(progress_id,**event)
-                    options['request_timeout']=int(os.getenv('STT_FILE_TIMEOUT_SECONDS') or '86400')
+                    options['request_timeout']=int(setting('STT_FILE_TIMEOUT_SECONDS') or '86400')
                     result = STT_MANAGER.transcribe_request(
                         audio_bytes,
                         language=language,

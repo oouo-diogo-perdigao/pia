@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "test": "node --test navigation.test.js forms.test.js"
+    "test": "node --test navigation.test.js forms.test.js resources.test.js"
   },
   "dependencies": {
     "@mantine/core": "8.3.18",

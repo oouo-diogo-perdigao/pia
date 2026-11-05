@@ -1,6 +1,5 @@
-"""Typed dotenv keys. Runtime consumers keep their stable, suffix-free names."""
+"""Settings type validation and legacy-file parsing for one-time migration only."""
 import math
-import os
 from pathlib import Path
 import re
 from dotenv import dotenv_values as raw_values
@@ -41,24 +40,6 @@ def dotenv_values(path, **kwargs):
             result[base] = (value or '') if kind in ('path', 'file') else validate(key, value or '')
     return result
 
-def load_dotenv(path, override=False, **kwargs):
-    explicit = {}
-    for key, value in list(os.environ.items()):
-        base, kind = split_key(key)
-        if base != key:
-            if not value and kind in ('bool','int','float','path','file'):
-                continue
-            explicit[base] = validate(key, value)
-            if override or base not in os.environ:
-                os.environ[base] = explicit[base]
-    empty_defaults = {split_key(k)[0] for k,v in raw_values(path).items()
-                      if not v and split_key(k)[1] in ('bool','int','float','path','file')}
-    for key, value in dotenv_values(path, **kwargs).items():
-        if key in empty_defaults:
-            continue
-        if value is not None and (override or key not in os.environ):
-            os.environ[key] = explicit.get(key, value)
-    return True
 
 def fields(example, current):
     defaults, values = raw_values(example), raw_values(current)

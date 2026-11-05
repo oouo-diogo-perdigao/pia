@@ -1,3 +1,4 @@
+from src.settings_store import get_store
 import base64
 import json
 import os
@@ -7,7 +8,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from src.env_types import fields, validate, dotenv_values, load_dotenv, split_key
+from src.env_types import fields, validate, dotenv_values, split_key
 from src.pia.service import Apps, WorkspaceService
 from src.plugin_migration import migrate_connectors
 from src.workspace_store import WorkspaceStore
@@ -33,40 +34,36 @@ class TypedSettingsTests(unittest.TestCase):
             self.assertEqual(values,{'ACTIVE__BOOL':'true','COUNT__INT':'8','KEY__SECRET':'secret','CUSTOM':'hello'})
             self.assertEqual(dotenv_values(current)['COUNT'],'8')
             with patch.dict(os.environ,{'COUNT__INT':'9'},clear=True):
-                load_dotenv(current)
-                self.assertEqual(os.environ['COUNT'],'9')
-            current.write_text('COUNT__INT=\nACTIVE__BOOL=\n')
-            with patch.dict(os.environ,{},clear=True):
-                load_dotenv(current)
+                self.assertEqual(dotenv_values(current)['COUNT'],'8')
                 self.assertNotIn('COUNT',os.environ)
-                self.assertNotIn('ACTIVE',os.environ)
 
     def test_settings_validate_before_writing_and_allow_clear_secret(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory);current=root/'.env';current.write_text('COUNT=2\nSECRET=abc\n')
-            service=WorkspaceService.__new__(WorkspaceService)
-            service.settings=lambda:[dict(id='general',fields=[dict(name='COUNT__INT',sensitive=False),dict(name='SECRET__SECRET',sensitive=True)])]
-            with patch('src.pia.service.CONFIG_DIR',root):
-                with self.assertRaises(ValueError):service.save_settings('general',{'SECRET__SECRET':'new','COUNT__INT':'oops'})
-                self.assertEqual(current.read_text(),'COUNT=2\nSECRET=abc\n')
-                service.save_settings('general',{'COUNT__INT':'4','SECRET__SECRET':''})
-                self.assertEqual(dotenv_values(current),{'COUNT':'4','SECRET':''})
-                self.assertNotIn('\nCOUNT=',current.read_text())
+        service=WorkspaceService.__new__(WorkspaceService)
+        definitions=[dict(name='COUNT',type='int',default='2'),dict(name='SECRET',type='secret',default='')]
+        service.settings=lambda:[dict(id='general',fields=[dict(name='COUNT'),dict(name='SECRET')])]
+        with patch('src.settings_store.schema',return_value=definitions):
+            get_store().save('general',{'COUNT':'2','SECRET':'abc'})
+            with self.assertRaises(ValueError):service.save_settings('general',{'SECRET':'new','COUNT':'oops'})
+            self.assertEqual(get_store().values('general')['SECRET'],'abc')
+            service.save_settings('general',{'COUNT':'4','SECRET':''})
+            self.assertEqual(get_store().values('general')['COUNT'],'4')
+            self.assertEqual(get_store().values('general')['SECRET'],'')
+            self.assertNotIn(b'abc',get_store().path.read_bytes())
 
-    def test_managed_upload_and_rejected_credentials_do_not_replace_file(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory);service=WorkspaceService.__new__(WorkspaceService)
-            name='GOOGLE_APPLICATION_CREDENTIALS__FILE'
-            service.settings=lambda:[dict(id='Connectors/google',fields=[dict(name=name,type='file')])]
-            service.plugin_folders=lambda:[('Connectors/google',root)]
-            payload=dict(section='Connectors/google',name=name,filename='private.json',data=base64.b64encode(json.dumps({'type':'service_account','client_email':'fixture@example.invalid','private_key':'fixture-only'}).encode()).decode())
+    def test_managed_upload_is_in_user_profile_and_invalid_data_preserves_file(self):
+        from src.user_paths import user_path
+        service=WorkspaceService.__new__(WorkspaceService);name='INPUT_FILE'
+        service.settings=lambda:[dict(id='Connectors/google',fields=[dict(name=name,type='file')])]
+        definitions=[dict(name=name,type='file',default='')]
+        payload=dict(section='Connectors/google',name=name,filename='example.json',data=base64.b64encode(b'{"fixture":true}').decode())
+        with patch('src.settings_store.schema',return_value=definitions):
             response=service.upload_setting(payload);target=Path(response['path'])
-            self.assertEqual(target,root/'files/google_GOOGLE_APPLICATION_CREDENTIALS.json')
-            self.assertEqual(dotenv_values(root/'.env')['GOOGLE_APPLICATION_CREDENTIALS'],str(target))
-            original=target.read_bytes();payload['data']=base64.b64encode(b'{}').decode()
+            self.assertEqual(target,user_path('files/Connectors_google/google_INPUT_FILE.json'))
+            self.assertEqual(get_store().values('Connectors/google')[name],str(target))
+            original=target.read_bytes();payload['data']='invalid-base64'
             with self.assertRaises(ValueError):service.upload_setting(payload)
             self.assertEqual(target.read_bytes(),original)
-            payload['name']='UNDECLARED__FILE'
+            payload['name']='UNDECLARED'
             with self.assertRaises(ValueError):service.upload_setting(payload)
 
     def test_manifest_and_language_preferences(self):

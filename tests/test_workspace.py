@@ -1,3 +1,4 @@
+from src.settings_store import get_store,save_document,document
 """Offline persistence, migration, account isolation and secretary scheduling."""
 from datetime import datetime, timedelta, timezone
 import base64
@@ -38,19 +39,16 @@ def response(data, status=200):
 
 class PersistenceTests(unittest.TestCase):
     def test_migration_preserves_conflicts_and_examples(self):
+        from src.profile_migration import initialize_profile
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            (root / '.env').write_text('SECRET=old')
-            (root / 'config').mkdir()
-            (root / 'config/.env').write_text('SECRET=new')
-            (root / 'config/keywords.example.txt').write_text('pia')
-            initialize_config(root)
-            self.assertFalse((root / '.env').exists())
-            self.assertEqual((root / 'config/.env').read_text(), 'SECRET=new')
-            self.assertEqual(next((root / 'config/legacy').iterdir()).read_text(), 'SECRET=old')
-            self.assertEqual((root / 'config/keywords.txt').read_text(), 'pia')
-            migrate_config(root)
-            self.assertEqual(len(list((root / 'config/legacy').iterdir())), 1)
+            root=Path(temp);(root/'config').mkdir()
+            (root/'config/.env').write_text('SECRET=new')
+            (root/'config/keywords.txt').write_text('pia')
+            initialize_profile(root,get_store(),root/'profile')
+            self.assertFalse((root/'config/.env').exists())
+            self.assertEqual(get_store().values('general')['SECRET'],'new')
+            self.assertEqual(document('main/keywords.txt'),'pia')
+            self.assertNotIn(b'new',get_store().path.read_bytes())
 
     def test_history_drafts_and_claims_survive_restart(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -78,7 +76,7 @@ class ConnectorTests(unittest.TestCase):
         self.plugins.configure('google', 'client-id', 'client-secret')
         data = self.plugins.config('google')
         data['accounts'] = [{'id': 'personal', 'label': 'Pessoal'}, {'id': 'work', 'label': 'Trabalho'}]
-        save_json(self.plugins.root / 'google/config.json', data)
+        save_document('Connectors/google',data)
         for account in ('personal', 'work'):
             self.vault.set('token:google:' + account, {'access_token': account + '-token', 'expires_at': 99999999999})
         self.session.get.return_value = response({'messages': []})
@@ -107,7 +105,7 @@ class ConnectorTests(unittest.TestCase):
         self.plugins.disconnect('google', 'work')
         self.assertIsNone(self.vault.get('token:google:work'))
         self.assertEqual(len(self.plugins.accounts('google')), 1)
-        stored = (self.plugins.root / 'google/config.json').read_text()
+        stored = json.dumps(document('Connectors/google'))
         self.assertNotIn('fresh', stored)
         self.assertNotIn('client-secret', stored)
 
@@ -130,7 +128,7 @@ class ConnectorTests(unittest.TestCase):
         self.plugins.configure('microsoft', 'ms-client')
         data = self.plugins.config('microsoft')
         data['accounts'] = [{'id': 'office', 'label': 'Trabalho'}]
-        save_json(self.plugins.root / 'microsoft/config.json', data)
+        save_document('Connectors/microsoft',data)
         self.vault.set('token:microsoft:office', {'access_token': 'ms-token', 'expires_at': 99999999999})
         self.plugins.call('microsoft', 'calendar.list', account='office', startDateTime='2026-10-24T00:00:00Z', endDateTime='2026-10-25T00:00:00Z')
         self.assertEqual(self.session.get.call_args.args[0], 'https://graph.microsoft.com/v1.0/me/calendarView')
@@ -174,8 +172,8 @@ class ConnectorTests(unittest.TestCase):
         self.assertTrue(captured['invalid_state_rejected'])
         self.assertTrue(payload['redirect_uri'].startswith('http://127.0.0.1:'))
         self.assertEqual(self.vault.get('token:google:' + account)['access_token'], 'access')
-        self.assertIn('me@example.com', (self.plugins.root / 'google/config.json').read_text())
-        self.assertNotIn('refresh_token', (self.plugins.root / 'google/config.json').read_text())
+        self.assertIn('me@example.com', json.dumps(document('Connectors/google')))
+        self.assertNotIn('refresh_token', json.dumps(document('Connectors/google')))
 
 
 class DesktopBackendTests(unittest.TestCase):

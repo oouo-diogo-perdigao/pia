@@ -1,3 +1,4 @@
+from src.settings_store import get_store,save_document,document
 import pytest
 
 from src import config
@@ -62,10 +63,10 @@ def test_default_gemini_order(monkeypatch):
 def test_provider_configuration(monkeypatch):
     monkeypatch.setattr(config, "LLM_PROVIDERS", ("openrouter", "cloudflare"))
     monkeypatch.setattr(config, "LLM_MODEL_CATALOG", '[{"provider":"custom","model":"openai/test","tier":"paid","api_key_env":"TEST_KEY","api_base_env":"TEST_BASE"}]')
-    monkeypatch.setenv("LLM_OPENROUTER_FREE_MODELS", "vendor/free:free")
-    monkeypatch.setenv("LLM_CLOUDFLARE_PAID_MODELS", "@cf/vendor/model")
-    monkeypatch.setenv("TEST_KEY", "test-credential")
-    monkeypatch.setenv("TEST_BASE", "https://example.invalid/v1")
+    get_store().save("general",{"LLM_OPENROUTER_FREE_MODELS":"vendor/free:free"})
+    get_store().save("general",{"LLM_CLOUDFLARE_PAID_MODELS":"@cf/vendor/model"})
+    get_store().save("general",{"TEST_KEY":"test-credential"})
+    get_store().save("general",{"TEST_BASE":"https://example.invalid/v1"})
     entries = catalog()
     assert [m.provider for m in entries] == ["openrouter", "cloudflare", "custom"]
     assert entries[-1].params() == {"model": "openai/test", "api_key": "test-credential", "api_base": "https://example.invalid/v1"}
@@ -211,5 +212,5 @@ def test_custom_provider_with_reserved_prefix():
 def test_multiple_local_models(monkeypatch):
     monkeypatch.setattr(config, "LLM_PROVIDERS", ("local",))
     monkeypatch.setattr(config, "LLM_MODEL_CATALOG", "[]")
-    monkeypatch.setenv("LLM_LOCAL_MODELS", "ollama/first,ollama/second")
+    get_store().save("general",{"LLM_LOCAL_MODELS":"ollama/first,ollama/second"})
     assert [m.model for m in select_models("local")] == ["ollama/first", "ollama/second"]

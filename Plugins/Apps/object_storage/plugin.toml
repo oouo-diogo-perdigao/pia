@@ -5,3 +5,4 @@ icon="folder"
 [web]
 entrypoint="index.html"
 api="web_api.py"
+native="native.py"

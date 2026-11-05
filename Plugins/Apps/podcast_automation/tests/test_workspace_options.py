@@ -1,3 +1,4 @@
+from src.settings_store import get_store,save_document,document
 """Persistence and published reader contracts, without accessing external accounts."""
 import copy
 import json
@@ -15,7 +16,7 @@ class WorkspaceOptionsTests(unittest.TestCase):
     def test_selected_folder_and_bucket_survive_reload_and_campaign_save(self):
         with TemporaryDirectory() as directory:
             root=Path(directory);(root/'config').mkdir()
-            (root/'config/config.json').write_text(json.dumps(EXAMPLE),encoding='utf-8')
+            save_document('Apps/podcast_automation/campaigns',copy.deepcopy(EXAMPLE))
             with patch.object(web_api,'ROOT',root):
                 stale=web_api.handle('config',{},None)
                 options={'google_account':'work','google_folder':'nested-folder','google_folder_name':'Gravações RPG','storage_account':'r2-work','storage_bucket':'podcasts'}
@@ -37,7 +38,7 @@ class WorkspaceOptionsTests(unittest.TestCase):
             self.assertTrue(notification.announce_publication('Sessão','Campanha',links))
             self.assertEqual(bot.return_value.send.call_count,2)
             for call in bot.return_value.send.call_args_list:
-                for url in links.values():self.assertIn(url,call.args[0])
+                self.assertEqual(call.args[0],'Campanha - Sessão\nMP3: '+links['MP3']+'\nRSS: '+links['RSS']+'\nTRANSCRIÇÃO: '+links['Transcrições gerais'])
 
     def test_reader_contains_every_transcript_with_escaped_content_and_tools(self):
         episodes=[dict(title='Sessão <1>',content='Fala única '+str(i)+'\n<script>alert("bad")</script>') for i in range(3)]
@@ -53,7 +54,7 @@ class WorkspaceOptionsTests(unittest.TestCase):
         self.assertNotIn('<script src=',page)
 
     def test_discord_splits_long_announcements_without_truncating_links(self):
-        links={name:'https://example.invalid/'+name+'x'*900 for name in ('MP3','TXT','RSS','HTML')}
+        links={name:'https://example.invalid/'+name.replace(' ','-')+'x'*900 for name in ('MP3','RSS','Transcrições gerais')}
         with patch.object(notification,'get_config',return_value={'integrations':{'discord_notify':True,'discord_channels':['123']}}),patch('Plugins.Connectors.discord.service.Discord') as bot:
             self.assertTrue(notification.announce_publication('Sessão','Campanha',links))
             calls=bot.return_value.send.call_args_list
@@ -61,3 +62,22 @@ class WorkspaceOptionsTests(unittest.TestCase):
             combined='\n'.join(call.args[0] for call in calls)
             for url in links.values():self.assertIn(url,combined)
             self.assertTrue(all(len(call.args[0])<=2000 for call in calls))
+
+    def test_episode_code_and_only_present_mapped_players_are_mentioned(self):
+        config={'integrations':{'discord_notify':True,'discord_channels':['123']},'discord_users':{'Caio':'111','Dota':'222','Ausente':'333','Inválido':'@everyone'}}
+        with patch.object(notification,'get_config',return_value=config),patch('Plugins.Connectors.discord.service.Discord') as bot:
+            self.assertTrue(notification.announce_publication('A chegada','Mesa',{'MP3':'https://example.invalid/a.mp3'},season=2,number=35,players=['Caio','Dota','Caio','Inválido']))
+            args=bot.return_value.send.call_args
+            self.assertTrue(args.args[0].startswith('Mesa - S02E35 - A chegada\nMP3: '))
+            self.assertEqual(args.kwargs['mentions'],['111','222'])
+            self.assertNotIn('333',args.args[0])
+
+    def test_reader_campaign_selector_escapes_labels_and_rejects_script_urls(self):
+        page=render([],None,{'title':'Mesa','rss_key':'a/rss.xml'},[
+            {'title':'Mesa <A>','rss_key':'a/rss.xml','url':'https://example.invalid/a/transcripts.html'},
+            {'title':'Mesa B','rss_key':'b/rss.xml','url':'https://example.invalid/b/transcripts.html'},
+            {'title':'Bad','rss_key':'c/rss.xml','url':'javascript:alert(1)'}])
+        self.assertIn('id="campaign"',page)
+        self.assertIn('value="https://example.invalid/a/transcripts.html" selected',page)
+        self.assertIn('Mesa &lt;A&gt;',page)
+        self.assertNotIn('javascript:',page)

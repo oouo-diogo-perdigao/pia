@@ -11,7 +11,7 @@ TOOLS=[
     spec('pia_camera','Tirar uma foto da câmera somente quando solicitado.',{'device':{'type':'integer','minimum':0,'maximum':16}}),
     spec('pia_image','Gerar imagem com a PIA.',{'prompt':{'type':'string'}},('prompt',)),
     spec('pia_music','Gerar uma música com descrição e letra opcional.',{'prompt':{'type':'string'},'lyrics':{'type':'string'},'provider':{'type':'string','enum':['local','gemini']},'duration':{'type':'integer','minimum':10,'maximum':180}},('prompt',)),
-    spec('pia_delegate','Perguntar ao CLI Codex ou Gemini, usando seu login existente.',{'provider':{'type':'string','enum':['codex','gemini']},'prompt':{'type':'string'}},('provider','prompt')),
+    spec('pia_delegate','Perguntar ao Codex CLI ou Google Antigravity CLI (agy), usando seu login existente.',{'provider':{'type':'string','enum':['codex','agy']},'prompt':{'type':'string'}},('provider','prompt')),
 ]
 
 def call(name,arguments,resources=None):

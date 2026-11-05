@@ -33,8 +33,8 @@ class VoiceAppTests(unittest.TestCase):
             command = spawn.call_args.args[0]
             self.assertEqual(command, [sys.executable, '-u', '-m', 'podcast_automation.main', '--once'])
             self.assertEqual(spawn.call_args.kwargs['cwd'], root)
-            self.assertEqual(spawn.call_args.kwargs['env']['PODCAST_ROOT'], str(root))
-            self.assertNotIn('LLM_MODEL', spawn.call_args.kwargs['env'])
+            self.assertNotIn('PODCAST_ROOT',spawn.call_args.kwargs['env'])
+            self.assertEqual(spawn.call_args.kwargs['env'].get('LLM_MODEL'),'pia-model')
             self.assertNotIn('VIRTUAL_ENV', spawn.call_args.kwargs['env'])
             self.assertEqual(job.snapshot()['state'], 'completed')
             self.assertEqual(job.snapshot()['stage'], 'Obter ZIP')

@@ -1,3 +1,4 @@
+from src.settings_store import get_store,save_document,document
 import asyncio
 import json
 from pathlib import Path
@@ -22,6 +23,7 @@ class DiscordLinkTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name)
         (self.root/'.env').write_text('DISCORD_BOT_TOKEN__SECRET=test-secret\nDISCORD_BOT_ID=99\nDISCORD_LINK_ENABLED__BOOL=true\n')
+        get_store().save('Connectors/discord',{'DISCORD_BOT_TOKEN':'test-secret','DISCORD_BOT_ID':'99','DISCORD_LINK_ENABLED':'true'})
         self.session=Mock()
         self.bot=Discord(self.root,self.session)
         self.session.get.return_value=response({'id':'123','guild_id':'456','type':0,'name':'publicacoes'})
@@ -44,7 +46,7 @@ class DiscordLinkTests(unittest.TestCase):
         self.session.get.assert_not_called()
 
     def test_allowlist_and_server_lock_cannot_be_bypassed(self):
-        with (self.root/'.env').open('a') as out:out.write('DISCORD_ADMIN_USER_IDS=789,101\n')
+        get_store().save('Connectors/discord',{'DISCORD_ADMIN_USER_IDS':'789,101'})
         with self.assertRaises(PermissionError):self.bot.link(**{**self.args,'user':'888'})
         self.bot.link(**self.args)
         with self.assertRaises(PermissionError):self.bot.link(**{**self.args,'guild':'999'})
@@ -56,7 +58,7 @@ class DiscordLinkTests(unittest.TestCase):
     def test_disabled_or_wrong_channel_does_not_write(self):
         self.session.get.return_value=response({'id':'123','guild_id':'456','type':11})
         with self.assertRaises(ValueError):self.bot.link(**self.args)
-        self.assertNotIn('DISCORD_CHANNEL_ID',self.bot.config())
+        self.assertFalse(self.bot.config().get('DISCORD_CHANNEL_ID'))
         self.bot.enable(False)
         with self.assertRaises(PermissionError):self.bot.link(**self.args)
 

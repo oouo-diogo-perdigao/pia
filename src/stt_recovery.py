@@ -1,3 +1,4 @@
+from src.settings_store import get as setting
 """Bounded audio-backed recovery. Never delete repetition or invent timestamps."""
 from collections import deque
 from dataclasses import dataclass
@@ -19,7 +20,7 @@ class RecoveryOptions:
     window_seconds: float=60
     @classmethod
     def from_env(cls):
-        value=cls(enabled=os.getenv('STT_RECOVERY_ENABLED','true').lower() not in ('false','0'),repetitions=int(os.getenv('STT_RECOVERY_REPETITIONS','6')),max_phrase=int(os.getenv('STT_RECOVERY_MAX_PHRASE_WORDS','8')),max_retries=int(os.getenv('STT_RECOVERY_MAX_RETRIES','3')),max_repairs=int(os.getenv('STT_RECOVERY_MAX_REPAIRS','12')),window_seconds=float(os.getenv('STT_RECOVERY_WINDOW_SECONDS','60')))
+        value=cls(enabled=setting('STT_RECOVERY_ENABLED','true').lower() not in ('false','0'),repetitions=int(setting('STT_RECOVERY_REPETITIONS','6')),max_phrase=int(setting('STT_RECOVERY_MAX_PHRASE_WORDS','8')),max_retries=int(setting('STT_RECOVERY_MAX_RETRIES','3')),max_repairs=int(setting('STT_RECOVERY_MAX_REPAIRS','12')),window_seconds=float(setting('STT_RECOVERY_WINDOW_SECONDS','60')))
         if not 2<=value.repetitions<=100 or not 1<=value.max_phrase<=32 or not 1<=value.max_retries<=10 or not 1<=value.max_repairs<=100 or not 5<=value.window_seconds<=600:raise ValueError('Configuração STT_RECOVERY inválida.')
         return value
 

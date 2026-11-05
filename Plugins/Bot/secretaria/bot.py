@@ -10,26 +10,42 @@ from urllib.parse import urlsplit
 
 from src.config_paths import BASE_DIR
 from src.resource_plugins import save_json
+from src.settings_store import document,save_document
 
 MAIL_FILTERS={'important_unread':('Não lidos importantes','is:unread is:important'),'all_unread':('Todos os não lidos','is:unread'),'inbox_unread':('Não lidos da caixa de entrada','is:unread in:inbox'),'starred_unread':('Não lidos com estrela','is:unread is:starred'),'custom':('Personalizado (avançado)',None)}
 
 DEFAULTS = {'enabled': False, 'accounts': [], 'reminders': True, 'remind_minutes': 10,
             'open_meetings': False, 'meet_minutes': 2, 'important_email': True, 'email_query': 'is:unread is:important',
-            'speak': False, 'poll_seconds': 30, 'calendar': 'primary', 'email_filter':'important_unread',
+            'poll_seconds': 30, 'calendar': 'primary', 'email_filter':'important_unread',
             'avatar_primary':'#ad83ff','avatar_accent':'#65d9ff','avatar_eyes':'#faf4ff'}
 
 
 class Secretary:
     def __init__(self, resources, store, notify, opener=webbrowser.open, config_path=None):
         self.resources, self.store, self.notify, self.opener = resources, store, notify, opener
-        self.path = Path(config_path or Path(__file__).with_name('config.json'))
+        self.path = Path(config_path) if config_path is not None else None
         self.stop_event = threading.Event()
         self.poll_lock = threading.Lock()
         self.thread = None
+        self.notification_center=None
+
+    def announce(self,title,text,links=None):
+        if self.notification_center:
+            return self.notification_center.publish('Bot/secretaria',title,text,links)
+        self.notify(title,text,False)
+
+    def bind_notifications(self,center):
+        self.notification_center=center
+        if not self.store.get('notifications:migrated-secretary',False):
+            saved=self.saved_config()
+            if saved.get('speak') and self.store.get('notifications:settings') is None:
+                center.configure({'read_aloud':True,'muted':[]})
+            self.store.set('notifications:migrated-secretary',True)
 
     def config(self):
-        saved=json.loads(self.path.read_text(encoding='utf-8')) if self.path.exists() else {}
+        saved=self.saved_config()
         data={**DEFAULTS,**saved}
+        data.pop('speak',None)
         if 'email_filter' not in saved:data['email_filter']=next((key for key,(_,query) in MAIL_FILTERS.items() if query==data['email_query']),'custom')
         return data
 
@@ -41,7 +57,7 @@ class Secretary:
         if not isinstance(data['email_query'],str) or len(data['email_query'])>1000:raise ValueError('Filtro personalizado inválido.')
         for color in ('avatar_primary','avatar_accent','avatar_eyes'):
             if not isinstance(data[color],str) or not re.fullmatch('#[a-fA-F0-9]{6}',data[color]):raise ValueError('Cor de avatar inválida.')
-        for key in ('enabled', 'reminders', 'open_meetings', 'important_email', 'speak'):
+        for key in ('enabled', 'reminders', 'open_meetings', 'important_email'):
             if not isinstance(data[key], bool):
                 raise ValueError(key + ' deve ser booleano.')
         if not 1 <= int(data['remind_minutes']) <= 1440 or not 15 <= int(data['poll_seconds']) <= 3600:
@@ -53,7 +69,12 @@ class Secretary:
         if not isinstance(data['accounts'], list) or set(data['accounts']) - connected:
             raise ValueError('Selecione somente contas Google conectadas.')
         data['remind_minutes'], data['poll_seconds'] = int(data['remind_minutes']), int(data['poll_seconds'])
-        save_json(self.path, {k: data[k] for k in DEFAULTS})
+        if self.path:save_json(self.path,{k:data[k] for k in DEFAULTS})
+        else:save_document('Bot/secretaria',{k:data[k] for k in DEFAULTS})
+
+    def saved_config(self):
+        if self.path:return json.loads(self.path.read_text(encoding='utf-8')) if self.path.exists() else {}
+        return document('Bot/secretaria',{})
 
     def _events(self, account, config, now):
         token = None
@@ -96,8 +117,10 @@ class Secretary:
                                           format='metadata', metadataHeaders=['Subject', 'From'])
             headers = {h['name'].lower(): h['value'] for h in message.get('payload', {}).get('headers', [])}
             if self.store.claim(key):
-                self.notify('E-mail importante', headers.get('subject', 'Sem assunto') +
-                            ' — ' + headers.get('from', ''), config['speak'])
+                address=next((a.get('email') or '' for a in self.resources.accounts('google') if a['id']==account),'')
+                from urllib.parse import quote
+                self.announce('E-mail importante', headers.get('subject', 'Sem assunto') +
+                            ' — ' + headers.get('from', ''),[{'label':'Abrir e-mail','url':'https://mail.google.com/mail/?authuser='+quote(address,safe='')+'#all/'+identity}])
         # Overlap tolerates delayed delivery/indexing; persistent IDs prevent duplicates.
         self.store.set(since_key, max(since, int(now.timestamp()) - 3600))
 
@@ -130,7 +153,11 @@ class Secretary:
                             title = event.get('summary', 'Compromisso')
                             if config['reminders'] and remaining <= config['remind_minutes'] * 60:
                                 if self.store.claim(key + ':reminder'):
-                                    self.notify('Compromisso em breve', title, config['speak'])
+                                    links=[]
+                                    if event.get('htmlLink'):links.append({'label':'Abrir compromisso','url':event['htmlLink']})
+                                    meet=event.get('hangoutLink') or next((e.get('uri','') for e in event.get('conferenceData',{}).get('entryPoints',[]) if e.get('entryPointType')=='video'),'')
+                                    if meet:links.append({'label':'Entrar no Meet','url':meet})
+                                    self.announce('Compromisso em breve', title,links)
                             if config['open_meetings'] and remaining <= config['meet_minutes'] * 60:
                                 url = event.get('hangoutLink') or next((
                                     e.get('uri', '') for e in event.get('conferenceData', {}).get('entryPoints', [])

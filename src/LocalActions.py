@@ -55,7 +55,8 @@ class LocalActions:
         )
         self._queued_audio_thread.start()
 
-        self._output_dir = BASE_DIR / "cache/main/actions"
+        from src.user_paths import user_path
+        self._output_dir = user_path('images')
         self._output_dir.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------

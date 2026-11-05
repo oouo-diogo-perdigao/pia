@@ -4,4 +4,7 @@ export async function api(path,data){const r=await fetch('/api/pia'+path,{method
 export function watchJob(id,onEvent){const stream=new EventSource('/api/pia/events/'+id);stream.onmessage=e=>{const value=JSON.parse(e.data);onEvent(value);if(value.type==='done'||value.type==='error')stream.close();};return stream;}
 export function appApi(id,action,payload={}){return api('/apps/'+id+'/'+action,payload);}
 export function settingsLink(section){parent.postMessage({type:'pia:settings',section},location.origin);}
+export function publishNotification(appId,title,text,links=[]){return api('/notifications/publish',{source:'Apps/'+appId,title,text,links});}
+export async function playMedia(url,title){return (await import('./media.js')).playMedia(url,title);}
+export async function pauseMedia(){return (await import('./media.js')).pauseMedia();}
 export function element(tag,text,className){const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node;}

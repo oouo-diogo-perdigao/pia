@@ -2,5 +2,11 @@
   "name": "Object Storage",
   "info": "Navegue e transfira arquivos entre seus armazenamentos.",
   "principal": "Principal",
-  "about": "Sobre"
+  "about": "Sobre",
+  "parent": "Voltar",
+  "modified": "Modificado em",
+  "open": "Abrir",
+  "public_link": "Link",
+  "browser": "Navegador",
+  "prepare_drag": "Preparar arquivo para arrastar ao computador"
 }

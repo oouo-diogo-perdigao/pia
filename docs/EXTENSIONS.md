@@ -6,8 +6,8 @@ A janela usa HTML/CSS/JavaScript. O menu **Exibir → Inspecionar HTML / CSS / J
 
 - `src/pia/`: interface geral; `src/pia/lang/pt-BR.json` e `en.json`: traduções.
 - `src/piamini/`: Mini PIA.
-- `config/.env`: configuração geral.
-- `Plugins/Apps/`: aplicativos com páginas Principal e Sobre.
+- `config/settings.schema.json`: schema nativo; valores no SQLite do perfil.
+- `Plugins/Apps/`: aplicativos com páginas Principal e Sobre; valores pessoais no SQLite.
 - `Plugins/Connectors/`: conexões compartilhadas com serviços e contas.
 - `Plugins/Bot/`, `Skills/` e `Browser/`: bots, comandos e integrações de navegador.
 
@@ -31,39 +31,13 @@ Exemplo de `pia.json` para aplicativo:
 
 As contas ficam em **Configurações → [conector]**, não no aplicativo que as consome. O Object Storage usa o cofre do sistema para credenciais de contas. Os segredos configurados aparecem em campos de senha com o tamanho real e um botão de olho. Eles só são fornecidos à sessão local autenticada e não são incluídos nos recursos públicos da interface.
 
-## Variáveis tipadas
+## Configuração interna e perfil
 
-O tipo é um sufixo separado por dois sublinhados:
+Declare `settings.schema.json` no plugin com campos `name`, `type`, `default`, `label` e `link`. Tipos: bool, int, float, path, file, secret e string. Todos aceitam vazio. Não há `.env` nem configuração por ambiente. Valores ficam no SQLite; credenciais no cofre, com referências no banco. Use `src.settings_store` para ler/salvar e `src.user_paths.user_path` para os dados pessoais.
 
-```dotenv
-ENABLED__BOOL=true
-PORT__INT=8762
-TEMPERATURE__FLOAT=0.4
-OUTPUT__PATH=
-GOOGLE_APPLICATION_CREDENTIALS__FILE=
-API_KEY__SECRET=
-MODEL=meu-modelo
-```
+Arquivos de configuração comuns ficam em Documentos/pia/files; arquivos de credenciais são guardados em bytes no cofre. Pastas de saída padrão são resolvidas pelo sistema e não têm overrides por app. Apps oferecem configuração pela interface compartilhada; contas continuam nos conectores. O editor de documentos nativos mantém atalhos, catálogo e palavras de ativação no SQLite.
 
-| Sufixo | Interface e validação |
-| --- | --- |
-| `__BOOL` | Seletor `true`, `false` ou vazio; outros valores são rejeitados. |
-| `__INT` | Inteiro, sem casas decimais. |
-| `__FLOAT` | Número finito; `NaN` e infinito são rejeitados. |
-| `__PATH` | Caminho existente, com seletores nativos de pasta ou arquivo externo. |
-| `__FILE` | Arquivo existente; permite carregar uma cópia gerenciada ou selecionar um arquivo externo. |
-| `__SECRET` | Senha com botão de mostrar/ocultar. |
-| Sem sufixo / `__STRING` | Texto livre. |
-
-Todos aceitam vazio. Apagar um segredo e salvar limpa o valor. Campos numéricos e booleanos vazios usam os padrões do programa no próximo início. A aplicação valida todos os valores enviados antes de gravar a seção. Reinicie a PIA para aplicar variáveis de inicialização.
-
-Os consumidores Python usam `src.env_types.load_dotenv` ou `dotenv_values`: uma chave `PORT__INT` é entregue ao código como `PORT`. Os nomes antigos continuam aceitos. O editor apresenta o tipo declarado em `.env.example` também para um valor legado e, ao salvar, substitui sua chave antiga pela tipada. Variáveis desconhecidas sem tipo mantêm o comportamento de texto.
-
-Uploads têm limite de **5 MiB** e ficam na subpasta privada `files/` junto ao `.env` da respectiva seção. O nome é `<app-ou-conector>_<VARIAVEL>.<extensão>`, por exemplo `google_GOOGLE_APPLICATION_CREDENTIALS.json`. O caminho é salvo automaticamente no `.env`. O botão de pasta abre o diretório do arquivo. Arquivos selecionados pelo caminho externo não são copiados.
-
-Para Google, carregue o JSON de uma conta de serviço válido ou conecte uma conta via OAuth. Depois use o seletor de pastas em `GOOGLE_DRIVE_FOLDER_ID`, com busca e paginação. A lista contém somente pastas acessíveis à conta escolhida; uma conta de serviço precisa receber permissão nas pastas desejadas. O Podcast Automation usa a mesma integração.
-
-Na atualização da antiga pasta `Plugins/Plugins`, a migração preserva configurações locais ignoradas pelo Git copiando as ausentes para `Plugins/Connectors`, sem sobrescrever destinos existentes.
+Veja [Perfil e migração](PROFILE_MIGRATION.md) para exemplos de API, backup criptografado e importação entre Windows/Linux. As regras antigas de sufixos e dotenv existem somente para a migração inicial de instalações anteriores.
 
 ## Verificação local
 

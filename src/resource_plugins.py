@@ -17,6 +17,7 @@ from pathlib import Path
 from urllib.parse import urlencode, urlsplit, parse_qs, quote
 
 from .config_paths import BASE_DIR
+from .settings_store import save_document
 
 
 def save_json(path, value):
@@ -29,24 +30,13 @@ def save_json(path, value):
     temporary.replace(path)
 
 
-class KeyringVault:
-    def __init__(self):
-        import keyring
-        backend = keyring.get_keyring()
-        if backend.priority <= 0 or 'plaintext' in type(backend).__name__.lower():
-            raise RuntimeError('Configure o cofre do sistema (Windows Credential Manager / Secret Service no Linux).')
-        self.keyring = keyring
+from .settings_store import SystemVault
 
-    def get(self, name):
-        value = self.keyring.get_password('PIA', name)
-        return json.loads(value) if value else None
-
-    def set(self, name, value):
-        self.keyring.set_password('PIA', name, json.dumps(value))
-
-    def delete(self, name):
-        if self.get(name) is not None:
-            self.keyring.delete_password('PIA', name)
+class KeyringVault(SystemVault):
+    def set(self,name,value):
+        super().set(name,value)
+        from .settings_store import get_store
+        get_store().register_secret(name)
 
 
 class ResourcePlugins:
@@ -87,8 +77,8 @@ class ResourcePlugins:
 
     def config(self, plugin):
         self.manifest(plugin)
-        path = self.root / plugin / 'config.json'
-        return json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
+        from .settings_store import document
+        return document('Connectors/'+plugin,{})
 
     def configure(self, plugin, client_id, client_secret=None):
         with self.lock:
@@ -96,7 +86,7 @@ class ResourcePlugins:
             data['client_id'] = client_id.strip()
             if client_secret:
                 self.vault.set('client:' + plugin, client_secret)
-            save_json(self.root / plugin / 'config.json', data)
+            save_document('Connectors/'+plugin,data)
 
     def accounts(self, plugin=None):
         with self.lock:
@@ -113,7 +103,7 @@ class ResourcePlugins:
             data = self.config(plugin)
             data['accounts'] = [a for a in data.get('accounts', []) if a['id'] != account]
             self.vault.delete('token:' + plugin + ':' + account)
-            save_json(self.root / plugin / 'config.json', data)
+            save_document('Connectors/'+plugin,data)
 
     def _endpoints(self, plugin):
         provider = self.manifest(plugin)['provider']
@@ -200,7 +190,7 @@ class ResourcePlugins:
             accounts.append({'id': account_id, 'label': label.strip() or 'Minha conta',
                              'email': data.get('email') or data.get('mail') or data.get('userPrincipalName', '')})
             config['accounts'] = accounts
-            save_json(self.root / plugin / 'config.json', config)
+            save_document('Connectors/'+plugin,config)
         return account_id
 
     def _access_token(self, plugin, account):

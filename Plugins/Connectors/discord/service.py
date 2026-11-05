@@ -8,8 +8,8 @@ import re
 import threading
 
 import requests
-from dotenv import set_key, unset_key, dotenv_values as raw_values
-from src.env_types import dotenv_values, split_key
+from src.settings_store import get_store, values, document, save_document
+from src.env_types import split_key
 from src.resource_plugins import save_json
 
 ROOT = Path(__file__).resolve().parent
@@ -24,11 +24,11 @@ class Discord:
         self.log_path = Path(log_path or (ROOT.parents[2] / 'logs/discord.log' if self.root == ROOT else self.root / 'discord.log'))
 
     def config(self):
-        return dotenv_values(self.root / '.env')
+        return values('Connectors/discord')
 
     def clean(self, text):
         text = str(text)
-        for key, value in raw_values(self.root / '.env').items():
+        for key, value in self.config().items():
             if value and any(part in key for part in ('TOKEN', 'SECRET')):
                 text = text.replace(value, '[REDACTED]')
         return text
@@ -85,12 +85,17 @@ class Discord:
                 'channel': value.get('DISCORD_CHANNEL_ID', ''), 'linked': self.binding(),
                 'link_enabled': value.get('DISCORD_LINK_ENABLED', 'false') == 'true'}
 
-    def send(self, text, channel=None):
+    def send(self, text, channel=None,mentions=None):
         channel = channel or self.config().get('DISCORD_CHANNEL_ID')
         if not channel or not re.fullmatch('[0-9]+', str(channel)):
             raise ValueError('Configure o canal do Discord para notificações ou use /link no canal desejado.')
+        allowed={'parse': []}
+        if mentions:
+            if not isinstance(mentions,list) or len(mentions)>100 or any(not isinstance(value,str) or not re.fullmatch(r'[0-9]{1,20}',value) for value in mentions):
+                raise ValueError('IDs de menção inválidos.')
+            allowed['users']=list(dict.fromkeys(mentions))
         result = self.request('POST', '/channels/' + str(channel) + '/messages',
-            json={'content': str(text)[:2000], 'allowed_mentions': {'parse': []}})
+            json={'content': str(text)[:2000], 'allowed_mentions': allowed})
         self.log(f'Mensagem enviada: canal={channel}, mensagem={result["id"]}.')
         return {'id': result['id'], 'channel': str(channel)}
 
@@ -133,17 +138,11 @@ class Discord:
 
     def set_value(self, name, value, preferred=None):
         """Respect an existing explicit type and remove legacy aliases that could shadow it."""
-        path=self.root / '.env'
-        aliases=[key for key in raw_values(path) if split_key(key)[0]==name]
-        key=preferred or next((key for key in aliases if split_key(key)[0]!=key),name)
-        set_key(path,key,str(value))
-        for alias in aliases:
-            if alias!=key:unset_key(path,alias)
-        path.chmod(0o600)
+        kind=split_key(preferred)[1] if preferred else 'string'
+        get_store().save('Connectors/discord',{name:str(value)},{name:kind})
 
     def binding(self):
-        file = self.root / 'config.json'
-        return json.loads(file.read_text(encoding='utf-8')).get('linked', {}) if file.exists() else {}
+        return document('Connectors/discord',{}).get('linked',{})
 
     def link(self, *, guild, channel, user, permissions, app_permissions, application):
         """Called only by the authenticated Gateway, never exposed as HTTP input."""
@@ -174,20 +173,20 @@ class Discord:
             guild_info=self.request('GET','/guilds/'+str(guild))
             self.set_value('DISCORD_CHANNEL_ID', str(channel))
             file = self.root / 'config.json'
-            data = json.loads(file.read_text(encoding='utf-8')) if file.exists() else {}
+            data = document('Connectors/discord',{})
             channels=data.get('channels',[]) or ([data['linked']] if data.get('linked') else [])
             data['linked'] = dict(guild=str(guild), channel=str(channel), name=info.get('name', ''),
                                   user=str(user), at=datetime.now(timezone.utc).isoformat())
             data['linked']['guild_name']=guild_info.get('name',str(guild))
             channels=[{**item,'guild_name':item.get('guild_name') or guild_info.get('name',str(guild))} for item in channels]
             data['channels']=[c for c in channels if c['channel']!=str(channel)]+[data['linked'].copy()]
-            save_json(file, data)
+            save_document('Connectors/discord', data)
         self.log(f'/link concluído: servidor={guild}, canal={channel}, administrador={user}.')
         return {'channel': str(channel), 'text': f'Canal vinculado à PIA local.\nDISCORD_CHANNEL_ID={channel}\nO valor já foi salvo nas configurações da PIA. Publicações com um canal específico no Podcast Automation continuam usando esse canal; deixe-o vazio para usar o padrão.'}
 
     def channels(self):
         file=self.root/'config.json'
-        data=json.loads(file.read_text(encoding='utf-8')) if file.exists() else {}
+        data=document('Connectors/discord',{})
         rows=data.get('channels',[])
         if not rows and data.get('linked'):rows=[data['linked']]
         return rows
@@ -195,9 +194,9 @@ class Discord:
     def unlink(self):
         with _lock:
             file = self.root / 'config.json'
-            data = json.loads(file.read_text(encoding='utf-8')) if file.exists() else {}
+            data = document('Connectors/discord',{})
             data.pop('linked', None)
-            save_json(file, data)
+            save_document('Connectors/discord', data)
             self.set_value('DISCORD_CHANNEL_ID', '')
         self.log('Vínculo de publicação removido na interface local.')
         return {'ok': True}

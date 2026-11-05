@@ -1,3 +1,4 @@
+from src.settings_store import get as setting
 """Music providers. Local ACE-Step is isolated from PIA's Torch environment."""
 import atexit
 import base64
@@ -15,19 +16,37 @@ from urllib.parse import urlsplit
 import uuid
 import requests
 from src.config_paths import BASE_DIR
-from src.env_types import dotenv_values
+from src.settings_store import values as section_values, document, save_document
 from src.resource_plugins import save_json
 
 ROOT=Path(__file__).resolve().parent
 CACHE=BASE_DIR/'cache/Apps/music'
-OUTPUT=BASE_DIR/'data/music'
+def default_music_folder():
+    home=Path.home()
+    if sys.platform=='win32':
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,r'Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders') as key:
+                return Path(os.path.expandvars(winreg.QueryValueEx(key,'My Music')[0]))/'PIA'
+        except OSError:pass
+    else:
+        file=Path(os.environ.get('XDG_CONFIG_HOME',home/'.config'))/'user-dirs.dirs'
+        if file.is_file():
+            match=re.search(r'^XDG_MUSIC_DIR="([^"]+)"',file.read_text(encoding='utf-8'),re.M)
+            if match:return Path(match.group(1).replace('$HOME',str(home)))/'PIA'
+    return home/'Music/PIA'
+
+from src.user_paths import user_path
+OUTPUT=user_path('music')
+LEGACY_OUTPUT=OUTPUT
 REVISION='ca1e85fe9430179831e6bc6be790c332190a3866'
 _engine=None
 _token=secrets.token_urlsafe(40)
 _lock=threading.Lock()
 _generation_lock=threading.Lock()
 
-def settings():return dotenv_values(ROOT/'.env')
+def settings():return section_values('Apps/music')
+def output_directory():return OUTPUT
 def base_url():
     url=settings().get('MUSIC_LOCAL_URL') or 'http://127.0.0.1:8015'
     parsed=urlsplit(url)
@@ -58,7 +77,7 @@ def _json(response):
 def engine(session,progress,cancelled):
     global _engine
     url=base_url()
-    key=settings().get('MUSIC_LOCAL_KEY') or (_token if _engine is not None and _engine.poll() is None else '')
+    key=_token if _engine is not None and _engine.poll() is None else settings().get('MUSIC_LOCAL_KEY','')
     headers={'Authorization':'Bearer '+key} if key else {}
     try:
         health=_json(session.get(url+'/health',headers=headers,timeout=2,allow_redirects=False))
@@ -72,7 +91,8 @@ def engine(session,progress,cancelled):
             env=os.environ.copy();env.update(ACESTEP_API_HOST='127.0.0.1',ACESTEP_API_PORT=str(urlsplit(url).port or 80),ACESTEP_API_KEY=_token,ACESTEP_LM_BACKEND='pt',ACESTEP_OFFLOAD_TO_CPU='true',ACESTEP_USE_FLASH_ATTENTION='false',HF_HOME=str(CACHE/'models'))
             log=BASE_DIR/'logs/plugins/Apps/music-engine.log';log.parent.mkdir(parents=True,exist_ok=True)
             with log.open('ab') as stream:
-                _engine=subprocess.Popen([uv,'run','--project',str(repo),'acestep-api'],cwd=repo,env=env,stdout=stream,stderr=subprocess.STDOUT,**({'creationflags':subprocess.CREATE_NO_WINDOW} if sys.platform=='win32' else {}))
+                python=repo/('.venv/Scripts/python.exe' if sys.platform=='win32' else '.venv/bin/python')
+                _engine=subprocess.Popen([str(python),'-c','from acestep.api_server import main; main()'],cwd=repo,env=env,stdout=stream,stderr=subprocess.STDOUT,**({'creationflags':subprocess.CREATE_NO_WINDOW} if sys.platform=='win32' else {}))
     headers={'Authorization':'Bearer '+_token}
     progress('Iniciando ACE-Step e carregando modelos…')
     for _ in range(600):
@@ -84,14 +104,37 @@ def engine(session,progress,cancelled):
     raise RuntimeError('O motor não ficou pronto em 20 minutos. Consulte seus logs.')
 
 def stop_engine():
-    if _engine is not None and _engine.poll() is None:_engine.terminate()
+    global _engine
+    with _lock:
+        process=_engine
+        if process is None:return
+        if process.poll() is None:
+            process.terminate()
+            try:process.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                process.kill();process.wait(timeout=5)
+        _engine=None
 atexit.register(stop_engine)
 
 def audio_file(name):
     if not re.fullmatch(r'[a-f0-9]{32}\.(mp3|wav|flac)',name):raise ValueError('Áudio inválido.')
-    path=OUTPUT/name
-    if not path.is_file():raise ValueError('Áudio não encontrado.')
-    return path
+    for root in (output_directory(),LEGACY_OUTPUT):
+        path=root/name
+        if path.is_file() and not path.is_symlink():return path
+    raise ValueError('Áudio não encontrado.')
+
+def library():
+    items={}
+    for root in (LEGACY_OUTPUT,output_directory()):
+        if not root.is_dir():continue
+        for path in root.glob('*.json'):
+            if not re.fullmatch(r'[a-f0-9]{32}\.(mp3|wav|flac)\.json',path.name):continue
+            try:
+                item=json.loads(path.read_text(encoding='utf-8'))
+                if item.get('file')!=path.name[:-5]:continue
+                if (root/item['file']).is_file():items[item['file']]={**item,'modified':path.stat().st_mtime}
+            except (ValueError,KeyError,OSError):continue
+    return sorted(items.values(),key=lambda item:item['modified'],reverse=True)[:100]
 
 def generate(prompt,lyrics='',provider='local',duration=30,progress=lambda text:None,cancelled=lambda:False):
     if not isinstance(prompt,str) or not prompt.strip() or len(prompt)>8000:raise ValueError('Descrição obrigatória (até 8000 caracteres).')
@@ -129,7 +172,7 @@ def generate(prompt,lyrics='',provider='local',duration=30,progress=lambda text:
                 extension='mp3'
             else:
                 from src.config import STT_GEMINI_API_KEY
-                key=os.getenv('GEMINI_API_KEY') or os.getenv('AGE_GEMINI_API_KEY') or STT_GEMINI_API_KEY
+                key=setting('GEMINI_API_KEY') or setting('AGE_GEMINI_API_KEY') or STT_GEMINI_API_KEY
                 if not key:raise RuntimeError('Configure a chave Gemini da PIA. A autorização Gmail/Drive não concede acesso à API Lyria.')
                 progress('Gerando música com Lyria pela API Gemini…')
                 data=_json(session.post('https://generativelanguage.googleapis.com/v1beta/interactions',headers={'x-goog-api-key':key},json={'model':settings().get('MUSIC_GEMINI_MODEL') or 'lyria-3.5','input':f'{prompt}\nTarget duration: {duration} seconds.\n'+('Lyrics:\n'+lyrics if lyrics else 'Instrumental only. No vocals.')},timeout=600))
@@ -138,10 +181,14 @@ def generate(prompt,lyrics='',provider='local',duration=30,progress=lambda text:
                 raw=base64.b64decode(audios[0]['data'],validate=True);extension='wav' if audios[0].get('mime_type')=='audio/wav' else 'mp3'
             if cancelled():raise InterruptedError('Geração cancelada antes de salvar o resultado.')
             if not raw or len(raw)>100*1024**2:raise RuntimeError('Áudio musical vazio ou maior que 100 MiB.')
-            OUTPUT.mkdir(parents=True,exist_ok=True)
+            destination=output_directory()
+            destination.mkdir(parents=True,exist_ok=True)
             name=uuid.uuid4().hex+'.'+extension
-            (OUTPUT/name).write_bytes(raw)
+            (destination/name).write_bytes(raw)
             result={'file':name,'provider':provider,'prompt':prompt,'lyrics':lyrics,'requested_duration':duration,'audio_url':'/api/pia/music/files/'+name}
-            save_json(OUTPUT/(name+'.json'),result)
+            save_json(destination/(name+'.json'),result)
             return result
-    finally:_generation_lock.release()
+    finally:
+        try:
+            if provider=='local':stop_engine()
+        finally:_generation_lock.release()

@@ -31,6 +31,10 @@ class WorkspaceStore:
                         db.execute('UPDATE messages SET parent=? WHERE id=?', (previous, identity))
                         previous = identity
                     db.execute('UPDATE chats SET leaf=? WHERE id=?', (previous, chat))
+            if 'read_message' not in {c[1] for c in db.execute('PRAGMA table_info(chats)')}:
+                db.execute('ALTER TABLE chats ADD COLUMN read_message INTEGER DEFAULT 0')
+                # Existing history is not a backlog of new notifications.
+                db.execute('UPDATE chats SET read_message=COALESCE((SELECT MAX(id) FROM messages WHERE chat=chats.id),0)')
 
     @contextmanager
     def connect(self):
@@ -50,6 +54,23 @@ class WorkspaceStore:
     def chats(self):
         with self.connect() as db:
             return db.execute('SELECT id,title FROM chats ORDER BY created DESC').fetchall()
+
+    def unread_chats(self):
+        with self.connect() as db:
+            return dict(db.execute('''WITH RECURSIVE active(id,parent,role,chat,seen) AS (
+                SELECT m.id,m.parent,m.role,m.chat,c.read_message FROM messages m
+                JOIN chats c ON c.leaf=m.id AND c.id=m.chat WHERE m.id>c.read_message
+                UNION ALL
+                SELECT m.id,m.parent,m.role,m.chat,a.seen FROM messages m
+                JOIN active a ON m.id=a.parent AND m.chat=a.chat WHERE m.id>a.seen
+            ) SELECT chat,COUNT(*) FROM active WHERE role='assistant' GROUP BY chat''').fetchall())
+
+    def read_chat(self,chat,through):
+        if type(through) is not int:raise ValueError('Mensagem inválida.')
+        with self.connect() as db:
+            if not db.execute("SELECT 1 FROM messages WHERE id=? AND chat=? AND role='assistant'",(through,chat)).fetchone():
+                raise ValueError('Mensagem não encontrada.')
+            db.execute('UPDATE chats SET read_message=MAX(read_message,?) WHERE id=?',(through,chat))
 
     def message_records(self, chat):
         with self.connect() as db:
@@ -113,6 +134,8 @@ class WorkspaceStore:
             leaf = db.execute('SELECT leaf FROM chats WHERE id=?',(chat,)).fetchone()[0]
             if leaf in doomed: db.execute('UPDATE chats SET leaf=? WHERE id=?',(row[0],chat))
             db.executemany('DELETE FROM messages WHERE id=?',[(i,) for i in doomed])
+            # SQLite can reuse the largest deleted id. Keep future replies unread.
+            db.execute('UPDATE chats SET read_message=MIN(read_message,COALESCE((SELECT MAX(id) FROM messages WHERE chat=?),0)) WHERE id=?',(chat,chat))
             if leaf in doomed:
                 sibling = db.execute('SELECT id FROM messages WHERE chat=? AND parent IS ? ORDER BY id DESC LIMIT 1',(chat,row[0])).fetchone()
                 replacement = sibling[0] if sibling else row[0]

@@ -13,6 +13,7 @@ import tomllib
 import types
 
 from src.config_paths import BASE_DIR, CONFIG_DIR
+from src.user_paths import user_path
 from src.desktop_backend import DesktopBackend, environment_fields
 
 
@@ -100,6 +101,10 @@ class WorkspaceService:
         self.backend = backend or DesktopBackend(self.notify)
         self.store = self.backend.store
         self.apps = apps or Apps()
+        from src.notifications import NotificationCenter
+        self.notifications=getattr(self.backend,'notifications',None) or NotificationCenter(self.store,self.notify,getattr(self.backend,'speak',lambda text:None))
+        from src.media import MediaSessions
+        self.media=MediaSessions()
 
     def notify(self, title, text, speak=False):
         if self.native_handler:
@@ -114,7 +119,26 @@ class WorkspaceService:
     def state(self):
         return {'boot':getattr(self,'boot','legacy'),'chats': self.store.chat_records(), 'folders': self.store.folders(), 'apps': sorted(self.apps.public(),key=lambda app:(self.store.get('ui:app-order',[]).index(app['id']) if app['id'] in self.store.get('ui:app-order',[]) else 999)),
                 'jobs': [{'id': j.id, 'chat': j.chat, 'status': j.status} for j in self.jobs.values() if j.status == 'running'],
-                'native': self.native_handler is not None}
+                'native': self.native_handler is not None,
+                'notifications':self.notification_counts(),'bots':self.bot_records()}
+
+    def notification_counts(self):
+        counts={k:v for k,v in self.notifications.snapshot().items() if k in ('counts','unread','settings')}
+        chats=self.store.unread_chats()
+        return {**counts,'chat_counts':chats,'chat_unread':sum(chats.values())}
+
+    def bot_records(self):
+        records=[]
+        for file in sorted((BASE_DIR/'Plugins/Bot').glob('*/pia.json')):
+            meta=json.loads(file.read_text(encoding='utf-8'))
+            identity=meta.get('app_id','')
+            if not re.fullmatch('[a-z][a-z0-9_]*',identity):continue
+            records.append({'id':identity,'name':meta['nome'],'avatar':f'/bots/{identity}/avatar.svg' if (file.parent/'avatar.svg').is_file() else None,'description':meta.get('info',''),'url':f'/bots/{identity}/web/'+meta.get('home','index.html')})
+        return records
+
+    def publish_notification(self,source,title,text,links=None):
+        if source not in dict(self.plugin_folders()):raise ValueError('Plugin não encontrado.')
+        return self.notifications.publish(source,title,text,links)
 
     def send(self, chat, text, request=None):
         if not isinstance(text, str) or not text.strip():
@@ -163,51 +187,29 @@ class WorkspaceService:
         return result
 
     def settings(self):
-        from src.env_types import fields, split_key
-        def field(name, value, link, sensitive):
-            base, kind = split_key(name)
-            sensitive = kind == 'secret' or (kind == 'string' and sensitive)
-            return dict(name=name, base=base, type=kind, value=value, sensitive=sensitive,
-                        configured=bool(value), link=link)
-        sections = [{'id': 'general', 'name': 'PIA · Geral', 'fields': [field(*row) for row in environment_fields() if split_key(row[0])[0]!='PODCAST_CONFIG']}]
-        for identity, folder in self.plugin_folders():
-            example = folder / '.env.example'
-            if not example.exists():
-                example = folder / 'docs' / 'examples' / '.env.example'
-            rows = []
-            for name, value in fields(example, folder / '.env'):
-                if split_key(name)[0] in ('PODCAST_CONFIG','GOOGLE_APPLICATION_CREDENTIALS','GOOGLE_DRIVE_FOLDER_ID'):continue
-                sensitive = any(part in name for part in ('KEY', 'TOKEN', 'SECRET', 'PASSWORD', 'CREDENTIAL'))
-                link = ('https://console.cloud.google.com/apis/credentials' if name.startswith('GOOGLE') else
-                        'https://dash.cloudflare.com/' if name.startswith('OBJECT_STORAGE') else
-                        'https://huggingface.co/settings/tokens' if name.startswith('HF_') else
-                        'https://discord.com/developers/applications' if name.startswith('DISCORD_') else
-                        'https://github.com/oouo-diogo-perdigao/pia#readme')
-                rows.append(field(name, value, link, sensitive))
-            if rows:
-                manifest=folder/'pia.json'
-                meta=json.loads(manifest.read_text(encoding='utf-8')) if manifest.exists() else {}
-                sections.append(dict(id=identity, name=meta.get('nome',identity.replace('/', ' · ')), fields=rows))
+        from src.settings_store import schema,get_store,sensitive
+        sections=[]
+        for identity,folder in [('general',CONFIG_DIR),*self.plugin_folders()]:
+            definitions=schema(identity)
+            known={item['name'] for item in definitions}
+            definitions=definitions+[dict(name=name,type=kind,label=name.replace('_',' ').title()) for group,name,_,kind,_ in get_store().rows('settings') if group==identity and name not in known]
+            if not definitions:continue
+            values=get_store().values(identity)
+            rows=[dict(name=item['name'],base=item['name'],label=item.get('label',item['name']),type=item['type'],
+                       value=values.get(item['name'],''),sensitive=sensitive(item['name'],item['type']),
+                       configured=bool(values.get(item['name'])),link=item.get('link','https://github.com/oouo-diogo-perdigao/pia#readme')) for item in definitions]
+            manifest=folder/'pia.json'
+            meta=json.loads(manifest.read_text(encoding='utf-8')) if manifest.exists() else {}
+            sections.append(dict(id=identity,name='PIA · Geral' if identity=='general' else meta.get('nome',identity),fields=rows))
         return sections
 
-    def save_settings(self, section, values):
-        from dotenv import set_key, unset_key
-        from src.env_types import validate, split_key
-        available = next((s for s in self.settings() if s['id'] == section), None)
-        if available is None:
-            raise ValueError('Seção desconhecida.')
-        path = CONFIG_DIR / '.env' if section == 'general' else dict(self.plugin_folders())[section] / '.env'
-        fields = {f['name']: f for f in available['fields']}
-        for name, value in values.items():
-            if name not in fields or not isinstance(value, str) or '\x00' in value:
-                raise ValueError('Variável inválida.')
-            validate(name, value)
-        for name, value in values.items():
-            set_key(path, name, value, quote_mode='always')
-            base, _ = split_key(name)
-            if base != name:
-                unset_key(path, base)
-        return {'ok': True, 'restart_required': True}
+    def save_settings(self,section,values):
+        from src.settings_store import get_store,schema
+        selected=next((item for item in self.settings() if item['id']==section),None)
+        allowed={item['name'] for item in selected['fields']} if selected else set()
+        if not isinstance(values,dict) or set(values)-allowed:raise ValueError('Configuração desconhecida.')
+        get_store().save(section,values)
+        return {'ok':True,'restart_required':True}
 
     def upload_setting(self, data):
         """A user-selected file is owned by its config section, never publicly served."""
@@ -225,16 +227,20 @@ class WorkspaceService:
         if len(content) > 5 * 1024 * 1024:
             raise ValueError('Arquivo excede 5 MiB.')
         base, _ = split_key(name)
+        from src.settings_store import sensitive,get_store
         if base == 'GOOGLE_APPLICATION_CREDENTIALS':
             credentials = json.loads(content)
             if not isinstance(credentials, dict) or credentials.get('type') != 'service_account' or not credentials.get('client_email') or not credentials.get('private_key'):
                 raise ValueError('Selecione o JSON de credenciais de uma conta de serviço Google.')
-        folder = CONFIG_DIR if section == 'general' else dict(self.plugin_folders())[section]
+        if sensitive(base):
+            get_store().save_file(section,base,str(data.get('filename','credencial.bin')),content)
+            return {'path':get_store().values(section)[base]}
+        folder = user_path('files',section.replace('/','_'))
         extension = Path(str(data.get('filename', ''))).suffix.lower()
         if not re.fullmatch(r'\.[a-z0-9]{1,10}', extension):
             extension = '.bin'
-        target = folder / 'files' / (section.split('/')[-1] + '_' + base + extension)
-        target.parent.mkdir(exist_ok=True)
+        target = folder / (section.split('/')[-1] + '_' + base + extension)
+        target.parent.mkdir(parents=True,exist_ok=True)
         if target.is_symlink() or not target.resolve().is_relative_to(folder.resolve()):
             raise ValueError('Destino inválido.')
         temporary = target.with_name(target.name + '.' + secrets.token_hex(8) + '.tmp')
@@ -267,6 +273,76 @@ class WorkspaceService:
         return result
 
     def _dispatch(self, method, path, data, query):
+        if path=='/settings/storage':
+            from src.settings_store import get_store,document
+            return {'folder':str(user_path()),'database':str(get_store().path),'notes':document('migration/notes',[])}
+        if path=='/settings/credentials':
+            from src.settings_store import get_store
+            return {'items':[row[0] for row in get_store().rows('vault_entries')]}
+        if path=='/settings/credential':
+            from src.settings_store import get_store
+            store=get_store();name=data['name']
+            if name not in {row[0] for row in store.rows('vault_entries')}:raise ValueError('Credencial não encontrada.')
+            return {'value':store.vault.get(name)}
+        if path=='/settings/export':
+            from src.config_transfer import export_config
+            return export_config(data['password'])
+        if path=='/settings/import-preview':
+            from src.config_transfer import preview_config
+            return preview_config(data['data'],data['password'])
+        if path=='/settings/import':
+            if any(job.status=='running' for job in self.jobs.values()):raise ValueError('Aguarde os trabalhos em andamento antes de importar configurações.')
+            from src.config_transfer import import_config
+            from contextlib import nullcontext
+            lock=getattr(getattr(self.backend,'resources',None),'lock',None)
+            with lock if hasattr(lock,'__enter__') else nullcontext():
+                result=import_config(data['data'],data['password'])
+            if self.native_handler:
+                threading.Timer(1,lambda:self.native('restart')).start()
+                result['restarting']=True
+            return result
+        if path=='/settings/documents':
+            from src.settings_store import document,save_document
+            names=('keywords.txt','models.yaml','shortcuts.yaml')
+            if method=='POST':
+                name=data['name'];value=data['value']
+                if name not in names or not isinstance(value,str) or len(value)>1024*1024:raise ValueError('Documento inválido.')
+                if name.endswith('.yaml'):
+                    import yaml
+                    if not isinstance(yaml.safe_load(value),dict):raise ValueError('Esperado um mapa YAML.')
+                save_document('main/'+name,value)
+                return {'ok':True,'restart_required':True}
+            return {name:document('main/'+name,(CONFIG_DIR/name.replace('.', '.example.',1)).read_text(encoding='utf-8') if (CONFIG_DIR/name.replace('.', '.example.',1)).is_file() else '') for name in names}
+
+        if path=='/notifications/counts':
+            return self.notification_counts()
+        if path=='/chat/read':
+            self.store.read_chat(data['chat'],data['through'])
+            return {'ok':True}
+        if path=='/notifications':
+            value=self.notifications.snapshot()
+            value['sources']=[{'id':identity,'name':json.loads((folder/'pia.json').read_text(encoding='utf-8')).get('nome',identity) if (folder/'pia.json').is_file() else identity} for identity,folder in self.plugin_folders() if identity.startswith(('Apps/','Bot/'))]
+            return value
+        if path=='/notifications/settings':
+            self.notifications.configure(data)
+            return {'ok':True}
+        if path=='/notifications/read':
+            self.notifications.read(data.get('id'),data.get('source'));return {'ok':True}
+        if path=='/notifications/publish':
+            return self.publish_notification(data['source'],data['title'],data['text'],data.get('links'))
+        if path=='/media/state':
+            playing=self.media.update(data.get('client'),data.get('playing'))
+            if self.native_handler:self.native('media-state',{'playing':playing})
+            return {'ok':True}
+        if path=='/logs/read':
+            from src.log_reader import read_log
+            return read_log(data['name'],data.get('cursor'),data.get('identity'))
+        if path=='/logs/open':
+            from src.log_reader import log_path
+            from urllib.parse import quote
+            log_path(data['name'])
+            if self.native_handler:return self.native('open-log',{'name':data['name']})
+            return {'url':'/api/pia/logs/file?name='+quote(data['name'],safe='')}
         if path == '/settings/upload':
             return self.upload_setting(data)
         if path == '/preferences':
@@ -381,8 +457,7 @@ class WorkspaceService:
             self.backend.resources.disconnect(data['plugin'], data['account'])
             return {'ok': True}
         if path == '/bots':
-            meta=json.loads((BASE_DIR/'Plugins/Bot/secretaria/pia.json').read_text(encoding='utf-8'))
-            return [{'id': meta['app_id'], 'name': meta['nome'], 'avatar':'/bots/secretaria/avatar.svg', 'description': meta['info']}]
+            return self.bot_records()
         if path == '/bots/secretaria':
             if method == 'POST':
                 self.backend.secretary.configure(data)
@@ -408,7 +483,7 @@ class WorkspaceService:
                 from Plugins.Connectors.object_storage.service import ObjectStorage
                 storage=ObjectStorage()
                 account=storage.account(data['account'])
-                value=storage.legacy() if account['id']=='legacy' else storage.vault.get('storage:'+account['id'])
+                value=storage.vault.get('storage:'+account['id'])
                 return {key:(value or {}).get(key,'') for key in ('access_key','secret_key','session_token')}
             if plugin=='google':
                 from Plugins.Connectors.google.drive import Drive
@@ -460,6 +535,7 @@ class WorkspaceService:
                 cleared.append(file.relative_to(directory).as_posix())
             return {'cleared':cleared}
         if path == '/logs':
+            from src.log_reader import read_log
             result = []
             directory=BASE_DIR/'logs'
             for identity,_ in self.plugin_folders():
@@ -468,9 +544,7 @@ class WorkspaceService:
                 file.parent.mkdir(parents=True,exist_ok=True);file.touch(exist_ok=True)
             for file in sorted(directory.rglob('*.log')):
                 if not file.resolve().is_relative_to(directory.resolve()):continue
-                with file.open('rb') as stream:
-                    stream.seek(max(0, file.stat().st_size - 32000))
-                    result.append({'name': file.relative_to(directory).as_posix(), 'text': stream.read().decode('utf-8', errors='replace')})
+                result.append(read_log(file.relative_to(directory).as_posix()))
             return result
         raise ValueError('Operação não encontrada.')
 

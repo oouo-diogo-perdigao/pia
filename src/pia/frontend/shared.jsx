@@ -16,8 +16,18 @@ import {
   Paper,
   Button,
   Alert,
+  TextInput,
+  Collapse,
 } from "@mantine/core";
-import { Check, Trash2, Copy, ArrowDown } from "lucide-react";
+import {
+  Check,
+  Trash2,
+  Copy,
+  ArrowDown,
+  ExternalLink,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 import { safe, report, copy } from "./api";
 export const Context = createContext({});
 export const usePia = () => useContext(Context);
@@ -109,7 +119,15 @@ export function WorkProgress({ value }) {
     </Paper>
   );
 }
-export function LogViewer({ text = "", onClear, title = "Log", height = 300 }) {
+export function LogViewer({
+  text = "",
+  onClear,
+  onOpen,
+  title = "Log",
+  height = 300,
+}) {
+  const [collapsed, setCollapsed] = useState(false),
+    [query, setQuery] = useState("");
   const ref = useRef(),
     follow = useRef(true),
     [following, setFollowing] = useState(true);
@@ -124,7 +142,14 @@ export function LogViewer({ text = "", onClear, title = "Log", height = 300 }) {
   return (
     <Paper withBorder p="md" className="log-panel">
       <Group justify="space-between">
-        <Text fw={600}>{title}</Text>
+        <Group gap={4}>
+          <Icon
+            icon={collapsed ? ChevronRight : ChevronDown}
+            label={collapsed ? "Expandir log" : "Minimizar log"}
+            onClick={() => setCollapsed((value) => !value)}
+          />
+          <Text fw={600}>{title}</Text>
+        </Group>
         <Group gap={4}>
           {!following && (
             <Icon
@@ -138,29 +163,53 @@ export function LogViewer({ text = "", onClear, title = "Log", height = 300 }) {
             />
           )}
           <Icon
-            feedback
-            icon={Copy}
-            label="Copiar log"
-            onClick={() => copy(text)}
+            icon={ExternalLink}
+            label="Abrir log"
+            onClick={
+              onOpen ||
+              (() => {
+                const url = URL.createObjectURL(
+                  new Blob([text], { type: "text/plain;charset=utf-8" }),
+                );
+                window.open(url, "_blank", "noopener");
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+              })
+            }
           />
           {onClear && (
             <Icon icon={Trash2} label="Limpar log" onClick={onClear} />
           )}
         </Group>
       </Group>
-      <pre
-        ref={ref}
-        className="log-viewer"
-        style={{ height }}
-        onScroll={() => {
-          const node = ref.current;
-          follow.current =
-            node.scrollHeight - node.scrollTop - node.clientHeight < 24;
-          setFollowing(follow.current);
-        }}
-      >
-        {text}
-      </pre>
+      <Collapse in={!collapsed}>
+        <TextInput
+          size="xs"
+          mt="xs"
+          placeholder="Buscar no log"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        <pre
+          ref={ref}
+          className="log-viewer"
+          style={{ height }}
+          onScroll={() => {
+            const node = ref.current;
+            follow.current =
+              node.scrollHeight - node.scrollTop - node.clientHeight < 24;
+            setFollowing(follow.current);
+          }}
+        >
+          {query
+            ? text
+                .split("\n")
+                .filter((line) =>
+                  line.toLowerCase().includes(query.toLowerCase()),
+                )
+                .join("\n")
+            : text}
+        </pre>
+      </Collapse>
     </Paper>
   );
 }

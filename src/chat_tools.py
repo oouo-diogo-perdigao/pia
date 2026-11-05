@@ -1,3 +1,4 @@
+from src.user_paths import user_path
 """Workspace tools route explicit requests to PIA; generated assets survive API cache expiry."""
 import base64
 import io
@@ -13,7 +14,7 @@ from .config_paths import BASE_DIR
 MARKDOWN_INSTRUCTION='Responda sempre em Markdown legível, em português. Use títulos, listas, tabelas e blocos de código quando ajudarem. Não envolva a resposta inteira em uma cerca de código Markdown. Não afirme que executou uma ação ou criou uma imagem se uma ferramenta não foi executada.'
 
 def save_camera(result):
-    root=BASE_DIR/'data/chat-images';root.mkdir(parents=True,exist_ok=True)
+    root=user_path('chat');root.mkdir(parents=True,exist_ok=True)
     name=uuid.uuid4().hex+'.png'
     (root/name).write_bytes(base64.b64decode(result['data'],validate=True))
     return '![Foto da câmera](/api/pia/chat/assets/'+name+')'
@@ -22,7 +23,7 @@ def allowed_tools(text):
     plain=unicodedata.normalize('NFKD',text.lower()).encode('ascii','ignore').decode()
     tools=set()
     if re.search(r'\b(agenda|compromissos?|email|gmail|drive|arquivos|contas|calendario)\b',plain):tools.update(('pia_accounts','pia_resources'))
-    if re.search(r'\b(codex|gemini cli)\b',plain):tools.add('pia_delegate')
+    if re.search(r'\b(codex|agy|antigravity)\b',plain):tools.add('pia_delegate')
     return tools
 
 def image_intent(text):
@@ -36,7 +37,7 @@ def image_intent(text):
 
 class ChatTools:
     def __init__(self,root=None,base_url=None,session=None,timeout=3600):
-        self.root=Path(root or BASE_DIR/'data/chat-images');self.base_url=base_url;self.session=session or requests.Session();self.timeout=timeout
+        self.root=Path(root or user_path('chat'));self.base_url=base_url;self.session=session or requests.Session();self.timeout=timeout
         if session is None:self.session.trust_env=False
     def execute(self,text):
         plain=unicodedata.normalize('NFKD',text.lower()).encode('ascii','ignore').decode()

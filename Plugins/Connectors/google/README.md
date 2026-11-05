@@ -12,3 +12,5 @@ Para marcar gravações processadas, a conta OAuth precisa do escopo Drive de le
 ## Manifesto e idioma
 
 Os metadados desta extensão ficam em `pia.json` e os textos em `lang/pt-BR.json`. Consulte o [padrão de extensões e variáveis tipadas](../../../docs/EXTENSIONS.md) para criar telas, campos de configuração e integrações compartilhadas.
+
+Configuração e dados usam o [perfil SQLite/cofre](../../../docs/PROFILE_MIGRATION.md).
