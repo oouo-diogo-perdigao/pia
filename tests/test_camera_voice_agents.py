@@ -81,7 +81,7 @@ class AgentBridgeTests(unittest.TestCase):
             self.assertNotIn('secret',str(raised.exception))
 
     def test_agy_configuration_does_not_reuse_gemini_executable(self):
-        with patch.object(agents,'dotenv_values',return_value={'AGENTS_GEMINI_EXECUTABLE':'old-gemini.exe','AGENTS_AGY_EXECUTABLE':'new-agy.exe'}):
+        with patch.object(agents,'section_values',return_value={'AGENTS_GEMINI_EXECUTABLE':'old-gemini.exe','AGENTS_AGY_EXECUTABLE':'new-agy.exe'}):
             self.assertEqual(agents.executable('agy'),'new-agy.exe')
         with patch.object(agents,'executable',return_value='fixture.exe'):
             self.assertEqual(set(agents.status()),{'codex','agy'})

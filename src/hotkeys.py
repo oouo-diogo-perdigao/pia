@@ -28,8 +28,8 @@ from pathlib import Path
 
 import yaml
 
-from src.config_paths import BASE_DIR, CONFIG_DIR, initialize_config
-initialize_config()
+from src.config_paths import BASE_DIR, CONFIG_DIR
+from src.settings_store import get as setting,document
 
 PROJECT_DIR = BASE_DIR
 LOG_FILE = PROJECT_DIR / "logs" / "hotkeys.log"
@@ -119,16 +119,9 @@ def _shortcut_value(item: dict, system: str, fallback: str) -> str:
 
 
 def load_config(path: Path | None = None) -> dict:
-    try:
-        from src.env_types import load_dotenv
-
-        load_dotenv(CONFIG_DIR / ".env")
-    except ImportError:
-        pass
-
     source = path
     if source is None:
-        source = CONFIG_FILE if CONFIG_FILE.exists() else EXAMPLE_FILE
+        source = EXAMPLE_FILE
 
     raw = {}
     if source is not None and source.exists():
@@ -136,6 +129,9 @@ def load_config(path: Path | None = None) -> dict:
         if not isinstance(loaded, dict):
             raise ValueError(f"{source} precisa ser um mapa YAML.")
         raw = loaded
+    if path is None:
+        text=document("main/shortcuts.yaml")
+        if text is not None:raw=yaml.safe_load(text) or {}
 
     shortcuts_raw = raw.get("shortcuts") or {}
     if not isinstance(shortcuts_raw, dict):
@@ -151,9 +147,9 @@ def load_config(path: Path | None = None) -> dict:
             "linux": _shortcut_value(item, "linux", fallback["linux"]),
         }
 
-    server = str(raw.get("server") or os.getenv("PUBLIC_BASE_URL") or "http://127.0.0.1:8762")
-    voice = str(raw.get("voice") or os.getenv("TTS_DEFAULT_VOICE") or "pm_santa")
-    speed = float(raw.get("speed") if raw.get("speed") is not None else os.getenv("TTS_DEFAULT_SPEED") or 0.95)
+    server = str(raw.get("server") or setting("PUBLIC_BASE_URL") or "http://127.0.0.1:8762")
+    voice = str(raw.get("voice") or setting("TTS_DEFAULT_VOICE") or "pm_santa")
+    speed = float(raw.get("speed") if raw.get("speed") is not None else setting("TTS_DEFAULT_SPEED") or 0.95)
     return {
         "server": normalize_server(server),
         "voice": voice,

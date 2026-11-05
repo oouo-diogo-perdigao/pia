@@ -1,3 +1,4 @@
+from src.settings_store import get_store,save_document,document
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,7 +12,7 @@ class PendingPreviewTests(unittest.TestCase):
     def test_paginated_read_only_queue_ignores_processed_and_non_zip(self):
         with TemporaryDirectory() as directory:
             root=Path(directory);(root/'config').mkdir()
-            (root/'config/config.json').write_text(json.dumps({'integrations':{'google_account':'work','google_folder':'folder'}}))
+            save_document('Apps/podcast_automation/campaigns',{'integrations':{'google_account':'work','google_folder':'folder'}})
             with patch.object(web_api,'ROOT',root),patch('Plugins.Connectors.google.drive.Drive') as constructor:
                 drive=constructor.return_value
                 drive.accounts.return_value=[{'id':'work'}];drive.account.return_value='work'
@@ -27,8 +28,9 @@ class PendingPreviewTests(unittest.TestCase):
     def test_local_queue_and_empty_folder_need_no_external_connection(self):
         with TemporaryDirectory() as directory:
             root=Path(directory);(root/'config').mkdir();(root/'config/config.json').write_text('{}')
-            (root/'.env').write_text('DRIVE_PROCESS=false\nLOCAL_DRIVE_FOLDER=recordings\n')
-            folder=root/'recordings';folder.mkdir()
+            (root/'recordings').mkdir()
+            save_document('Apps/podcast_automation/campaigns',{});get_store().save('Apps/podcast_automation',{'DRIVE_PROCESS':'false','LOCAL_DRIVE_FOLDER':str(root/'recordings')})
+            folder=root/'recordings'
             for name in ('new.zip','old-ok.zip','ignored.txt'):(folder/name).touch()
             with patch.object(web_api,'ROOT',root):
                 result=web_api.handle('pending-preview',{},None)

@@ -86,7 +86,7 @@ KWS_ENCODER = MODEL_DIR / "encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx"
 KWS_DECODER = MODEL_DIR / "decoder-epoch-12-avg-2-chunk-16-left-64.onnx"
 KWS_JOINER = MODEL_DIR / "joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx"
 from .config_paths import CONFIG_DIR
-KWS_KEYWORDS = CONFIG_DIR / "keywords.txt"
+KWS_KEYWORDS = Path(__file__).resolve().parents[1] / 'cache/main/wakeword/keywords.txt'
 KWS_REQUIRED_FILES = (
     KWS_TOKENS,
     KWS_ENCODER,
@@ -205,13 +205,10 @@ def _ensure_keyword_model() -> None:
     # else:
     #     logging.info("[KWS] Modelo Sherpa-ONNX já está instalado.")
 
-    if not KWS_KEYWORDS.is_file():
-        logging.info("[KWS] Criando arquivo de palavras-chave.")
-
-        KWS_KEYWORDS.write_text(
-            "hey mycroft\n",
-            encoding="utf-8",
-        )
+    from .settings_store import document
+    text=document('main/keywords.txt',(CONFIG_DIR/'keywords.example.txt').read_text(encoding='utf-8'))
+    KWS_KEYWORDS.parent.mkdir(parents=True,exist_ok=True)
+    KWS_KEYWORDS.write_text(text,encoding='utf-8')
 
     missing_files = [path for path in KWS_REQUIRED_FILES if not path.is_file()]
 

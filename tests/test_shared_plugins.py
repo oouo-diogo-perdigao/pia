@@ -1,3 +1,4 @@
+from src.settings_store import get_store,save_document,document
 """Shared integrations: isolated account storage, migration, paging and app access."""
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -31,7 +32,7 @@ class SharedPluginTests(unittest.TestCase):
     def test_multiple_accounts_secrets_only_in_vault_and_blank_preserves(self):
         first=self.account();second=self.account('Work')
         self.assertEqual(len(self.storage.accounts()),2)
-        self.assertNotIn('secret-',(self.root/'config.json').read_text())
+        self.assertNotIn('secret-',json.dumps(document('Connectors/object_storage')))
         self.assertNotIn('secret_key',json.dumps(self.storage.accounts()))
         self.storage.save_account(dict(self.storage.account(first),secret_key='',access_key=''))
         self.storage.client(first)
@@ -81,6 +82,7 @@ class SharedPluginTests(unittest.TestCase):
         self.assertEqual(resources.session.request.call_args.args[0],'PATCH')
     def test_discord_uses_bot_token_not_application_url(self):
         (self.root/'.env').write_text('DISCORD_BOT_TOKEN=fixture\nDISCORD_BOT_URL=https://discord.com/oauth2/authorize\nDISCORD_CHANNEL_ID=123\n')
+        get_store().save('Connectors/discord',{'DISCORD_BOT_TOKEN':'fixture','DISCORD_BOT_URL':'https://discord.com/oauth2/authorize','DISCORD_CHANNEL_ID':'123'})
         session=Mock();session.post.return_value.status_code=200;session.post.return_value.json.return_value={'id':'message'}
         bot=Discord(self.root,session);self.assertNotIn('TOKEN',json.dumps(bot.public()))
         self.assertEqual(bot.send('Episode published')['id'],'message')

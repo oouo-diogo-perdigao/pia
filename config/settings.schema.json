@@ -1,0 +1,660 @@
+[
+  {
+    "name": "HOST",
+    "type": "string",
+    "default": "0.0.0.0",
+    "label": "Host",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "PORT",
+    "type": "int",
+    "default": "8762",
+    "label": "Port",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "OPENAI_COMPAT_API_KEY",
+    "type": "secret",
+    "default": "",
+    "label": "Openai Compat Api Key",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "OPENAI_COMPAT_TIMEOUT_SECONDS",
+    "type": "int",
+    "default": "180",
+    "label": "Openai Compat Timeout Seconds",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "OPENAI_COMPAT_MAX_UPLOAD_BYTES",
+    "type": "int",
+    "default": "209715200",
+    "label": "Openai Compat Max Upload Bytes",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "START_SOUND",
+    "type": "string",
+    "default": "src/sounds/start.mp3",
+    "label": "Start Sound",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "END_SOUND",
+    "type": "string",
+    "default": "src/sounds/end.mp3",
+    "label": "End Sound",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "PUBLIC_BASE_URL",
+    "type": "string",
+    "default": "http://127.0.0.1:8762",
+    "label": "Public Base Url",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_MODEL",
+    "type": "string",
+    "default": "large-v3-turbo",
+    "label": "Stt Model",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_LANG",
+    "type": "string",
+    "default": "pt",
+    "label": "Stt Lang",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_DEVICE",
+    "type": "string",
+    "default": "cpu",
+    "label": "Stt Device",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_COMPUTE_TYPE",
+    "type": "string",
+    "default": "int8",
+    "label": "Stt Compute Type",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_CPU_THREADS",
+    "type": "int",
+    "default": "8",
+    "label": "Stt Cpu Threads",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_BEAM_SIZE",
+    "type": "int",
+    "default": "5",
+    "label": "Stt Beam Size",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_BEST_OF",
+    "type": "int",
+    "default": "5",
+    "label": "Stt Best Of",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_TEMPERATURE",
+    "type": "float",
+    "default": "0.0",
+    "label": "Stt Temperature",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_PROMPT",
+    "type": "string",
+    "default": "",
+    "label": "Stt Prompt",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_SAMPLE_RATE",
+    "type": "int",
+    "default": "16000",
+    "label": "Stt Sample Rate",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_CHANNELS",
+    "type": "int",
+    "default": "1",
+    "label": "Stt Channels",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_WHISPER_TIMEOUT",
+    "type": "int",
+    "default": "600",
+    "label": "Stt Whisper Timeout",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_PROVIDERS",
+    "type": "string",
+    "default": "gemini,groq,local",
+    "label": "Stt Providers",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_REMOTE_COOLDOWN_SECONDS",
+    "type": "int",
+    "default": "900",
+    "label": "Stt Remote Cooldown Seconds",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_GEMINI_API_KEY",
+    "type": "secret",
+    "default": "",
+    "label": "Stt Gemini Api Key",
+    "link": "https://aistudio.google.com/apikey"
+  },
+  {
+    "name": "STT_GEMINI_MODEL",
+    "type": "string",
+    "default": "gemini-3.5-transcribe-live",
+    "label": "Stt Gemini Model",
+    "link": "https://aistudio.google.com/apikey"
+  },
+  {
+    "name": "STT_GROQ_MODEL",
+    "type": "string",
+    "default": "groq/whisper-large-v3-turbo",
+    "label": "Stt Groq Model",
+    "link": "https://console.groq.com/keys"
+  },
+  {
+    "name": "TTS_DEFAULT_VOICE",
+    "type": "string",
+    "default": "pm_santa",
+    "label": "Tts Default Voice",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "TTS_DEFAULT_SPEED",
+    "type": "string",
+    "default": "0.95",
+    "label": "Tts Default Speed",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "TTS_KOKORO_IDLE_TIMEOUT",
+    "type": "string",
+    "default": "600",
+    "label": "Tts Kokoro Idle Timeout",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "TTS_QWEN_IDLE_TIMEOUT",
+    "type": "string",
+    "default": "600",
+    "label": "Tts Qwen Idle Timeout",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "TTS_DEVICE",
+    "type": "string",
+    "default": "cuda",
+    "label": "Tts Device",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "TTS_KOKORO_MODEL",
+    "type": "path",
+    "default": "",
+    "label": "Tts Kokoro Model",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "TTS_LLM_MODEL",
+    "type": "string",
+    "default": "free",
+    "label": "Tts Llm Model",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_COMFYUI_URL",
+    "type": "string",
+    "default": "http://127.0.0.1:8188",
+    "label": "Ice Comfyui Url",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_COMFYUI_TIMEOUT_SECONDS",
+    "type": "int",
+    "default": "300",
+    "label": "Ice Comfyui Timeout Seconds",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_COMFYUI_POLL_INTERVAL_SECONDS",
+    "type": "float",
+    "default": "0.35",
+    "label": "Ice Comfyui Poll Interval Seconds",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_COMFYUI_SERIALIZE_JOBS",
+    "type": "bool",
+    "default": "true",
+    "label": "Ice Comfyui Serialize Jobs",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_COMFYUI_AUTO_FREE",
+    "type": "bool",
+    "default": "true",
+    "label": "Ice Comfyui Auto Free",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_COMFYUI_UNLOAD_MODELS",
+    "type": "bool",
+    "default": "true",
+    "label": "Ice Comfyui Unload Models",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_COMFYUI_FREE_MEMORY",
+    "type": "bool",
+    "default": "true",
+    "label": "Ice Comfyui Free Memory",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_COMFYUI_SAFE_FREE",
+    "type": "bool",
+    "default": "true",
+    "label": "Ice Comfyui Safe Free",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_COMFYUI_MODEL_LAYOUT",
+    "type": "string",
+    "default": "checkpoint",
+    "label": "Ice Comfyui Model Layout",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_COMFYUI_CHECKPOINT",
+    "type": "string",
+    "default": "sd_xl_base_1.0.safetensors",
+    "label": "Ice Comfyui Checkpoint",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_COMFYUI_UNET",
+    "type": "string",
+    "default": "flux1-schnell.safetensors",
+    "label": "Ice Comfyui Unet",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_COMFYUI_CLIP_L",
+    "type": "string",
+    "default": "clip_l.safetensors",
+    "label": "Ice Comfyui Clip L",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_COMFYUI_T5XXL",
+    "type": "string",
+    "default": "t5xxl_fp8_e4m3fn.safetensors",
+    "label": "Ice Comfyui T5Xxl",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_COMFYUI_VAE",
+    "type": "string",
+    "default": "ae.safetensors",
+    "label": "Ice Comfyui Vae",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_IMAGE_STEPS",
+    "type": "int",
+    "default": "4",
+    "label": "Ice Image Steps",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_IMAGE_CFG",
+    "type": "float",
+    "default": "1.0",
+    "label": "Ice Image Cfg",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_IMAGE_SAMPLER",
+    "type": "string",
+    "default": "euler",
+    "label": "Ice Image Sampler",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_IMAGE_SCHEDULER",
+    "type": "string",
+    "default": "simple",
+    "label": "Ice Image Scheduler",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_IMAGE_FLUX_GUIDANCE",
+    "type": "float",
+    "default": "3.5",
+    "label": "Ice Image Flux Guidance",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_IMAGE_EDIT_DENOISE",
+    "type": "float",
+    "default": "0.65",
+    "label": "Ice Image Edit Denoise",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_IMAGE_EDIT_MASK_DENOISE",
+    "type": "float",
+    "default": "1.0",
+    "label": "Ice Image Edit Mask Denoise",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_IMAGE_EDIT_GROW_MASK_BY",
+    "type": "int",
+    "default": "6",
+    "label": "Ice Image Edit Grow Mask By",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_IMAGE_VARIATION_DENOISE",
+    "type": "float",
+    "default": "0.75",
+    "label": "Ice Image Variation Denoise",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_IMAGE_VARIATION_PROMPT",
+    "type": "string",
+    "default": "Create a visually coherent variation of the input image while preserving its main subject and composition.",
+    "label": "Ice Image Variation Prompt",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_IMAGE_DEFAULT_SIZE",
+    "type": "string",
+    "default": "1024x1024",
+    "label": "Ice Image Default Size",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_IMAGE_MAX_N",
+    "type": "int",
+    "default": "1",
+    "label": "Ice Image Max N",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "ICE_OUTPUT_CACHE_TTL_SECONDS",
+    "type": "int",
+    "default": "900",
+    "label": "Ice Output Cache Ttl Seconds",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "AGE_USER_NAME",
+    "type": "string",
+    "default": "Mestre",
+    "label": "Age User Name",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "AGE_GEMINI_API_KEY",
+    "type": "secret",
+    "default": "",
+    "label": "Age Gemini Api Key",
+    "link": "https://aistudio.google.com/apikey"
+  },
+  {
+    "name": "GROQ_API_KEY",
+    "type": "secret",
+    "default": "",
+    "label": "Groq Api Key",
+    "link": "https://console.groq.com/keys"
+  },
+  {
+    "name": "CLOUDFLARE_LIMIT",
+    "type": "string",
+    "default": "9000",
+    "label": "Cloudflare Limit",
+    "link": "https://dash.cloudflare.com/"
+  },
+  {
+    "name": "CLOUDFLARE_ACCOUNT_ID",
+    "type": "string",
+    "default": "YOUR_CLOUDFLARE_ACCOUNT_ID_HERE",
+    "label": "Cloudflare Account Id",
+    "link": "https://dash.cloudflare.com/"
+  },
+  {
+    "name": "CLOUDFLARE_API_TOKEN",
+    "type": "secret",
+    "default": "",
+    "label": "Cloudflare Api Token",
+    "link": "https://dash.cloudflare.com/"
+  },
+  {
+    "name": "OPENROUTER_API_KEY",
+    "type": "secret",
+    "default": "",
+    "label": "Openrouter Api Key",
+    "link": "https://openrouter.ai/settings/keys"
+  },
+  {
+    "name": "LLM_MODEL",
+    "type": "string",
+    "default": "free",
+    "label": "Llm Model",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "LLM_PROVIDERS",
+    "type": "string",
+    "default": "gemini,groq,local",
+    "label": "Llm Providers",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "LLM_REMOTE_COOLDOWN_SECONDS",
+    "type": "int",
+    "default": "300",
+    "label": "Llm Remote Cooldown Seconds",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "LLM_GEMINI_FREE_MODELS",
+    "type": "string",
+    "default": "gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash,gemini-3-flash-preview,gemini-2.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-2.5-flash-lite",
+    "label": "Llm Gemini Free Models",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "LLM_GEMINI_PAID_MODELS",
+    "type": "string",
+    "default": "",
+    "label": "Llm Gemini Paid Models",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "LLM_GROQ_MODEL",
+    "type": "string",
+    "default": "groq/openai/gpt-oss-120b",
+    "label": "Llm Groq Model",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "LLM_LOCAL_MODEL",
+    "type": "string",
+    "default": "ollama/qwen3:8b",
+    "label": "Llm Local Model",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "LLM_LOCAL_API_BASE",
+    "type": "string",
+    "default": "http://localhost:11434",
+    "label": "Llm Local Api Base",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "OVE_RATE",
+    "type": "string",
+    "default": "16000",
+    "label": "Ove Rate",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "OVE_CHANNELS",
+    "type": "string",
+    "default": "1",
+    "label": "Ove Channels",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "OVE_CHUNK",
+    "type": "string",
+    "default": "1280",
+    "label": "Ove Chunk",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "OVE_THRESHOLD",
+    "type": "string",
+    "default": "0.5",
+    "label": "Ove Threshold",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "LLM_GROQ_PAID_MODELS",
+    "type": "string",
+    "default": "",
+    "label": "Llm Groq Paid Models",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "LLM_OPENROUTER_FREE_MODELS",
+    "type": "string",
+    "default": "",
+    "label": "Llm Openrouter Free Models",
+    "link": "https://openrouter.ai/settings/keys"
+  },
+  {
+    "name": "LLM_OPENROUTER_PAID_MODELS",
+    "type": "string",
+    "default": "",
+    "label": "Llm Openrouter Paid Models",
+    "link": "https://openrouter.ai/settings/keys"
+  },
+  {
+    "name": "LLM_CLOUDFLARE_FREE_MODELS",
+    "type": "string",
+    "default": "",
+    "label": "Llm Cloudflare Free Models",
+    "link": "https://dash.cloudflare.com/"
+  },
+  {
+    "name": "LLM_CLOUDFLARE_PAID_MODELS",
+    "type": "string",
+    "default": "",
+    "label": "Llm Cloudflare Paid Models",
+    "link": "https://dash.cloudflare.com/"
+  },
+  {
+    "name": "CLOUDFLARE_API_KEY",
+    "type": "secret",
+    "default": "",
+    "label": "Cloudflare Api Key",
+    "link": "https://dash.cloudflare.com/"
+  },
+  {
+    "name": "LLM_CLOUDFLARE_API_BASE",
+    "type": "string",
+    "default": "",
+    "label": "Llm Cloudflare Api Base",
+    "link": "https://dash.cloudflare.com/"
+  },
+  {
+    "name": "LLM_MODEL_CATALOG",
+    "type": "string",
+    "default": "[]",
+    "label": "Llm Model Catalog",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_GROQ_MAX_UPLOAD_BYTES",
+    "type": "int",
+    "default": "25000000",
+    "label": "Stt Groq Max Upload Bytes",
+    "link": "https://console.groq.com/keys"
+  },
+  {
+    "name": "STT_RECOVERY_ENABLED",
+    "type": "bool",
+    "default": "true",
+    "label": "Stt Recovery Enabled",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_RECOVERY_REPETITIONS",
+    "type": "int",
+    "default": "6",
+    "label": "Stt Recovery Repetitions",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_RECOVERY_MAX_PHRASE_WORDS",
+    "type": "int",
+    "default": "8",
+    "label": "Stt Recovery Max Phrase Words",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_RECOVERY_MAX_RETRIES",
+    "type": "int",
+    "default": "3",
+    "label": "Stt Recovery Max Retries",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_RECOVERY_MAX_REPAIRS",
+    "type": "int",
+    "default": "12",
+    "label": "Stt Recovery Max Repairs",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_RECOVERY_WINDOW_SECONDS",
+    "type": "float",
+    "default": "60",
+    "label": "Stt Recovery Window Seconds",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "STT_FILE_TIMEOUT_SECONDS",
+    "type": "int",
+    "default": "86400",
+    "label": "Stt File Timeout Seconds",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  }
+]

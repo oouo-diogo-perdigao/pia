@@ -29,6 +29,7 @@ uv.lock
 
 /config/legacy/
 /config/*.json
+!/config/settings.schema.json
 /data/
 /Plugins/Connectors/*/config.json
 /Plugins/Connectors/*/accounts.json

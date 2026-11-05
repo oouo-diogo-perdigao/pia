@@ -37,10 +37,70 @@ def handle(action,data,context):
         if metadata.get('bucket'):return {'buckets':[metadata['bucket']]}
         return {'buckets':[b['Name'] for b in store.client(account).list_buckets()['Buckets']]}
     if action=='list':return store.list(account,bucket,data.get('prefix',''),data.get('cursor'),data.get('limit',100))
+    if action=='public-link':return {'url':store.public_url(data['key'],account)}
+    if action in ('open-local','drag-local'):
+        return context.native('app',{'id':'object_storage','action':action,'payload':{'token':data['token']}})
+    if action=='prepare-local':
+        if context.native_handler is None:raise ValueError('Abrir e arrastar arquivos locais requer a PIA desktop. No navegador use Baixar.')
+        from Plugins.Apps.object_storage import local_files
+        import re
+        key=store.key(data['key']);client=store.client(account);bucket=store.bucket(account,bucket)
+        def download(job):
+            if job.cancelled.is_set():raise InterruptedError('Download cancelado.')
+            size=client.head_object(Bucket=bucket,Key=key)['ContentLength']
+            if size>2*1024**3:raise ValueError('A abertura local aceita arquivos de até 2 GiB. Use Baixar para arquivos maiores.')
+            name=re.sub(r'[<>:"/\\|?*\x00-\x1f]','_',key.rsplit('/',1)[-1]).strip(' .')[:160] or 'arquivo'
+            # Prefix avoids Windows reserved names without changing the extension.
+            folder=local_files.ROOT/secrets.token_hex(16);folder.mkdir(parents=True)
+            file=folder/('pia_'+name);done=0;last=0;progress_lock=threading.Lock()
+            def progress(count):
+                nonlocal done,last
+                if job.cancelled.is_set():raise InterruptedError('Download cancelado.')
+                with progress_lock:
+                    done+=count
+                    if time.monotonic()-last>.2:
+                        job.emit('progress',percent=min(100,done*100/max(1,size)));last=time.monotonic()
+            try:
+                client.download_file(bucket,key,str(file),Callback=progress)
+                if job.cancelled.is_set():raise InterruptedError('Download cancelado.')
+                return {'token':local_files.register(file),'name':name}
+            except Exception:
+                file.unlink(missing_ok=True)
+                raise
+        return task(context,download)
     if action=='mkdir':store.put(store.key(data['key']).rstrip('/')+'/',b'',account,bucket);return {'ok':True}
     if action=='delete':
         keys=data['keys']
         return task(context,lambda job:store.delete(keys,account,bucket))
+    if action=='move-many':
+        keys=data['keys'];target=data['target']
+        if not isinstance(keys,list) or not keys or any(not isinstance(key,str) for key in keys):raise ValueError('Selecione os objetos a mover.')
+        if not isinstance(target,str) or (target and not target.endswith('/')):raise ValueError('Pasta de destino inválida.')
+        keys=list(dict.fromkeys(keys))
+        keys=[key for key in keys if not any(other!=key and other.endswith('/') and key.startswith(other) for other in keys)]
+        for key in keys:
+            store.key(key)
+            destination=target+key.rstrip('/').rsplit('/',1)[-1]+('/' if key.endswith('/') else '')
+            if destination==key or (key.endswith('/') and target.startswith(key)):raise ValueError('Escolha uma pasta fora da origem.')
+        def move(job):
+            client=store.client(account);bucket_name=store.bucket(account,bucket);plan=[]
+            for key in keys:
+                destination=target+key.rstrip('/').rsplit('/',1)[-1]+('/' if key.endswith('/') else '')
+                sources=[item['Key'] for item in store.objects(account,bucket,key)] if key.endswith('/') else [key]
+                for source in sources:
+                    dest=destination+source[len(key):] if key.endswith('/') else destination
+                    try:client.head_object(Bucket=bucket_name,Key=dest)
+                    except client.exceptions.ClientError as exc:
+                        if exc.response.get('ResponseMetadata',{}).get('HTTPStatusCode')!=404:raise
+                    else:raise ValueError('Já existe um objeto no destino: '+dest)
+                    if any(existing==dest for _,existing in plan):raise ValueError('Dois objetos selecionados têm o mesmo destino: '+dest)
+                    plan.append((source,dest))
+            for index,(source,dest) in enumerate(plan):
+                if job.cancelled.is_set():raise InterruptedError('Movimentação cancelada; objetos concluídos foram preservados.')
+                store.copy(source,dest,account,bucket,move=True)
+                job.emit('progress',percent=(index+1)*100/max(1,len(plan)))
+            return {'count':len(plan)}
+        return task(context,move)
     if action in ('copy','move'):
         key=store.key(data['key']);target=store.key(data['target'])
         def transfer(job):

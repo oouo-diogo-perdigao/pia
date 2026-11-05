@@ -46,3 +46,5 @@ Veja `Plugins/Apps/music/README.md`. `POST /v1/music/generations` aceita JSON co
 ## Validação
 
 Os testes automatizados substituem câmera, CLIs e provedores por adaptadores simulados. Captura real, interrupção com alto-falantes, download de modelos e geração paga exigem validação no ambiente configurado.
+
+Configuração e dados usam o [perfil SQLite/cofre](docs/PROFILE_MIGRATION.md).

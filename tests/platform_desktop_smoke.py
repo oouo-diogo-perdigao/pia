@@ -13,6 +13,15 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QImage,QCloseEvent
 from PyQt6.QtCore import QTimer,QRect
 from PyQt6.QtTest import QTest
+from src import settings_store,user_paths
+_fixture_profile=tempfile.TemporaryDirectory(prefix='pia-native-test-')
+user_paths.USER_DIR=Path(_fixture_profile.name)
+class _FixtureVault:
+    def __init__(self):self.items={}
+    def get(self,name):return self.items.get(name)
+    def set(self,name,value):self.items[name]=value
+    def delete(self,name):self.items.pop(name,None)
+settings_store._store=settings_store.SettingsStore(user_paths.USER_DIR/'workspace.sqlite3',_FixtureVault())
 from src.desktop_ui import WebShell,DesktopUI
 from Plugins.Apps.screenshots.native import NativeApp,png_data
 

@@ -52,6 +52,11 @@ BODIES = {
     '/chat/delete': {'chat': '{{chat_id}}'}, '/chat/delete-many': {'chats': ['{{chat_id}}']},
     '/chat/read': {'chat': '{{chat_id}}', 'through': 1},
     '/folder/save': {'name': 'Minha pasta'}, '/folder/delete': {'id': '{{folder_id}}'},
+    '/settings/export': {'password': '{{backup_password}}'},
+    '/settings/import-preview': {'data': '{{backup_base64}}', 'password': '{{backup_password}}'},
+    '/settings/import': {'data': '{{backup_base64}}', 'password': '{{backup_password}}'},
+    '/settings/credential': {'name': '{{credential_name}}'},
+    '/settings/documents': {'name': 'keywords.txt', 'value': 'pia'},
     '/settings/save': {'section': 'general', 'values': {}},
     '/settings/upload': {'section': '{{section}}', 'name': '{{file_variable}}', 'filename': 'example.json', 'data': '{{file_base64}}'},
     '/preferences': {'language': 'pt-BR'}, '/apps/order': {'order': ['music', 'object_storage', 'podcast_automation', 'screenshots']},
@@ -144,10 +149,10 @@ def build():
             rpc['id'] = 1
         add('06 · MCP e AG-UI', 'POST', '/protocols/mcp', rpc, suffix=name)
     add('06 · MCP e AG-UI', 'POST', '/protocols/ag-ui', description='SSE RunAgentInput. Perfil PIA; resposta text/event-stream. Não há ACP nem A2A.')
-    readable = {'/state', '/chat/messages', '/settings', '/accounts', '/bots', '/bots/secretaria', '/logs', '/preferences', '/notifications', '/notifications/counts'}
+    readable = {'/state', '/chat/messages', '/settings', '/accounts', '/bots', '/bots/secretaria', '/logs', '/preferences', '/notifications', '/notifications/counts', '/settings/documents', '/settings/credentials', '/settings/storage'}
     for fn in functions('src/pia/service.py', {'_dispatch'}):
         for path in sorted(compared(fn, 'path')):
-            methods = ['GET', 'POST'] if path in ('/preferences', '/bots/secretaria') else ['GET' if path in readable else 'POST']
+            methods = ['GET', 'POST'] if path in ('/preferences', '/bots/secretaria', '/settings/documents') else ['GET' if path in readable else 'POST']
             for method in methods:
                 body = BODIES.get(path, {})
                 if path == '/bots/secretaria':

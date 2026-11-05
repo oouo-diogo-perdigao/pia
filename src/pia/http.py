@@ -1,3 +1,4 @@
+from src.user_paths import user_path
 """Same-origin, loopback-only workspace routes, independent of /v1 Bearer APIs."""
 import json
 import mimetypes
@@ -112,13 +113,13 @@ def route(handler):
                 name=path.rsplit('/',1)[-1]
                 if not re.fullmatch(r'[a-f0-9]{32}\.(png|jpg|webp)',name):raise ValueError('Imagem não encontrada.')
                 from src.config_paths import BASE_DIR
-                file=BASE_DIR/'data/chat-images'/name
+                file=user_path('chat')/name
                 if not file.is_file():
                     respond(handler,404,{'error':'Imagem não encontrada.'})
                 else:respond(handler,200,file.read_bytes(),mimetypes.guess_type(file.name)[0])
                 return True
             if handler.command == 'GET' and not path.startswith('/api/pia/events/') and path.removeprefix('/api/pia') not in {
-                '/state', '/chat/messages', '/settings', '/accounts', '/bots', '/bots/secretaria', '/logs', '/preferences', '/notifications', '/notifications/counts'}:
+                '/state', '/chat/messages', '/settings', '/accounts', '/bots', '/bots/secretaria', '/logs', '/preferences', '/notifications', '/notifications/counts','/settings/documents','/settings/credentials','/settings/storage'}:
                 respond(handler, 405, {'error': 'Use POST para esta operação.'})
                 return True
             if path.startswith('/api/pia/events/'):

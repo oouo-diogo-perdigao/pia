@@ -1,4 +1,5 @@
 from __future__ import annotations
+from src.settings_store import get as setting
 
 import asyncio
 import io
@@ -182,7 +183,7 @@ class STTManager(LocalSTTManager):
             if not self._provider_available(provider):
                 continue
 
-            if provider == 'groq' and len(audio_bytes) > int(os.getenv('STT_GROQ_MAX_UPLOAD_BYTES', '25000000')):
+            if provider == 'groq' and len(audio_bytes) > int(setting('STT_GROQ_MAX_UPLOAD_BYTES', '25000000')):
                 reason = f'groq: arquivo de {len(audio_bytes)} bytes excede o limite local de upload; pulando sem enviar'
                 errors.append(reason)
                 logging.info('[STT] %s', reason)
@@ -407,7 +408,7 @@ class STTManager(LocalSTTManager):
         return_metadata: bool = False,
         temperature: float | None = None,
     ) -> str | dict:
-        if len(audio_bytes) > int(os.getenv('STT_GROQ_MAX_UPLOAD_BYTES', '25000000')):
+        if len(audio_bytes) > int(setting('STT_GROQ_MAX_UPLOAD_BYTES', '25000000')):
             raise RemoteSTTUnavailable('Arquivo excede o limite de 25 MB para upload ao Groq.')
         if not GROQ_API_KEY:
             raise RemoteSTTUnavailable("GROQ_API_KEY não configurada.")

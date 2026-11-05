@@ -84,7 +84,7 @@ def test_music_stops_only_owned_process_and_uses_destination(tmp_path,monkeypatc
     monkeypatch.setattr(music,'_engine',process)
     music.stop_engine();process.terminate.assert_called_once();process.wait.assert_called_once()
     assert music._engine is None
-    monkeypatch.setattr(music,'settings',lambda:{'MUSIC_OUTPUT_DIR':str(tmp_path)})
+    monkeypatch.setattr(music,'OUTPUT',tmp_path)
     assert music.output_directory()==tmp_path
 
 

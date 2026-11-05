@@ -9,9 +9,9 @@ PIA → Codex CLI (conector de agentes externos) e Codex → PIA (MCP) são inte
 | Nome sugerido | `pia` |
 | Transporte | Streamable HTTP, stateless |
 | URL padrão | `http://127.0.0.1:8762/protocols/mcp` |
-| Porta | `PORT__INT` em `config/.env`; padrão 8762 |
+| Porta | `PORT` em Configurações → Geral; padrão 8762 |
 | Autenticação | Bearer fixo quando a chave da PIA está preenchida; sem autenticação quando está vazia |
-| Chave da PIA | `OPENAI_COMPAT_API_KEY__SECRET` em `config/.env` (nome legado sem sufixo também é lido) |
+| Chave da PIA | `OPENAI_COMPAT_API_KEY` em Configurações → Geral, armazenada no cofre |
 | Header, se houver chave | `Authorization: Bearer <chave-da-PIA>` |
 | OAuth/client ID/client secret/callback | Não utilizados por este servidor MCP |
 | Processo servidor | PIA já em execução; cadastrar a URL no Codex não inicia a PIA |
@@ -20,7 +20,7 @@ O valor `local` usado nos exemplos é uma chave de exemplo, não uma senha obrig
 
 ## 1. Inicie a PIA
 
-Na instalação existente, execute `bash start.sh` no Linux ou Git Bash do Windows. Mantenha a PIA rodando na bandeja. Confirme a porta e a chave em Configurações → Geral; salvar variáveis solicita o reinício pelo fluxo do aplicativo.
+Na instalação existente, execute `bash start.sh` no Linux ou Git Bash do Windows. Mantenha a PIA rodando na bandeja. Confirme a porta e a chave em Configurações → Geral; salvar configurações solicita o reinício pelo fluxo do aplicativo.
 
 PIA e Codex precisam alcançar o mesmo endereço. Os exemplos pressupõem ambos no mesmo sistema. WSL, execução remota e tarefas cloud têm seus próprios ambientes de rede; `127.0.0.1` neles pode não apontar para a PIA do Windows. Não altere o endereço para uma máquina externa sem configurar acesso e autenticação apropriados.
 
@@ -143,3 +143,5 @@ O servidor oferece initialize, ping, tools/list e tools/call, além de aceitar n
 - [Conector de agentes externos, sentido PIA → CLI](../Plugins/Connectors/agents/README.md)
 
 O comando de cadastro e suas flags foram conferidos no `codex mcp add --help` instalado. A rota local foi consultada com tools/list e retornou HTTP 200 e seis ferramentas; nenhuma ferramenta com efeito foi executada. Este guia não altera automaticamente a configuração do Codex e não equivale a testar a conexão final dentro de uma sessão dele.
+
+Configuração e dados usam o [perfil SQLite/cofre](PROFILE_MIGRATION.md).

@@ -1,3 +1,5 @@
+from .settings import option
+from src.user_paths import user_path
 from .ui_events import emit, stage
 import os
 import shutil
@@ -197,7 +199,8 @@ def finalizar_publicacao(item, drive, obj_storage, rss_updater, sessoes_processa
     print("Sessão publicada com sucesso!")
     links={**item.get('publication_links',{}),'RSS':obj_storage.public_url(item['rss_key']),
            'Transcrições gerais':obj_storage.public_url(folder_rss+'/transcripts.html')}
-    announce_publication(item["nome_sessao"], item["campanha"],links)
+    announce_publication(item["nome_sessao"], item["campanha"],links,
+                         season=item.get('season'),number=item.get('episode'),players=item.get('jogadores',()))
 
 
 def processar_sessao(
@@ -291,6 +294,8 @@ def processar_sessao(
     item["narrador"] = audio.narrador
     item["personagens"] = audio.personagens
     item["jogadores"] = audio.jogadores
+    item['season']=audio.session
+    item['episode']=audio.episode
     item["ouvintes"] = audio.ouvintes
     item["rss_key"] = audio.rss
 
@@ -351,7 +356,7 @@ def main() -> None:
     else:
         drive = LocalDriveClient()
         folder_path = str(
-            project_path(os.getenv("LOCAL_DRIVE_FOLDER", "data/local-drive"))
+            project_path(option("LOCAL_DRIVE_FOLDER", "data/local-drive"))
         )
 
     drive_files = drive.list_zip_files(folder_path)
@@ -403,10 +408,10 @@ def run() -> None:
     )
     args = parser.parse_args()
     configure()
-    work = project_path(os.getenv("WORK_DIR", "data/work"))
+    work = user_path('apps/podcast_automation/work')
     work.mkdir(parents=True, exist_ok=True)
     os.chdir(work)
-    interval = int(os.getenv("POLL_INTERVAL_SECONDS", "600"))
+    interval = int(option("POLL_INTERVAL_SECONDS", "600"))
     if interval < 1:
         raise ValueError("POLL_INTERVAL_SECONDS deve ser positivo.")
     while True:

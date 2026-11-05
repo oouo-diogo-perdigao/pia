@@ -60,10 +60,12 @@ O fluxo anterior foi restaurado: cada captura abre uma janela nova com seu ident
 
 O app cria de 1 a 10 faixas por pedido, agrupadas em um card. Progresso percentual corresponde às faixas concluídas, não a uma estimativa inventada da inferência individual. Resultados parciais sobrevivem a falhas/cancelamento. Ao concluir na tela Principal, o app rola até o card.
 
-Destino padrão: pasta Música do sistema, subpasta PIA. `MUSIC_OUTPUT_DIR__PATH` permite selecionar outro diretório em Configurações → variáveis do app. A biblioteca também consulta o destino legado `data/music`. Alterar o destino não move arquivos existentes; arquivos de outros destinos personalizados precisam ser acessados no diretório original.
+Destino fixo: `Documentos/pia/music`, dentro do perfil do usuário. As configurações e credenciais são gerenciadas pela interface e armazenadas no SQLite/cofre; consulte [perfil e migração](PROFILE_MIGRATION.md).
 
 A PIA solicita o encerramento do processo ACE-Step iniciado por ela após cada geração, inclusive em erro/cancelamento. No Windows, o interpretador pode criar processos filhos que sobrevivem ao processo principal; o encerramento de toda a árvore e a liberação completa de VRAM ainda precisam de correção e validação com hardware. A próxima geração pode recarregar o motor. A PIA não encerra um servidor ACE-Step externo que já estava rodando; para ele, liberação de recursos depende de sua configuração. Não foi executado download de modelos ou geração paga para validar essas mudanças.
 
 ## Agentes externos
 
 O ícone de ajuda do painel abre um popup específico para Codex ou AGY, com seleção Windows/PowerShell ou Linux/Bash. Ele contém documentação oficial, comando de instalação, login, verificação de versão e comandos para obter o caminho que deve ser preenchido em AGENTS_CODEX_EXECUTABLE ou AGENTS_AGY_EXECUTABLE. Os comandos são exemplos para copiar, não são executados pela interface. MCP e AG-UI permanecem; ACP legado e o perfil A2A síncrono foram removidos.
+
+Configuração e dados usam o [perfil SQLite/cofre](PROFILE_MIGRATION.md).

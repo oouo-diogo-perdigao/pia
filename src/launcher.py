@@ -1,3 +1,4 @@
+from src.user_paths import user_path
 """Shared desktop launcher used by start.sh, the installer and login."""
 import argparse
 import os
@@ -5,12 +6,14 @@ import subprocess
 import sys
 import time
 
-from .config_paths import BASE_DIR, initialize_config
+from .config_paths import BASE_DIR
+from .profile_migration import initialize_profile
 from .instance import InstanceLock
 
 
 def run_desktop():
-    lock = InstanceLock(BASE_DIR / 'data' / 'pia.lock')
+    if legacy_running():return
+    lock = InstanceLock(user_path('pia.lock'))
     if not lock.acquire():
         print('A PIA já está em execução. Use o ícone na bandeja.')
         return
@@ -18,7 +21,7 @@ def run_desktop():
     try:
         if sys.platform != 'win32' and os.getenv('WAYLAND_DISPLAY') and os.getenv('DISPLAY'):
             os.environ.setdefault('QT_QPA_PLATFORM', 'xcb')
-        initialize_config()
+        initialize_profile()
         from .cache_paths import migrate
         migrate()
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
@@ -36,7 +39,8 @@ def run_desktop():
 
 
 def start_background():
-    lock = InstanceLock(BASE_DIR / 'data' / 'pia.lock')
+    if legacy_running():return
+    lock = InstanceLock(user_path('pia.lock'))
     if not lock.acquire():
         print('A PIA já está em execução. Use o ícone na bandeja.')
         return
@@ -54,6 +58,17 @@ def start_background():
     print('PIA iniciada em segundo plano. Logs: logs/launcher.log')
 
 
+def legacy_running(quiet=False):
+    legacy=BASE_DIR/'data/pia.lock'
+    if not legacy.exists():return False
+    lock=InstanceLock(legacy)
+    if not lock.acquire():
+        if not quiet:print('A versão anterior da PIA ainda está em execução. Encerre-a pela bandeja antes de iniciar a migração.')
+        return True
+    lock.close()
+    return False
+
+
 def main():
     parser = argparse.ArgumentParser(description='Iniciar PIA')
     parser.add_argument('--foreground', action='store_true', help='Executar no terminal para diagnóstico')
@@ -62,9 +77,10 @@ def main():
     options = parser.parse_args()
     if options.restart_pid:
         for _ in range(600):
-            lock=InstanceLock(BASE_DIR/'data/pia.lock')
+            lock=InstanceLock(user_path('pia.lock'))
             if lock.acquire():
-                lock.close();break
+                lock.close()
+                if not legacy_running(quiet=True):break
             time.sleep(.25)
         else:raise RuntimeError('A instância anterior não encerrou; reinício cancelado.')
         start_background()

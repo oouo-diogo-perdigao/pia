@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import json
+import base64
 import tempfile
 import threading
 from types import SimpleNamespace
@@ -13,6 +14,15 @@ from unittest.mock import Mock,patch
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtTest import QTest
+from src import settings_store,user_paths
+_fixture_profile=tempfile.TemporaryDirectory(prefix='pia-native-test-')
+user_paths.USER_DIR=Path(_fixture_profile.name)
+class _FixtureVault:
+    def __init__(self):self.items={}
+    def get(self,name):return self.items.get(name)
+    def set(self,name,value):self.items[name]=value
+    def delete(self,name):self.items.pop(name,None)
+settings_store._store=settings_store.SettingsStore(user_paths.USER_DIR/'workspace.sqlite3',_FixtureVault())
 from src.desktop_ui import WebShell
 from src.pia import http
 from src.pia.service import WorkspaceService,Apps,Job
@@ -38,7 +48,7 @@ with tempfile.TemporaryDirectory() as directory:
         answer='# Resposta\n\n**React funciona.**'
         on_delta(answer);store.append(chat,'assistant',answer);return answer
     backend=SimpleNamespace(store=store,reply=reply,speak=Mock(),resources=resources,secretary=secretary)
-    calls=[]
+    calls=[];storage_calls=[];backups=[]
     config={'nomes_reais':{},'campaign_details':{},'publication':{},'audio':{},'processing':{},'integrations':{'google_account':'work','google_folder':'old-folder'},'outputs':{}}
     class FakeApps(Apps):
         def call(self,identity,action,payload,context):
@@ -68,8 +78,16 @@ with tempfile.TemporaryDirectory() as directory:
                     return {'job':job.id}
                 return {'ok':True}
             if identity=='object_storage':
-                if action=='accounts':return {'accounts':[{'id':'work-storage','name':'Work storage'}],'default':'work-storage'}
-                if action=='buckets':return {'buckets':['podcasts','archive']}
+                storage_calls.append((action,payload.copy()))
+                if action=='accounts':return {'accounts':[{'id':'work-storage','name':'Work storage','color':'#123456'},{'id':'other-storage','name':'Other storage','color':'#654321'}],'default':'work-storage'}
+                if action=='buckets':return {'buckets':['podcasts','archive'] if payload['account']=='work-storage' else ['other-bucket']}
+                if action=='list':
+                    assert payload['bucket'] in (['podcasts','archive'] if payload['account']=='work-storage' else ['other-bucket'])
+                    return {'folders':['exams/'] if not payload['prefix'] else [],'objects':[{'key':payload['prefix']+'fixture.txt','size':3,'modified':'2026-10-31T00:00:00Z'}]}
+                if action=='public-link':return {'url':'https://example.invalid/fixture.txt'}
+                if action in ('prepare-local','move-many','upload-finish'):
+                    job=Job();context.jobs[job.id]=job;job.emit('done',result={'token':'fixture-token'});return {'job':job.id}
+                if action=='open-local':return {'ok':True}
             if identity=='screenshots':
                 if action=='image':return {'id':'fixture','data':png_data(capture_image),'title':'Fixture','comment':'','mode':'selection','config':{'format':'png','border':False}}
                 if action=='list-saved':return {'captures':[],'total':0,'folder':'fixture/captures'}
@@ -80,6 +98,8 @@ with tempfile.TemporaryDirectory() as directory:
     capture_image=QImage(32,32,QImage.Format.Format_ARGB32);capture_image.fill(QColor('#7755cc'))
     service=WorkspaceService(backend=backend,apps=FakeApps())
     def native(action,payload):
+        if action=='save-config-backup':backups.append(payload['data']);return {'ok':True}
+        if action=='restart':return {'ok':True}
         if action in ('notify','media-state'):return {'ok':True}
         if action=='dictate':
             job=Job();service.jobs[job.id]=job;job.emit('delta',text='texto ditado');job.emit('done');return {'job':job.id}
@@ -226,12 +246,12 @@ with tempfile.TemporaryDirectory() as directory:
         # Environment settings use an isolated fixture and do not expose live secrets.
         service.settings=lambda:[dict(id='general',name='PIA · Geral',fields=[dict(name=name,base=name.split('__')[0],type='int',value='1',sensitive=False,link='https://example.invalid') for name in ('COUNT__INT','STT_THREADS__INT','TTS_SPEED__INT')])]
         js(shell,"document.querySelector('.rail-bottom [aria-label=\"Configurações\"]')?.click() || document.querySelector('[aria-label=\"Configurações\"]').click()")
-        wait(lambda:js(shell,"[...document.querySelectorAll('button')].some(b=>b.textContent==='Salvar variáveis')"))
-        assert js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='Salvar variáveis').disabled")
+        wait(lambda:js(shell,"[...document.querySelectorAll('button')].some(b=>b.textContent==='Salvar configurações')"))
+        assert js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='Salvar configurações').disabled")
         js(shell,"var field=[...document.querySelectorAll('label')].find(l=>l.textContent==='COUNT__INT').control;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(field,'2');field.dispatchEvent(new Event('input',{bubbles:true}));")
-        wait(lambda:js(shell,"![...document.querySelectorAll('button')].find(b=>b.textContent==='Salvar variáveis').disabled"))
+        wait(lambda:js(shell,"![...document.querySelectorAll('button')].find(b=>b.textContent==='Salvar configurações').disabled"))
         js(shell,"var field=[...document.querySelectorAll('label')].find(l=>l.textContent==='COUNT__INT').control;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(field,'1');field.dispatchEvent(new Event('input',{bubbles:true}));")
-        wait(lambda:js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='Salvar variáveis').disabled"))
+        wait(lambda:js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='Salvar configurações').disabled"))
         assert js(shell,"(()=>{const label=document.querySelector('label[for=\"env-COUNT__INT\"]').getBoundingClientRect(),input=document.querySelector('#env-COUNT__INT').getBoundingClientRect();return Math.abs(label.top+label.height/2-input.top-input.height/2)<5;})()")
         js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='STT').click()")
         wait(lambda:js(shell,"!!document.querySelector('#env-STT_THREADS__INT') && !document.querySelector('#env-COUNT__INT')"))
@@ -264,8 +284,25 @@ with tempfile.TemporaryDirectory() as directory:
         js(shell,"var promptField=[...document.querySelectorAll('label')].find(label=>label.textContent==='Descrição musical').control;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(promptField,'Piano fixture');promptField.dispatchEvent(new Event('input',{bubbles:true}));var countField=[...document.querySelectorAll('label')].find(label=>label.textContent==='Quantidade de músicas').control;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(countField,'2');countField.dispatchEvent(new Event('input',{bubbles:true}));")
         wait(lambda:js(shell,"![...document.querySelectorAll('button')].find(button=>button.textContent==='Gerar música').disabled"))
         js(shell,"[...document.querySelectorAll('button')].find(button=>button.textContent==='Gerar música').click()")
-        wait(lambda:js(shell,"!!document.querySelector('#music-batch-fixture-batch') && document.body.textContent.includes('100.0%')"))
+        wait(lambda:js(shell,"!!document.querySelector('#music-batch-fixture-batch') && ![...document.querySelectorAll('label')].some(label=>label.textContent==='Descrição musical')"))
         assert js(shell,"document.querySelectorAll('#music-batch-fixture-batch [aria-label^=\"Tocar Versão\"]').length===2 && !document.querySelector('audio')")
+        js(shell,"document.querySelector('[aria-label=\"Reutilizar prompt\"]').click()")
+        wait(lambda:js(shell,"[...document.querySelectorAll('label')].find(label=>label.textContent==='Descrição musical')?.control.value==='Piano fixture' && !document.querySelector('#music-batch-fixture-batch')"))
+        js(shell,"document.querySelector('.app-activities [aria-label=\"Object Storage\"]').click()")
+        wait(lambda:js(shell,"document.querySelector('[aria-label=\"Caminho do bucket\"]')?.textContent.includes('podcasts')"))
+        js(shell,"[...document.querySelectorAll('button')].find(button=>button.textContent==='exams/').click()")
+        wait(lambda:js(shell,"document.body.textContent.includes('.. / Voltar')"))
+        assert not js(shell,"!!document.querySelector('[aria-label=\"Pasta anterior\"]')")
+        js(shell,"[...document.querySelectorAll('button')].find(button=>button.textContent==='fixture.txt').click()")
+        wait(lambda:js(shell,"document.body.textContent.includes('Como deseja abrir este arquivo?')"))
+        js(shell,"[...document.querySelectorAll('button')].find(button=>button.textContent==='Abrir').click()")
+        wait(lambda:any(action=='open-local' for action,payload in storage_calls))
+        assert not js(shell,"!!document.querySelector('[aria-label=\"Cancelar envio local\"]')")
+        js(shell,"[...document.querySelectorAll('label')].find(label=>label.textContent==='Conta').control.click()")
+        wait(lambda:js(shell,"!![...document.querySelectorAll('[role=option]')].find(option=>option.textContent==='Other storage')"))
+        js(shell,"[...document.querySelectorAll('[role=option]')].find(option=>option.textContent==='Other storage').click()")
+        wait(lambda:any(action=='list' and payload['account']=='other-storage' and payload['bucket']=='other-bucket' and payload['prefix']=='' for action,payload in storage_calls))
+        print('Music history/reuse, storage breadcrumbs, file actions, transfer finish and account reset: OK')
         log=root/'logs/plugins/Apps/fixture.log';log.parent.mkdir(parents=True);log.write_text(''.join(f'old {n}\n' for n in range(130)),encoding='utf-8')
         with patch('src.pia.service.BASE_DIR',root),patch('src.log_reader.BASE_DIR',root):
             js(shell,"document.querySelector('.rail-bottom [aria-label=\"Configurações\"]').click()")
@@ -286,6 +323,28 @@ with tempfile.TemporaryDirectory() as directory:
         js(editor,"window.piaCapture.fullScreen()")
         wait(lambda:('screenshots','finalize') in calls)
         editor.hide()
+        # Migration UI uses encrypted bytes, a synthetic vault and a mocked native save.
+        settings_store.get_store().save('general',{'PORT':'8763','GEMINI_API_KEY':'fixture-only-secret'})
+        for job in service.jobs.values():
+            if job.status=='running':job.emit('done')
+        js(shell,"document.querySelector('.rail-bottom [aria-label=\"Configurações\"]').click()")
+        wait(lambda:js(shell,"[...document.querySelectorAll('.sidebar button')].some(button=>button.textContent==='Exportar / importar')"))
+        js(shell,"[...document.querySelectorAll('.sidebar button')].find(button=>button.textContent==='Exportar / importar').click()")
+        wait(lambda:js(shell,"!![...document.querySelectorAll('label')].find(label=>label.textContent==='Senha do arquivo de migração')"))
+        js(shell,"for(const text of ['Senha do arquivo de migração','Confirmar senha para exportar']){const input=[...document.querySelectorAll('label')].find(label=>label.textContent===text).control;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'fixture-password-long');input.dispatchEvent(new Event('input',{bubbles:true}));}")
+        wait(lambda:js(shell,"![...document.querySelectorAll('button')].find(button=>button.textContent==='Exportar configurações e credenciais').disabled"))
+        js(shell,"[...document.querySelectorAll('button')].find(button=>button.textContent==='Exportar configurações e credenciais').click()")
+        wait(lambda:len(backups)==1)
+        assert b'fixture-only-secret' not in base64.b64decode(backups[0])
+        settings_store.get_store().save('general',{'PORT':'8764'})
+        js(shell,"{const bytes=Uint8Array.from(atob("+json.dumps(backups[0])+"),c=>c.charCodeAt(0));const transfer=new DataTransfer();transfer.items.add(new File([bytes],'fixture.pia-backup'));const input=document.querySelector('input[accept=\".pia-backup\"]');input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));}")
+        js(shell,"{const input=[...document.querySelectorAll('label')].find(label=>label.textContent==='Senha do arquivo de migração').control;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'fixture-password-long');input.dispatchEvent(new Event('input',{bubbles:true}));}")
+        wait(lambda:js(shell,"![...document.querySelectorAll('button')].find(button=>button.textContent==='Verificar importação').disabled"))
+        js(shell,"[...document.querySelectorAll('button')].find(button=>button.textContent==='Verificar importação').click()")
+        wait(lambda:js(shell,"[...document.querySelectorAll('button')].some(button=>button.textContent==='Importar e substituir configurações')"))
+        js(shell,"[...document.querySelectorAll('button')].find(button=>button.textContent==='Importar e substituir configurações').click()")
+        wait(lambda:settings_store.get_store().values('general')['PORT']=='8763')
+        print('Encrypted settings export/import UI and credential restoration: OK')
         shell.hide();shell.view.setUrl(__import__('PyQt6.QtCore',fromlist=['QUrl']).QUrl('about:blank'))
         server.shutdown();server.server_close()
         assert not [error for error in errors if 'Uncaught' in error],errors
@@ -301,6 +360,7 @@ with tempfile.TemporaryDirectory() as directory:
     prefs={'format':'png','quality':92,'output_folder':str(root/'saved'),'auto_save':True,'auto_copy':True}
     with patch('src.config_paths.BASE_DIR',root),patch('Plugins.Apps.screenshots.native.config',return_value=prefs),patch('Plugins.Apps.screenshots.native.QApplication.clipboard',return_value=Mock()) as clipboard:
         native=NativeApp(ui,None)
+        native.output_directory=lambda:root/'saved'
         image=QImage(32,32,QImage.Format.Format_ARGB32);image.fill(QColor('#7755cc'))
         identity=native.store_capture(image)
         raw=native.records[identity]['path'];assert raw.parent==root/'logs/screenshots'

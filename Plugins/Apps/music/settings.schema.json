@@ -1,0 +1,23 @@
+[
+  {
+    "name": "MUSIC_LOCAL_URL",
+    "type": "string",
+    "default": "http://127.0.0.1:8015",
+    "label": "Music Local Url",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "MUSIC_LOCAL_KEY",
+    "type": "secret",
+    "default": "",
+    "label": "Music Local Key",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "MUSIC_GEMINI_MODEL",
+    "type": "string",
+    "default": "lyria-3.5",
+    "label": "Music Gemini Model",
+    "link": "https://aistudio.google.com/apikey"
+  }
+]

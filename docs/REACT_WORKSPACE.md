@@ -24,7 +24,7 @@ Botões preenchidos representam ações. Botões de navegação usam a variante 
 
 Arraste os ícones dos apps na barra esquerda para mudar sua ordem. A ordem fica no banco local do workspace. A navegação usa `history.pushState` e `popstate`, funciona com voltar/avançar e mantém as últimas **50 telas**. As entradas guardam somente a tela e seus identificadores, nunca callbacks ou ações: voltar ao podcast não inicia processamento ou publicação. Criar chat, salvar, capturar e processar exigem a ação correspondente.
 
-Ao salvar variáveis, a PIA solicita o próprio reinício e reabre a janela. O ambiente herdado da instância antiga é limpo das variáveis gerenciadas para que o novo processo leia os valores recém-salvos. Havendo jobs em execução no workspace, o reinício aguarda sua conclusão; o aviso não bloqueia a navegação. O navegador acompanha o retorno da API. Uma sessão exclusivamente HTTP, sem a sessão gráfica nativa, informa que o reinício exige o launcher.
+Ao salvar configurações, a PIA solicita o próprio reinício e reabre a janela. O ambiente herdado da instância antiga é limpo das variáveis gerenciadas para que o novo processo leia os valores recém-salvos. Havendo jobs em execução no workspace, o reinício aguarda sua conclusão; o aviso não bloqueia a navegação. O navegador acompanha o retorno da API. Uma sessão exclusivamente HTTP, sem a sessão gráfica nativa, informa que o reinício exige o launcher.
 
 ## Podcast Automation
 
@@ -122,3 +122,5 @@ O Podcast Automation preserva o JSON completo da resposta antes de validá-lo em
 A página `transcripts.html` é um arquivo autossuficiente com visual escuro roxo/azul, busca sem distinção de acentos, índice lateral e cópia de uma ou várias sessões. Todos os textos estão em elementos HTML no corpo, inclusive quando um filtro os oculta; não há busca remota nem carregamento preguiçoso de transcrições. CSS e JavaScript ficam em `Plugins/Apps/podcast_automation/web/transcripts/` e são incorporados ao publicar. **Reconstruir feeds** aplica o novo leitor às campanhas existentes. A versão do cache foi incrementada para evitar reaproveitar a renderização anterior.
 
 Notificações do Discord incluem os links realmente publicados: MP3, TXT (se habilitado), RSS e página geral de transcrições. Mensagens longas são divididas entre linhas para preservar os links completos.
+
+Configuração e dados usam o [perfil SQLite/cofre](PROFILE_MIGRATION.md).

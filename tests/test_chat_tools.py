@@ -47,8 +47,8 @@ class ChatToolTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             root=Path(temporary);empty=root/'empty';full=root/'full';empty.mkdir();full.mkdir();(full/'.env.example').write_text('EXAMPLE_KEY=')
             service=WorkspaceService(backend=SimpleNamespace(store=WorkspaceStore(root/'chat.sqlite')))
-            with patch.object(service,'plugin_folders',return_value=[('Apps/empty',empty),('Plugins/full',full)]),patch('src.pia.service.environment_fields',return_value=[]):
-                self.assertEqual([s['id'] for s in service.settings()],['general','Plugins/full'])
+            with patch.object(service,'plugin_folders',return_value=[('Apps/empty',empty),('Plugins/full',full)]),patch('src.settings_store.schema',side_effect=lambda section:[{'name':'KEY','type':'secret','default':''}] if section=='Plugins/full' else []):
+                self.assertEqual([s['id'] for s in service.settings()],['Plugins/full'])
     def test_secretary_readable_filters_custom_compatibility_and_colors(self):
         with TemporaryDirectory() as temporary:
             root=Path(temporary);store=WorkspaceStore(root/'chat.sqlite');resources=Mock();resources.accounts.return_value=[]

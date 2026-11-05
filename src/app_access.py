@@ -1,3 +1,4 @@
+from src.settings_store import get as setting
 """Per-process capabilities for apps launched by PIA. Never trust Origin alone."""
 import json
 import os
@@ -11,7 +12,7 @@ def issue(app, routes=None):
     from .config import PORT, LLM_MODEL, OPENAI_COMPAT_MAX_UPLOAD_BYTES
     token=secrets.token_urlsafe(48)
     with _lock:_tokens[token]={'app':app,'routes':set(routes) if routes is not None else ROUTES}
-    return json.dumps(dict(token=token,app=app,url=f'http://localhost:{PORT}',model=LLM_MODEL,max_upload_bytes=OPENAI_COMPAT_MAX_UPLOAD_BYTES,stt_timeout=int(os.getenv('STT_FILE_TIMEOUT_SECONDS') or '86400')+30))
+    return json.dumps(dict(token=token,app=app,url=f'http://localhost:{PORT}',model=LLM_MODEL,max_upload_bytes=OPENAI_COMPAT_MAX_UPLOAD_BYTES,stt_timeout=int(setting('STT_FILE_TIMEOUT_SECONDS') or '86400')+30))
 def revoke(context):
     with _lock:_tokens.pop(json.loads(context)['token'],None)
 def authorized(handler):

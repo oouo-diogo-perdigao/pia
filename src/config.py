@@ -2,40 +2,38 @@ from pathlib import Path
 import logging
 from logging.handlers import RotatingFileHandler
 import os
-from src.env_types import load_dotenv
+from src.settings_store import get as setting
 
 
 def _bool_env(name: str, default: bool) -> bool:
-    value = os.getenv(name)
+    value = setting(name)
     if not value:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on", "sim"}
 
 
 def _int_env(name: str, default: int) -> int:
-    return int((os.getenv(name) or str(default)).strip())
+    return int((setting(name) or str(default)).strip())
 
 
 def _float_env(name: str, default: float) -> float:
-    return float((os.getenv(name) or str(default)).strip())
+    return float((setting(name) or str(default)).strip())
 
 
 def _str_env(name: str, default: str) -> str:
-    return os.getenv(name, default).strip()
+    return setting(name, default).strip()
 
 
 def _list_env(name: str, default: str) -> tuple[str, ...]:
-    values = [item.strip().lower() for item in os.getenv(name, default).split(",")]
+    values = [item.strip().lower() for item in setting(name, default).split(",")]
     return tuple(item for item in values if item)
 
 
 def _path_env(name: str, default: str) -> Path:
-    return Path(os.getenv(name, default).strip())
+    return Path(setting(name, default).strip())
 
 
-from .config_paths import BASE_DIR, CONFIG_DIR, SOUNDS_DIR, initialize_config, sound_path
-initialize_config()
-load_dotenv(CONFIG_DIR / ".env")
+from .config_paths import BASE_DIR, CONFIG_DIR, SOUNDS_DIR, sound_path
 if not os.environ.get("HF_HOME"):
     os.environ["HF_HOME"]=str(BASE_DIR/"cache/main/models/huggingface")
 
@@ -52,7 +50,7 @@ OPENAI_COMPAT_MAX_UPLOAD_BYTES = _int_env("OPENAI_COMPAT_MAX_UPLOAD_BYTES", 2097
 START_SOUND = sound_path(_str_env("START_SOUND", ""), "start.mp3")
 END_SOUND = sound_path(_str_env("END_SOUND", ""), "end.mp3")
 from .cache_paths import cache_path
-MODELS_DIR = cache_path(os.getenv('MODELS_DIR'),'main/stt')
+MODELS_DIR = cache_path(setting('MODELS_DIR'),'main/stt')
 PUBLIC_BASE_URL = _str_env("PUBLIC_BASE_URL", f"http://{HOST}:{PORT}").rstrip("/")
 if not PUBLIC_BASE_URL.startswith(("http://", "https://")):
     PUBLIC_BASE_URL = "http://" + PUBLIC_BASE_URL
@@ -75,9 +73,9 @@ STT_WHISPER_TIMEOUT = _int_env("STT_WHISPER_TIMEOUT", 600)
 STT_PROVIDERS = _list_env("STT_PROVIDERS", "gemini,groq,local")
 STT_REMOTE_COOLDOWN_SECONDS = _int_env("STT_REMOTE_COOLDOWN_SECONDS", 900)
 STT_GEMINI_API_KEY = (
-    os.getenv("STT_GEMINI_API_KEY")
-    or os.getenv("GEMINI_API_KEY")
-    or os.getenv("AGE_GEMINI_API_KEY")
+    setting("STT_GEMINI_API_KEY")
+    or setting("GEMINI_API_KEY")
+    or setting("AGE_GEMINI_API_KEY")
     or ""
 ).strip()
 STT_GEMINI_MODEL = _str_env("STT_GEMINI_MODEL", "gemini-3.5-transcribe-live")
@@ -91,7 +89,7 @@ TTS_DEFAULT_SPEED = _float_env("TTS_DEFAULT_SPEED", 0.95)
 TTS_KOKORO_IDLE_TIMEOUT = _int_env("TTS_KOKORO_IDLE_TIMEOUT", 600)
 TTS_QWEN_IDLE_TIMEOUT = _int_env("TTS_QWEN_IDLE_TIMEOUT", 300)
 TTS_DEVICE = _str_env("TTS_DEVICE", "cuda")
-TTS_KOKORO_MODEL = str(cache_path(os.getenv('TTS_KOKORO_MODEL'),'main/tts/kokoro'))
+TTS_KOKORO_MODEL = str(cache_path(setting('TTS_KOKORO_MODEL'),'main/tts/kokoro'))
 TTS_LLM_MODEL = _str_env("TTS_LLM_MODEL", "")
 
 # ============================================================
@@ -134,7 +132,7 @@ ICE_IMAGE_VARIATION_PROMPT = _str_env(
 ICE_IMAGE_DEFAULT_SIZE = _str_env("ICE_IMAGE_DEFAULT_SIZE", "1024x1024")
 ICE_IMAGE_MAX_N = _int_env("ICE_IMAGE_MAX_N", 4)
 
-ICE_OUTPUT_CACHE_DIR = cache_path(os.getenv("ICE_OUTPUT_CACHE_DIR"),"main/images/output")
+ICE_OUTPUT_CACHE_DIR = cache_path(setting("ICE_OUTPUT_CACHE_DIR"),"main/images/output")
 ICE_OUTPUT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 ICE_OUTPUT_CACHE_TTL_SECONDS = _int_env("ICE_OUTPUT_CACHE_TTL_SECONDS", 900)
 

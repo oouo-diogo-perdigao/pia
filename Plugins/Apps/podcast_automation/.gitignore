@@ -19,5 +19,6 @@ dist/
 .pytest_cache/
 !docs/examples/*.json
 !pia.json
+!settings.schema.json
 !lang/
 !lang/*.json

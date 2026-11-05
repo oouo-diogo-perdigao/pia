@@ -1,37 +1,11 @@
 # Configuração, contas e segredos
 
-## Localização e contratos
+As configurações são editadas pela interface, armazenadas no SQLite do perfil e validadas pelos schemas versionados. Credenciais pertencem ao cofre seguro do sistema. Não há .env nem overrides por variáveis de ambiente da PIA.
 
-Use `src/config_paths.py` para caminhos nativos: `config/.env`, keywords, models e shortcuts. Não reintroduza configurações na raiz. Migrações preservam configurações existentes sem sobrescrever destinos silenciosamente.
+Consulte [Perfil, cofre e migração](PROFILE_MIGRATION.md) para caminhos Windows/Linux, atualização de instalações existentes, exportação/importação por senha, tipos e APIs de desenvolvimento.
 
-Cada extensão mantém `.env`, exemplos e arquivos próprios na pasta do plugin. Metadados públicos ficam em `pia.json`, entradas técnicas em `plugin.toml`. Não trate banco de histórico, modelos baixados ou logs como configuração.
+Apps usam as contas dos conectores, explicitamente selecionadas. Não duplique chaves LLM/STT nem credenciais de Google/Discord/storage em apps. Os schemas e a implementação de cada extensão continuam em sua própria pasta; o estado pessoal não fica dentro da instalação.
 
-Use `src.env_types` em vez de ler dotenv diretamente quando a seção oferece tipos. O sufixo é removido para consumidores Python:
+Salvar só fica habilitado quando há mudanças e produz toast. Configurações que afetam serviços solicitam reinício, respeitando os jobs em andamento. Credenciais ficam mascaradas; arquivos de credenciais enviados vão ao cofre e não são publicados como assets. Se o cofre estiver indisponível, informe o erro sem fallback para texto.
 
-```dotenv
-ENABLED__BOOL=
-PORT__INT=8762
-TEMPERATURE__FLOAT=0.4
-OUTPUT__PATH=
-INPUT__FILE=
-API_KEY__SECRET=
-MODEL=exemplo
-```
-
-Todos os tipos aceitam vazio. Sem sufixo, o valor é string. Bool oferece `true`, `false`, vazio; números devem ser válidos e finitos. PATH/FILE usam seletores e validação conforme o editor existente. Preserve leitura de chaves legadas e migração para nomes tipados ao salvar.
-
-FILE pode apontar para arquivo externo ou cópia gerenciada. Upload gerenciado fica em `files/` junto da seção, com nome baseado no plugin e variável; limite atual 5 MiB. Não copie arquivos externos automaticamente nem inclua uploads privados no Git.
-
-## UI e aplicação
-
-Use o editor compartilhado: diferenças do formulário habilitam Salvar, sucesso gera toast, segredo tem password/olho e campos oferecem link de obtenção/configuração por ícone. Omita seções de variáveis vazias. Salvar variáveis solicita reinício pelo fluxo existente, respeitando jobs em andamento e a limitação de instâncias sem launcher gráfico.
-
-## Conectores
-
-Contas e credenciais Google/Microsoft, Object Storage e Discord pertencem a Conectores. Apps selecionam recursos dessas contas, sem duplicar configuração. Podcast não deve pedir GOOGLE_APPLICATION_CREDENTIALS, chave LLM própria ou WHISPER; usa integração Google e serviços da PIA. `PODCAST_CONFIG` é editado pela tela de campanhas, não pelo editor genérico de variáveis.
-
-Múltiplas contas exigem seleção explícita. Preserve o cofre do sistema e os serviços existentes para tokens/segredos. Não deduza que uma assinatura ou autorização Gmail/Drive permite chamar APIs Gemini/Lyria. CLIs de agentes usam seus próprios logins, sem copiar tokens.
-
-Nunca registre valores secretos, cookies, tokens ou arquivos de credenciais. Exemplos usam placeholders. Não exponha configurações privadas no bundle nem em rotas públicas. Autorização interna de apps usa o mecanismo existente de tokens/escopo; não remova autenticação global por ser uma chamada local.
-
-Detalhes de formato: [EXTENSIONS.md](EXTENSIONS.md). Fluxo de reinício: [REACT_WORKSPACE.md](REACT_WORKSPACE.md).
+O backup criptografado inclui configurações, preferências, documentos lógicos, arquivos gerenciados e credenciais da PIA. Não inclui mídia, conversas, modelos ou logins externos do Codex/AGY. Nunca registre valores secretos, senhas de backup, cookies ou tokens em logs.

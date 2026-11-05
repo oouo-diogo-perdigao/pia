@@ -250,17 +250,28 @@ class DesktopUI(QObject):
         return self.native_apps[identity].handle(action, payload)
 
     def command(self, action, payload):
+        if action=='save-config-backup':
+            import base64
+            from .user_paths import user_path
+            from .config_transfer import MAGIC
+            raw=base64.b64decode(payload['data'],validate=True)
+            if len(raw)>24*1024**2 or not raw.startswith(MAGIC):raise ValueError('Backup inválido.')
+            folder=user_path('exports');folder.mkdir(parents=True,exist_ok=True)
+            target,_=QFileDialog.getSaveFileName(self.window,'Exportar configurações',str(folder/'pia-configuracoes.pia-backup'),'PIA backup (*.pia-backup)')
+            if not target:return {'cancelled':True}
+            from pathlib import Path
+            import secrets
+            file=Path(target);temporary=file.with_name(file.name+'.'+secrets.token_hex(8)+'.tmp')
+            try:
+                with temporary.open('xb') as out:out.write(raw)
+                temporary.chmod(0o600);temporary.replace(file)
+            finally:temporary.unlink(missing_ok=True)
+            return {'ok':True}
         if action == 'restart':
             import subprocess
             import os
             from .config_paths import BASE_DIR,CONFIG_DIR
-            from dotenv import dotenv_values
-            from .env_types import split_key
             env=os.environ.copy()
-            for file in (CONFIG_DIR/'.env',CONFIG_DIR/'.env.example'):
-                for key in dotenv_values(file):
-                    env.pop(key,None)
-                    env.pop(split_key(key)[0],None)
             env['PIA_OPEN_MAIN']='1'
             flags=subprocess.CREATE_NO_WINDOW if sys.platform=='win32' else 0
             subprocess.Popen([sys.executable,'-m','src.launcher','--restart-pid',str(os.getpid())],cwd=BASE_DIR,env=env,creationflags=flags,start_new_session=sys.platform!='win32')

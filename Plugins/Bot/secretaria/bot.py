@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 from src.config_paths import BASE_DIR
 from src.resource_plugins import save_json
+from src.settings_store import document,save_document
 
 MAIL_FILTERS={'important_unread':('Não lidos importantes','is:unread is:important'),'all_unread':('Todos os não lidos','is:unread'),'inbox_unread':('Não lidos da caixa de entrada','is:unread in:inbox'),'starred_unread':('Não lidos com estrela','is:unread is:starred'),'custom':('Personalizado (avançado)',None)}
 
@@ -22,7 +23,7 @@ DEFAULTS = {'enabled': False, 'accounts': [], 'reminders': True, 'remind_minutes
 class Secretary:
     def __init__(self, resources, store, notify, opener=webbrowser.open, config_path=None):
         self.resources, self.store, self.notify, self.opener = resources, store, notify, opener
-        self.path = Path(config_path or Path(__file__).with_name('config.json'))
+        self.path = Path(config_path) if config_path is not None else None
         self.stop_event = threading.Event()
         self.poll_lock = threading.Lock()
         self.thread = None
@@ -36,13 +37,13 @@ class Secretary:
     def bind_notifications(self,center):
         self.notification_center=center
         if not self.store.get('notifications:migrated-secretary',False):
-            saved=json.loads(self.path.read_text(encoding='utf-8')) if self.path.is_file() else {}
+            saved=self.saved_config()
             if saved.get('speak') and self.store.get('notifications:settings') is None:
                 center.configure({'read_aloud':True,'muted':[]})
             self.store.set('notifications:migrated-secretary',True)
 
     def config(self):
-        saved=json.loads(self.path.read_text(encoding='utf-8')) if self.path.exists() else {}
+        saved=self.saved_config()
         data={**DEFAULTS,**saved}
         data.pop('speak',None)
         if 'email_filter' not in saved:data['email_filter']=next((key for key,(_,query) in MAIL_FILTERS.items() if query==data['email_query']),'custom')
@@ -68,7 +69,12 @@ class Secretary:
         if not isinstance(data['accounts'], list) or set(data['accounts']) - connected:
             raise ValueError('Selecione somente contas Google conectadas.')
         data['remind_minutes'], data['poll_seconds'] = int(data['remind_minutes']), int(data['poll_seconds'])
-        save_json(self.path, {k: data[k] for k in DEFAULTS})
+        if self.path:save_json(self.path,{k:data[k] for k in DEFAULTS})
+        else:save_document('Bot/secretaria',{k:data[k] for k in DEFAULTS})
+
+    def saved_config(self):
+        if self.path:return json.loads(self.path.read_text(encoding='utf-8')) if self.path.exists() else {}
+        return document('Bot/secretaria',{})
 
     def _events(self, account, config, now):
         token = None

@@ -1,3 +1,4 @@
+from src.settings_store import get_store,save_document,document
 """Offline tests: real implementation, mocked desktop/model/provider boundaries.
 
 Run without the desktop dependencies: python -m unittest discover -s tests -p test_transcription.py
@@ -242,7 +243,7 @@ class TimingTests(unittest.TestCase):
         manager._transcribe_groq_litellm.assert_called_once()
 
     def test_groq_adapter_checks_size_before_import_or_upload(self):
-        with patch.dict(hybrid.os.environ, {'STT_GROQ_MAX_UPLOAD_BYTES': '10'}):
+        with patch.object(hybrid,'setting',return_value='10'):
             with self.assertRaisesRegex(hybrid.RemoteSTTUnavailable, 'limite'):
                 hybrid.STTManager._transcribe_groq_litellm(self.manager(), b'x' * 11)
 

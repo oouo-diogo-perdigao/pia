@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12,<3.13"
 
 dependencies = [
+    "cryptography>=43",
     "opencv-python-headless>=4.10",
     "jsonschema>=4.0",
     "webrtcvad-wheels>=2.0.14",

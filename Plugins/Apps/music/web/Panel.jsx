@@ -25,9 +25,13 @@ import {
   LogViewer,
   WorkProgress,
   Icon,
+  usePia,
 } from "../../../../src/pia/frontend/shared";
 const call = (action, data = {}) => appApi("music", action, data);
 export default function Music({ sub = "principal" }) {
+  const { navigate, route } = usePia();
+  const currentSub = useRef(sub);
+  currentSub.current = sub;
   const [prompt, setPrompt] = useState(""),
     [lyrics, setLyrics] = useState(""),
     [provider, setProvider] = useState("local"),
@@ -57,6 +61,7 @@ export default function Music({ sub = "principal" }) {
     );
     setCount(Math.max(1, Math.min(10, tracks.length)));
     setScrollBatch(null);
+    navigate({ ...route, sub: "principal" });
     requestAnimationFrame(() => {
       form.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       promptInput.current?.focus({ preventScroll: true });
@@ -85,6 +90,8 @@ export default function Music({ sub = "principal" }) {
           report(event.error);
         } else {
           setScrollBatch(event.result?.batch);
+          if (event.result?.batch && currentSub.current === "principal")
+            navigate({ ...route, sub: "history" });
           refresh().catch(report);
         }
       }
@@ -101,7 +108,7 @@ export default function Music({ sub = "principal" }) {
     return () => source.current?.close();
   }, []);
   useEffect(() => {
-    if (scrollBatch && sub === "principal")
+    if (scrollBatch && sub === "history")
       requestAnimationFrame(() =>
         document
           .getElementById("music-batch-" + scrollBatch)
@@ -143,140 +150,156 @@ export default function Music({ sub = "principal" }) {
     );
   return (
     <Stack>
-      <Paper withBorder p="lg" ref={form}>
-        <Stack>
-          <Select
-            label="Gerador"
-            value={provider}
-            onChange={setProvider}
-            disabled={busy}
-            data={[
-              { value: "local", label: "Local · ACE-Step" },
-              { value: "gemini", label: "Gemini · Lyria API" },
-              {
-                value: "flow",
-                label: "Google Flow Music · abrir interface oficial",
-              },
-            ]}
-          />
-          <Textarea
-            label="Descrição musical"
-            ref={promptInput}
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            minRows={3}
-            autosize
-          />
-          <Textarea
-            label="Letra (vazio gera instrumental)"
-            value={lyrics}
-            onChange={(e) => setLyrics(e.target.value)}
-            minRows={5}
-            autosize
-          />
-          <NumberInput
-            label="Duração desejada (segundos)"
-            min={10}
-            max={180}
-            value={duration}
-            onChange={setDuration}
-          />
-          <NumberInput
-            label="Quantidade de músicas"
-            min={1}
-            max={10}
-            allowDecimal={false}
-            value={count}
-            onChange={setCount}
-            disabled={busy}
-          />
-          <Text size="xs" c="dimmed">
-            Destino: {folder || "Pasta de músicas do sistema / PIA"}
-          </Text>
-          <Group>
-            {provider === "flow" ? (
-              <>
-                <Button onClick={safe(() => copy(prompt + "\n\n" + lyrics))}>
-                  Copiar descrição e letra
-                </Button>
-                <Anchor href="https://www.flowmusic.app/" target="_blank">
-                  Abrir acesso oficial ao Flow Music ↗
-                </Anchor>
-              </>
-            ) : (
-              <Button
-                disabled={busy || !prompt.trim()}
-                onClick={safe(() => start("generate"))}
-              >
-                Gerar música
-              </Button>
-            )}
-            {provider === "local" && (
-              <Button
-                variant="light"
+      {sub !== "history" && (
+        <>
+          <Paper withBorder p="lg" ref={form}>
+            <Stack>
+              <Select
+                label="Gerador"
+                value={provider}
+                onChange={setProvider}
                 disabled={busy}
-                onClick={safe(() => start("prepare-local"))}
-              >
-                Instalar motor local (vários GB)
-              </Button>
-            )}
-            {busy && (
-              <Button color="red" onClick={safe(() => call("cancel", { job }))}>
-                Cancelar espera
-              </Button>
-            )}
-          </Group>
-          <Text size="sm" c="dimmed">
-            A PIA não usa cookies das contas para simular APIs. O motor local
-            fica separado do Whisper/TTS.
-          </Text>
-        </Stack>
-      </Paper>
-      <LogViewer text={logs} onClear={() => setLogs("")} />
-      <WorkProgress value={progress} />
-      {busy && (
-        <Text size="xs" c="dimmed">
-          O percentual indica músicas concluídas do lote. O provedor não fornece
-          percentual confiável da geração individual.
-        </Text>
-      )}
-      <Title order={4}>Suas músicas</Title>
-      {Object.entries(
-        items.reduce((groups, item) => {
-          (groups[item.batch || item.file] ||= []).push(item);
-          return groups;
-        }, {}),
-      ).map(([batch, tracks]) => (
-        <Paper withBorder p="md" key={batch} id={"music-batch-" + batch}>
-          <Stack>
-            <Group justify="space-between" wrap="nowrap" align="start">
-              <Text fw={600}>{tracks[0].prompt}</Text>
-              <Icon
-                icon={RotateCcw}
-                label="Reutilizar prompt"
-                disabled={busy}
-                onClick={() => reuse(tracks)}
+                data={[
+                  { value: "local", label: "Local · ACE-Step" },
+                  { value: "gemini", label: "Gemini · Lyria API" },
+                  {
+                    value: "flow",
+                    label: "Google Flow Music · abrir interface oficial",
+                  },
+                ]}
               />
-            </Group>
+              <Textarea
+                label="Descrição musical"
+                ref={promptInput}
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                minRows={3}
+                autosize
+              />
+              <Textarea
+                label="Letra (vazio gera instrumental)"
+                value={lyrics}
+                onChange={(e) => setLyrics(e.target.value)}
+                minRows={5}
+                autosize
+              />
+              <NumberInput
+                label="Duração desejada (segundos)"
+                min={10}
+                max={180}
+                value={duration}
+                onChange={setDuration}
+              />
+              <NumberInput
+                label="Quantidade de músicas"
+                min={1}
+                max={10}
+                allowDecimal={false}
+                value={count}
+                onChange={setCount}
+                disabled={busy}
+              />
+              <Text size="xs" c="dimmed">
+                Destino: {folder || "Pasta de músicas do sistema / PIA"}
+              </Text>
+              <Group>
+                {provider === "flow" ? (
+                  <>
+                    <Button
+                      onClick={safe(() => copy(prompt + "\n\n" + lyrics))}
+                    >
+                      Copiar descrição e letra
+                    </Button>
+                    <Anchor href="https://www.flowmusic.app/" target="_blank">
+                      Abrir acesso oficial ao Flow Music ↗
+                    </Anchor>
+                  </>
+                ) : (
+                  <Button
+                    disabled={busy || !prompt.trim()}
+                    onClick={safe(() => start("generate"))}
+                  >
+                    Gerar música
+                  </Button>
+                )}
+                {provider === "local" && (
+                  <Button
+                    variant="light"
+                    disabled={busy}
+                    onClick={safe(() => start("prepare-local"))}
+                  >
+                    Instalar motor local (vários GB)
+                  </Button>
+                )}
+                {busy && (
+                  <Button
+                    color="red"
+                    onClick={safe(() => call("cancel", { job }))}
+                  >
+                    Cancelar espera
+                  </Button>
+                )}
+              </Group>
+              <Text size="sm" c="dimmed">
+                A PIA não usa cookies das contas para simular APIs. O motor
+                local fica separado do Whisper/TTS.
+              </Text>
+            </Stack>
+          </Paper>
+          <LogViewer text={logs} onClear={() => setLogs("")} />
+          <WorkProgress value={progress} />
+          {busy && (
             <Text size="xs" c="dimmed">
-              {tracks.length} música(s) · {tracks[0].provider}
+              O percentual indica músicas concluídas do lote. O provedor não
+              fornece percentual confiável da geração individual.
             </Text>
-            {tracks
-              .sort((a, b) => (a.variant || 0) - (b.variant || 0))
-              .map((item, index) => (
-                <div key={item.file}>
-                  <MediaTrack
-                    url={item.audio_url}
-                    title={"Versão " + (index + 1)}
+          )}
+        </>
+      )}
+      {sub === "history" && (
+        <>
+          <Title order={4}>Suas músicas</Title>
+          {!items.length && (
+            <Text c="dimmed">Nenhuma música gerada ainda.</Text>
+          )}
+          {Object.entries(
+            items.reduce((groups, item) => {
+              (groups[item.batch || item.file] ||= []).push(item);
+              return groups;
+            }, {}),
+          ).map(([batch, tracks]) => (
+            <Paper withBorder p="md" key={batch} id={"music-batch-" + batch}>
+              <Stack>
+                <Group justify="space-between" wrap="nowrap" align="start">
+                  <Text fw={600}>{tracks[0].prompt}</Text>
+                  <Icon
+                    icon={RotateCcw}
+                    label="Reutilizar prompt"
+                    disabled={busy}
+                    onClick={() => reuse(tracks)}
                   />
-                  <Anchor href={item.audio_url} download={item.file}>
-                    Salvar áudio
-                  </Anchor>
-                </div>
-              ))}
-          </Stack>
-        </Paper>
-      ))}
+                </Group>
+                <Text size="xs" c="dimmed">
+                  {tracks.length} música(s) · {tracks[0].provider}
+                </Text>
+                {tracks
+                  .sort((a, b) => (a.variant || 0) - (b.variant || 0))
+                  .map((item, index) => (
+                    <div key={item.file}>
+                      <MediaTrack
+                        url={item.audio_url}
+                        title={"Versão " + (index + 1)}
+                      />
+                      <Anchor href={item.audio_url} download={item.file}>
+                        Salvar áudio
+                      </Anchor>
+                    </div>
+                  ))}
+              </Stack>
+            </Paper>
+          ))}
+        </>
+      )}
     </Stack>
   );
 }

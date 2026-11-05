@@ -169,25 +169,7 @@ export default function Screenshots({ sub = "principal" }) {
             value={config.format}
             onChange={(format) => setConfig({ ...config, format })}
           />
-          <Group align="end" wrap="nowrap">
-            <TextInput
-              className="grow"
-              label="Pasta de destino"
-              value={config.output_folder}
-              onChange={(event) =>
-                setConfig({ ...config, output_folder: event.target.value })
-              }
-            />
-            <Icon
-              icon={Folder}
-              label="Selecionar pasta"
-              onClick={async () => {
-                const result = await call("choose-folder");
-                if (result.folder)
-                  setConfig({ ...config, output_folder: result.folder });
-              }}
-            />
-          </Group>
+          <Text size="sm">Destino padrão: {config.output_folder}</Text>
           {Object.entries({
             prefill_title: "Usar título da janela",
             prefill_url: "Obter URL do navegador",

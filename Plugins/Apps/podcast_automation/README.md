@@ -52,4 +52,24 @@ Na tela Principal, **Desligar o computador ao concluir todos os arquivos** é um
 
 Ao abrir o app, **Gravações pendentes** consulta os ZIPs da pasta e mostra a quantidade e os nomes, sem baixar mídia nem iniciar processamento. ZIPs `-ok.zip` e `-ok-omitido.zip` aparecem na contagem de já processados. Cada ZIP representa uma sessão, que pode conter várias faixas de participantes. A consulta acompanha mudanças de conta/pasta e pode ser atualizada pelo ícone ao lado do título. A pasta é apresentada por seu caminho de nomes no Drive; novas escolhas guardam também esse caminho junto ao ID usado internamente.
 
-Use **Reconstruir feeds** para aplicar o leitor de transcrições às publicações existentes: busca, índice de sessões e cópia individual ou em lote, com todos os textos no corpo do HTML para LLMs. As notificações opcionais do Discord incluem MP3, TXT (quando gerado), RSS e transcrições gerais.
+Use **Reconstruir feeds** para aplicar o leitor de transcrições às publicações existentes: busca, índice de sessões e cópia individual ou em lote, com todos os textos no corpo do HTML para LLMs. O seletor **Mesa** contém as campanhas configuradas e navega diretamente ao `transcripts.html` de cada uma, conservando a aparência do leitor. Ele não baixa nem combina textos de outras mesas. A lista pode conter uma mesa ainda sem transcrição publicada; o destino só passa a existir quando seu HTML for gerado. Novas publicações e reconstruções usam o novo leitor.
+
+O anúncio Discord segue este formato, omitindo apenas links de artefatos ausentes:
+
+```text
+Nome da Mesa - S02E35 - Nome do episódio
+MP3: https://exemplo.invalid/episodio.mp3
+RSS: https://exemplo.invalid/rss.xml
+TRANSCRIÇÃO: https://exemplo.invalid/transcripts.html
+```
+
+Para mencionar jogadores, adicione no JSON de **Campanhas** a propriedade de raiz
+`"discord_users": {"Caio": "123456789012345678", "Dota": "234567890123456789"}`.
+Os nomes são os nomes normalizados dos jogadores (`nomes_reais`); os valores são
+IDs de usuário do Discord, obtidos com Modo Desenvolvedor → Copiar ID do usuário.
+Somente participantes presentes em `jogadores` da sessão e com ID mapeado são
+mencionados. O conector permite explicitamente esses IDs e mantém menções gerais
+e de cargos desativadas. Não tenta inferir IDs a partir de apelidos. A entrega da
+notificação depende das permissões do bot e das preferências dos destinatários.
+
+Configuração e dados usam o [perfil SQLite/cofre](../../../docs/PROFILE_MIGRATION.md).

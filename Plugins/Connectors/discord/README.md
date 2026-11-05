@@ -1,6 +1,6 @@
 # Plugin Discord
 
-Guarda a configuração do bot no `.env` deste plugin, migrada do podcast. `DISCORD_BOT_ID`, `DISCORD_BOT_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`, `DISCORD_BOT_PERMISSIONS`, `DISCORD_BOT_URL` e `DISCORD_LINK` pertencem aqui. `DISCORD_CHANNEL_ID` escolhe o canal padrão de notificações.
+Guarda a configuração do bot no SQLite, com o token no cofre do sistema. `DISCORD_BOT_ID`, `DISCORD_BOT_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`, `DISCORD_BOT_PERMISSIONS`, `DISCORD_BOT_URL` e `DISCORD_LINK` pertencem aqui. `DISCORD_CHANNEL_ID` escolhe o canal padrão de notificações.
 
 A URL OAuth do bot instala/autoriza o bot; ela não é uma URL de webhook. `Discord().send(text,channel=None)` usa o token de bot na API oficial de mensagens, com menções automáticas desabilitadas. `public()` retorna somente metadados e o estado de configuração. O bot precisa das permissões de visualizar e enviar mensagens no canal.
 
@@ -14,9 +14,9 @@ Salve o token e as variáveis antes de usar o painel. **Verificar conexão** con
 
 ## /link e execução local
 
-Use **Registrar /link e conectar**. O registro cria/atualiza somente esse comando, preservando os demais comandos da aplicação. O token é usado na API oficial; não é necessário abrir o portal para registrar comandos. Com `discord.py` instalado e `DISCORD_LINK_ENABLED__BOOL=true`, a PIA abre uma conexão de saída com o Gateway do Discord. O SDK gerencia heartbeat e reconexão. Não há servidor público, túnel, porta aberta no roteador ou necessidade dos intents privilegiados de conteúdo/membros.
+Use **Registrar /link e conectar**. O registro cria/atualiza somente esse comando, preservando os demais comandos da aplicação. O token é usado na API oficial; não é necessário abrir o portal para registrar comandos. Com `discord.py` instalado e a opção `DISCORD_LINK_ENABLED` habilitada, a PIA abre uma conexão de saída com o Gateway do Discord. O SDK gerencia heartbeat e reconexão. Não há servidor público, túnel, porta aberta no roteador ou necessidade dos intents privilegiados de conteúdo/membros.
 
-Com a PIA aberta e o painel indicando **Conectado**, use `/link` no canal de texto ou anúncios desejado. A resposta é privada, informa `DISCORD_CHANNEL_ID=<id>` e salva o valor no `.env` deste conector imediatamente. O histórico do vínculo (servidor, canal, autor e horário) fica no `config.json` privado. O painel mostra o ID com botão de copiar e atualiza o campo de configuração; não é necessário reiniciar para publicar no novo canal. No Podcast Automation, deixe o canal específico vazio para seguir o padrão do conector; um canal específico continua tendo prioridade.
+Com a PIA aberta e o painel indicando **Conectado**, use `/link` no canal de texto ou anúncios desejado. A resposta é privada, informa `DISCORD_CHANNEL_ID=<id>` e salva o vínculo no SQLite imediatamente. O histórico do vínculo (servidor, canal, autor e horário) fica no SQLite. O painel mostra o ID com botão de copiar e atualiza o campo de configuração; não é necessário reiniciar para publicar no novo canal. No Podcast Automation, deixe o canal específico vazio para seguir o padrão do conector; um canal específico continua tendo prioridade.
 
 O comando tem `default_member_permissions=8` (Administrador), fica disponível somente em servidores e valida a permissão novamente ao executar, mesmo se alguém mudar as permissões de comandos no Discord. DMs e membros sem Administrador são rejeitados. O bot precisa poder ver e enviar mensagens no canal. O primeiro vínculo fixa o servidor; administradores de outro servidor não podem redirecionar essa instalação. **Remover vínculo local** permite trocar de servidor. As restrições opcionais são:
 
@@ -36,3 +36,5 @@ Os metadados desta extensão ficam em `pia.json` e os textos em `lang/pt-BR.json
 
 
 A tela atual usa React/Mantine. Consulte [o guia do workspace React](../../../docs/REACT_WORKSPACE.md). Componentes dos apps/bots ficam em `web/Panel.jsx`; os painéis de conectores são apresentados por `src/pia/frontend/Settings.jsx`.
+
+Configuração e dados usam o [perfil SQLite/cofre](../../../docs/PROFILE_MIGRATION.md).

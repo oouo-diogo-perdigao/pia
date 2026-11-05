@@ -4,9 +4,19 @@ from urllib.parse import urlsplit,quote
 import uuid
 import threading
 _CONFIG_LOCK=threading.RLock()
-from src.env_types import dotenv_values
+from src.settings_store import values as section_values, document, save_document
 from src.resource_plugins import KeyringVault,save_json
 import json
+import re
+import secrets
+
+def valid_color(value):
+    if not isinstance(value,str) or not re.fullmatch(r'#[0-9a-fA-F]{6}',value):
+        raise ValueError('Cor de conta inválida; use #RRGGBB.')
+    return value
+
+def random_color():
+    return secrets.choice(('#9b7aff','#54c7ec','#df8ec7','#65cfa4','#e7af68','#8fa8ff'))
 
 ROOT=Path(__file__).resolve().parent
 class ObjectStorage:
@@ -17,16 +27,18 @@ class ObjectStorage:
         if self._vault is None:self._vault=KeyringVault()
         return self._vault
     def config(self):
-        path=self.root/'config.json'
-        return json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'accounts':[]}
-    def legacy(self):
-        values=dotenv_values(self.root/'.env')
-        if not values.get('OBJECT_STORAGE_ACCESS_KEY_ID'):return None
-        return dict(id='legacy',name='Storage migrado',provider='s3',endpoint=values.get('OBJECT_STORAGE_ENDPOINT') or '',region=values.get('OBJECT_STORAGE_REGION') or 'auto',bucket=values.get('OBJECT_STORAGE_BUCKET_NAME') or '',public_url=values.get('OBJECT_STORAGE_URL') or '',access_key=values.get('OBJECT_STORAGE_ACCESS_KEY_ID'),secret_key=values.get('OBJECT_STORAGE_SECRET_ACCESS_KEY'))
+        return document('Connectors/object_storage',{'accounts':[]})
+    def legacy(self):return None
     def accounts(self):
-        result=self.config().get('accounts',[])
-        legacy=self.legacy()
-        if legacy:result=[{k:v for k,v in legacy.items() if k not in ('access_key','secret_key')},*result]
+        with _CONFIG_LOCK:
+            config=self.config();result=config.get('accounts',[]);changed=False
+            for account in result:
+                if not account.get('color'):account['color']=random_color();changed=True
+            if changed:save_document('Connectors/object_storage',config)
+        overrides=json.loads(section_values('Connectors/object_storage').get('OBJECT_STORAGE_ACCOUNT_COLORS') or '{}')
+        if not isinstance(overrides,dict):raise ValueError('OBJECT_STORAGE_ACCOUNT_COLORS deve ser um objeto JSON de ID para cor.')
+        for account in result:
+            account['color']=valid_color(overrides.get(account['id'],account.get('color','#9b7aff')))
         return result
     def account(self,identity=None):
         accounts=self.accounts();identity=identity or self.config().get('default') or (accounts[0]['id'] if accounts else None)
@@ -37,7 +49,6 @@ class ObjectStorage:
         with _CONFIG_LOCK:return self._save_account(value)
     def _save_account(self,value):
         config=self.config();identity=value.get('id') or uuid.uuid4().hex
-        if identity=='legacy':raise ValueError('A conta migrada é configurada nas variáveis do plugin. Crie outra conta para substituir.')
         endpoint=value.get('endpoint','').strip();public=value.get('public_url','').strip()
         provider=value.get('provider','s3')
         if provider not in ('s3','r2','compatible') or (provider!='s3' and not endpoint):raise ValueError('Escolha um provedor válido e configure o endpoint S3 do serviço.')
@@ -46,6 +57,8 @@ class ObjectStorage:
         if not value.get('name','').strip():raise ValueError('Informe o nome da conta.')
         metadata={k:str(value.get(k,'')).strip() for k in ('name','provider','region','bucket')}
         metadata.update(id=identity,endpoint=endpoint,public_url=public)
+        previous=next((a for a in config.get('accounts',[]) if a['id']==identity),{})
+        metadata['color']=valid_color(value.get('color') or previous.get('color') or random_color())
         secret=self.vault.get('storage:'+identity) or {}
         for key in ('access_key','secret_key','session_token'):
             if value.get(key):secret[key]=value[key]
@@ -53,18 +66,17 @@ class ObjectStorage:
         self.vault.set('storage:'+identity,secret)
         config['accounts']=[a for a in config.get('accounts',[]) if a['id']!=identity]+[metadata]
         if value.get('default') or not config.get('default'):config['default']=identity
-        save_json(self.root/'config.json',config)
+        save_document('Connectors/object_storage',config)
         return {'id':identity}
     def remove_account(self,identity):
         with _CONFIG_LOCK:return self._remove_account(identity)
     def _remove_account(self,identity):
-        if identity=='legacy':raise ValueError('Remova as variáveis da conta migrada nas configurações do plugin.')
         config=self.config();config['accounts']=[a for a in config.get('accounts',[]) if a['id']!=identity]
         if config.get('default')==identity:config.pop('default',None)
-        self.vault.delete('storage:'+identity);save_json(self.root/'config.json',config)
+        self.vault.delete('storage:'+identity);save_document('Connectors/object_storage',config)
     def client(self,identity=None):
         account=self.account(identity)
-        secret=self.legacy() if account['id']=='legacy' else self.vault.get('storage:'+account['id'])
+        secret=self.vault.get('storage:'+account['id'])
         if not secret:raise ValueError('Credenciais não disponíveis no cofre.')
         import boto3
         from botocore.config import Config

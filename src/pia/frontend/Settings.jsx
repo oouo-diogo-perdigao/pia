@@ -1,4 +1,9 @@
 import { fieldGroup } from "./settings-groups";
+import {
+  TransferSettings,
+  DocumentSettings,
+  VaultSettings,
+} from "./ProfileSettings";
 import LogsPanel from "./LogsPanel";
 import { fingerprint } from "./forms";
 import React, { useState, useEffect, useRef } from "react";
@@ -18,6 +23,7 @@ import {
   FileButton,
   Anchor,
   Badge,
+  ColorInput,
 } from "@mantine/core";
 import {
   ExternalLink,
@@ -207,7 +213,7 @@ export function StorageAccounts() {
       {accounts.map((account) => (
         <Group key={account.id} mt="sm" justify="space-between">
           <Text>{account.name}</Text>
-          {account.id !== "legacy" && (
+          {
             <Group>
               <Button variant="subtle" onClick={safe(() => edit(account))}>
                 Editar
@@ -222,10 +228,16 @@ export function StorageAccounts() {
                 }}
               />
             </Group>
-          )}
+          }
         </Group>
       ))}
       <Stack mt="lg">
+        <ColorInput
+          label="Cor da conta"
+          value={form.color || ""}
+          placeholder="Automática"
+          onChange={(color) => setForm({ ...form, color })}
+        />
         {[
           "name",
           "provider",
@@ -412,7 +424,11 @@ export default function SettingsPanel({ section = "general" }) {
     [group, setGroup] = useState("Geral");
   useEffect(() => {
     let active = true;
-    if (section !== "logs" && section !== "accounts") {
+    if (
+      !["logs", "accounts", "transfer", "documents", "credentials"].includes(
+        section,
+      )
+    ) {
       api("/settings")
         .then((result) => {
           if (!active) return;
@@ -432,6 +448,9 @@ export default function SettingsPanel({ section = "general" }) {
   }, [section]);
   if (section === "accounts") return <Accounts />;
   if (section === "logs") return <LogsPanel />;
+  if (section === "transfer") return <TransferSettings />;
+  if (section === "documents") return <DocumentSettings />;
+  if (section === "credentials") return <VaultSettings />;
   const selected = sections.find((s) => s.id === section) || sections[0];
   if (!selected) return <Text>{t("Carregando…")}</Text>;
   async function save() {
@@ -456,7 +475,9 @@ export default function SettingsPanel({ section = "general" }) {
       }
       throw Error("A PIA ainda não voltou. Consulte logs/launcher.log.");
     }
-    setNotice("Variáveis salvas. O reinício exige a sessão gráfica da PIA.");
+    setNotice(
+      "Configurações salvas. O reinício exige a sessão gráfica da PIA.",
+    );
   }
   async function upload(field, file) {
     if (!file) return;
@@ -557,7 +578,7 @@ export default function SettingsPanel({ section = "general" }) {
                   size="xs"
                   className="env-name"
                 >
-                  {field.name}
+                  {field.label || field.name}
                 </Text>
                 <div className="grow">
                   {field.type === "bool" ? (
@@ -657,7 +678,7 @@ export default function SettingsPanel({ section = "general" }) {
             disabled={fingerprint(values) === savedValues}
             onClick={safe(save)}
           >
-            {t("Salvar variáveis")}
+            {t("Salvar configurações")}
           </Button>
           {notice && <Text size="sm">{notice}</Text>}
         </Stack>

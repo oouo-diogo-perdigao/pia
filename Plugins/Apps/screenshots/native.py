@@ -171,7 +171,8 @@ class NativeApp:
         return result
 
     def output_directory(self):
-        return Path(config()['output_folder'] or str(Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.PicturesLocation)) / 'PIA Captures'))
+        from src.user_paths import user_path
+        return user_path('screenshots')
 
     def saved_files(self):
         directory = self.output_directory()
@@ -258,7 +259,7 @@ class NativeApp:
                 directory = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation))
                 path = directory / name
             elif action == 'save':
-                directory = prefs['output_folder'] or str(Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)) / 'PIA Captures')
+                directory = str(self.output_directory())
                 target, _ = QFileDialog.getSaveFileName(self.shell, 'Salvar captura', str(Path(directory) / name),
                     {'png': 'PNG (*.png)', 'jpg': 'JPEG (*.jpg)', 'bmp': 'Bitmap (*.bmp)'}[kind])
                 if not target:

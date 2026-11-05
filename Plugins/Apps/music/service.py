@@ -1,3 +1,4 @@
+from src.settings_store import get as setting
 """Music providers. Local ACE-Step is isolated from PIA's Torch environment."""
 import atexit
 import base64
@@ -15,7 +16,7 @@ from urllib.parse import urlsplit
 import uuid
 import requests
 from src.config_paths import BASE_DIR
-from src.env_types import dotenv_values
+from src.settings_store import values as section_values, document, save_document
 from src.resource_plugins import save_json
 
 ROOT=Path(__file__).resolve().parent
@@ -35,16 +36,17 @@ def default_music_folder():
             if match:return Path(match.group(1).replace('$HOME',str(home)))/'PIA'
     return home/'Music/PIA'
 
-OUTPUT=default_music_folder()
-LEGACY_OUTPUT=BASE_DIR/'data/music'
+from src.user_paths import user_path
+OUTPUT=user_path('music')
+LEGACY_OUTPUT=OUTPUT
 REVISION='ca1e85fe9430179831e6bc6be790c332190a3866'
 _engine=None
 _token=secrets.token_urlsafe(40)
 _lock=threading.Lock()
 _generation_lock=threading.Lock()
 
-def settings():return dotenv_values(ROOT/'.env')
-def output_directory():return Path(settings().get('MUSIC_OUTPUT_DIR') or OUTPUT).expanduser()
+def settings():return section_values('Apps/music')
+def output_directory():return OUTPUT
 def base_url():
     url=settings().get('MUSIC_LOCAL_URL') or 'http://127.0.0.1:8015'
     parsed=urlsplit(url)
@@ -170,7 +172,7 @@ def generate(prompt,lyrics='',provider='local',duration=30,progress=lambda text:
                 extension='mp3'
             else:
                 from src.config import STT_GEMINI_API_KEY
-                key=os.getenv('GEMINI_API_KEY') or os.getenv('AGE_GEMINI_API_KEY') or STT_GEMINI_API_KEY
+                key=setting('GEMINI_API_KEY') or setting('AGE_GEMINI_API_KEY') or STT_GEMINI_API_KEY
                 if not key:raise RuntimeError('Configure a chave Gemini da PIA. A autorização Gmail/Drive não concede acesso à API Lyria.')
                 progress('Gerando música com Lyria pela API Gemini…')
                 data=_json(session.post('https://generativelanguage.googleapis.com/v1beta/interactions',headers={'x-goog-api-key':key},json={'model':settings().get('MUSIC_GEMINI_MODEL') or 'lyria-3.5','input':f'{prompt}\nTarget duration: {duration} seconds.\n'+('Lyrics:\n'+lyrics if lyrics else 'Instrumental only. No vocals.')},timeout=600))

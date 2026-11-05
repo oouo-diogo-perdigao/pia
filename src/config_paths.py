@@ -1,4 +1,4 @@
-"""Configuration lives in config/; migration never overwrites an existing file."""
+"""Installation assets/schemas and legacy migration entry point; profile uses user_paths."""
 from pathlib import Path
 import os
 import time
@@ -40,19 +40,9 @@ def migrate_config(root=BASE_DIR):
 
 
 def initialize_config(root=BASE_DIR):
-    folder = migrate_config(root)
-    examples = {'.env': '.env.example', 'keywords.txt': 'keywords.example.txt',
-                'models.yaml': 'models.example.yaml', 'shortcuts.yaml': 'shortcuts.example.yaml'}
-    for name, example in examples.items():
-        target, source = folder / name, folder / example
-        if not target.exists() and source.exists():
-            # Exclusive creation avoids overwriting configuration from another process.
-            try:
-                with target.open('xb') as out:
-                    out.write(source.read_bytes())
-            except FileExistsError:
-                pass
-    return folder
+    from .profile_migration import initialize_profile
+    initialize_profile(root)
+    return CONFIG_DIR
 
 
 if __name__ == '__main__':

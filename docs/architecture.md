@@ -34,9 +34,13 @@ STT/TTS e gerenciamento de provedores ficam no núcleo. Podcast Automation usa a
 
 ## Dados e ciclo de vida
 
-- `config/`: arquivos nativos; plugins mantêm configuração local e exemplos em suas pastas.
-- `data/`: banco, histórico e resultados que não podem desaparecer com limpeza de cache.
+- `config/` e pastas de plugins: schemas e exemplos imutáveis, sem estado pessoal.
+- Documentos/pia: banco SQLite, histórico e resultados que não podem desaparecer com limpeza de cache.
 - `cache/main/<capacidade>` e `cache/<categoria>/<plugin>`: modelos e conteúdo recuperável conforme os caminhos existentes.
 - `logs/`: diagnóstico; capturas temporárias em `logs/screenshots`, removidas após salvamento bem-sucedido.
 
 Uma tela observa jobs; não é dona da duração deles. Cancelar uma espera não implica cancelar processamento já enviado a um provedor. Estado concluído exige sucesso real das etapas obrigatórias, inclusive publicação e atualização de feeds no podcast.
+
+## Perfil do usuário
+
+Configuração por ambiente foi substituída por SQLite/cofre. Dados persistentes ficam em Documentos/pia, com resolução nativa Windows/Linux por user_paths. config/ e as extensões fornecem schemas imutáveis. Consulte [Perfil e migração](PROFILE_MIGRATION.md).

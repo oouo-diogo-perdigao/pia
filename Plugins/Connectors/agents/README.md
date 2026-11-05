@@ -16,8 +16,10 @@ As chamadas recebem a mensagem por stdin, em diretório de trabalho separado, co
 
 O modo plan respeita as permissões do próprio AGY; a PIA não acrescenta flags de aprovação irrestrita nem altera permissões globais. Consulte [headless/stdin](https://antigravity.google/docs/cli/headless/) e [modos](https://antigravity.google/docs/cli/modes).
 
-Para novos conectores, forneça `pia.json`, `plugin.toml`, `.env.example` e `lang/pt-BR.json`. Implemente operações no serviço e registre explicitamente as ferramentas em `src/tool_registry.py`; valide argumentos e nunca aceite comandos arbitrários de shell. A PIA fornece configurações tipadas, jobs, logs e acesso às contas dos conectores por identificador explícito.
+Para novos conectores, forneça `pia.json`, `plugin.toml`, `settings.schema.json` e `lang/pt-BR.json`. Implemente operações no serviço e registre explicitamente as ferramentas em `src/tool_registry.py`; valide argumentos e nunca aceite comandos arbitrários de shell. A PIA fornece configurações tipadas, jobs, logs e acesso às contas dos conectores por identificador explícito.
 
 O ícone de ajuda do painel abre instruções específicas para cada CLI, com comandos de instalação, login, versão e obtenção do caminho do executável. Os protocolos disponíveis no painel são MCP e AG-UI; ACP legado e A2A síncrono não fazem mais parte da PIA.
 
 Para o sentido inverso — Codex acessando ferramentas da PIA — consulte [o guia MCP, incluindo autenticação e login](../../../docs/MCP_CODEX.md). Cadastrar esse MCP não exige AGENTS_CODEX_EXECUTABLE.
+
+Configuração e dados usam o [perfil SQLite/cofre](../../../docs/PROFILE_MIGRATION.md).

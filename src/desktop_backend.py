@@ -1,3 +1,4 @@
+from src.user_paths import user_path
 """Desktop actions shared by the companion and the expanded workspace."""
 from pathlib import Path
 import os
@@ -14,10 +15,8 @@ from Plugins.Bot.secretaria import Secretary
 
 class DesktopBackend:
     def __init__(self, notify):
-        from .plugin_migration import migrate
-        migrate()
         self.notify = notify
-        self.store = WorkspaceStore(BASE_DIR / 'data' / 'workspace.sqlite3')
+        self.store = WorkspaceStore(user_path('workspace.sqlite3'))
         self.resources = get_resources()
         from .notifications import NotificationCenter
         self.notifications=NotificationCenter(self.store,notify,self.speak)
@@ -170,10 +169,8 @@ class DesktopBackend:
             if self.podcast_process and self.podcast_process.poll() is None:
                 raise RuntimeError('Já existe uma tarefa do podcast em execução.')
             folder = BASE_DIR / 'Plugins' / 'Apps' / 'podcast_automation'
-            from src.env_types import dotenv_values
             env = os.environ.copy()
-            env.update({k: v for k, v in dotenv_values(folder / '.env').items() if v is not None})
-            env.update(PODCAST_ROOT=str(folder), PYTHONUTF8='1', PYTHONIOENCODING='utf-8',
+            env.update(PYTHONUTF8='1', PYTHONIOENCODING='utf-8',
                        CRAIG_GUI_EVENTS='1')
             from .app_access import issue,revoke
             context=issue('podcast_automation')
@@ -207,23 +204,6 @@ class DesktopBackend:
 
 def environment_fields():
     """All distributed settings, with a setup/documentation link for each field."""
-    from src.env_types import fields
-    result = []
-    for name, value in fields(CONFIG_DIR / '.env.example', CONFIG_DIR / '.env'):
-        if name.startswith(('AGE_GEMINI', 'GEMINI', 'STT_GEMINI')):
-            link = 'https://aistudio.google.com/apikey'
-        elif name.startswith(('GROQ', 'STT_GROQ')):
-            link = 'https://console.groq.com/keys'
-        elif name.startswith('HF_'):
-            link = 'https://huggingface.co/settings/tokens'
-        elif name.startswith(('OPENROUTER', 'LLM_OPENROUTER')):
-            link = 'https://openrouter.ai/settings/keys'
-        elif name.startswith(('CLOUDFLARE', 'LLM_CLOUDFLARE')):
-            link = 'https://dash.cloudflare.com/profile/api-tokens'
-        elif name.startswith('LLM_LOCAL'):
-            link = 'https://ollama.com/download'
-        else:
-            link = 'https://github.com/oouo-diogo-perdigao/pia#readme'
-        result.append((name, value, link,
-                       any(part in name for part in ('KEY', 'TOKEN', 'SECRET', 'PASSWORD'))))
-    return result
+    from src.settings_store import schema,get_store,sensitive
+    values=get_store().values('general')
+    return [(item['name'],values.get(item['name'],''),item.get('link','https://github.com/oouo-diogo-perdigao/pia#readme'),sensitive(item['name'],item['type'])) for item in schema('general')]

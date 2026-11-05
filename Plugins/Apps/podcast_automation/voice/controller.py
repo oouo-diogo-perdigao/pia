@@ -47,20 +47,13 @@ class PodcastJob:
 
     def child_env(self):
         env = os.environ.copy()
-        # A PIA carrega seu próprio .env no processo pai. O podcast precisa ler o dele.
-        env_file = self.project / '.env'
-        if env_file.exists():
-            for key in re.findall(r'^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=', env_file.read_text(encoding='utf-8'), re.MULTILINE):
-                from src.env_types import split_key
-                env.pop(key, None)
-                env.pop(split_key(key)[0], None)
         for key in ('VIRTUAL_ENV', 'UV_PROJECT_ENVIRONMENT', 'PYTHONHOME'):
             env.pop(key, None)
         from src.app_access import issue
         from src.config_paths import BASE_DIR
         self.app_context=issue('podcast_automation')
         env['PIA_APP_CONTEXT']=self.app_context
-        env.update(PODCAST_ROOT=str(self.project), CRAIG_GUI_EVENTS='1',
+        env.update(CRAIG_GUI_EVENTS='1',
                    PYTHONIOENCODING='utf-8', PYTHONUTF8='1',
                    PYTHONPATH=str(BASE_DIR)+os.pathsep+str(self.project/'src') + os.pathsep + str(self.project))
         return env
@@ -71,8 +64,9 @@ class PodcastJob:
                 raise RuntimeError('O processamento já está em execução.')
             if not (self.project/'src/podcast_automation/main.py').is_file():
                 raise RuntimeError('Arquivos do aplicativo não encontrados na PIA.')
-            self.project.joinpath('data/logs').mkdir(parents=True, exist_ok=True)
-            self.log_path = self.project/'data/logs'/('pia-podcast-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f') + '.log')
+            from src.config_paths import BASE_DIR
+            folder=BASE_DIR/'logs/plugins/Apps/podcast_automation';folder.mkdir(parents=True,exist_ok=True)
+            self.log_path = folder/('pia-podcast-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f') + '.log')
             self.session, self.percent, self.links = '', None, {}
             self.stage, self.stop_requested, self.returncode = 'Preparando processamento', False, None
             self.process = subprocess.Popen(

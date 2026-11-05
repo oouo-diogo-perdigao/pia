@@ -87,7 +87,7 @@ a secretária local, dependências gráficas e os testes.
 
 # Configuração
 
-Toda a configuração principal fica em `config/.env`. `keywords.txt`, `models.yaml` e `shortcuts.yaml` também ficam em `config/`.
+As configurações são editadas pela interface e ficam no SQLite em **Documentos/pia**. Credenciais ficam no cofre do sistema. Atalhos, catálogo e palavras de ativação são documentos lógicos no banco. Não há configuração por `.env` ou variáveis de ambiente. Veja [perfil, cofre e exportação/importação](docs/PROFILE_MIGRATION.md). Os identificadores abaixo descrevem campos internos da interface, não arquivos de configuração.
 
 ## Servidor
 
@@ -199,7 +199,7 @@ Limites e dependências:
 
 - `OPENAI_COMPAT_MAX_UPLOAD_BYTES=209715200`: 200 MiB para o **corpo HTTP inteiro**,
   incluindo overhead multipart ou Base64; excesso retorna HTTP 413.
-- `OPENAI_COMPAT_TIMEOUT_SECONDS=180`: espera pelo worker local; aumente no `.env`
+- `OPENAI_COMPAT_TIMEOUT_SECONDS=180`: espera pelo worker local; aumente na interface
   para podcasts longos e ajuste também os timeouts do cliente/proxy. A execução
   local usa memória proporcional ao áudio decodificado; o limite de upload não
   garante que qualquer duração caiba na memória disponível.
@@ -560,7 +560,7 @@ src/
   sounds/                   # sons de interface
   ui/                       # páginas HTML
   ...                       # módulos de voz, chat, desktop e plugins
-config/                     # configuração geral e exemplos
+config/                     # schemas e exemplos imutáveis
 Plugins/
   Apps/podcast_automation/   # processamento, UI e voice/ no mesmo app
   Bot/
@@ -593,7 +593,7 @@ A aplicação foi estruturada para manter modelos pesados em workers/processos s
 ## Observações de segurança
 
 - Não coloque chaves reais no repositório.
-- Mantenha `config/.env` e as configurações privadas dos plugins fora do Git.
+- Dados e configurações pessoais ficam em Documentos/pia; credenciais, no cofre do sistema. Não os inclua no Git.
 - Se expuser `HOST=0.0.0.0`, configure `OPENAI_COMPAT_API_KEY` e proteja a rede.
 - O fallback local permite continuar usando STT e chat sem depender exclusivamente de APIs externas, desde que os modelos locais necessários estejam instalados.
 
@@ -603,7 +603,7 @@ A aba `stt` do visualizador mostra preparação e progresso de arquivos transcri
 
 ### Whisper local na GPU
 
-Para uma NVIDIA com bibliotecas CUDA/cuDNN compatíveis, use `STT_DEVICE=cuda` e `STT_COMPUTE_TYPE=float16` no `.env`. A instalação local com RTX 3080 de 10 GB foi validada com inferência CUDA real usando o modelo em cache. O log informa dispositivo e precisão efetivos. O ajuste vale para todas as transcrições do Whisper local, mantendo a ordem dos provedores e uma tarefa por worker. Reinicie a PIA para carregar a configuração; não é necessário interromper uma transcrição em andamento. Para economizar VRAM, pode-se avaliar `int8_float16`; para retornar à CPU, use `cpu` e `int8`.
+Para uma NVIDIA com bibliotecas CUDA/cuDNN compatíveis, use `STT_DEVICE=cuda` e `STT_COMPUTE_TYPE=float16` em Configurações. A instalação local com RTX 3080 de 10 GB foi validada com inferência CUDA real usando o modelo em cache. O log informa dispositivo e precisão efetivos. O ajuste vale para todas as transcrições do Whisper local, mantendo a ordem dos provedores e uma tarefa por worker. Reinicie a PIA para carregar a configuração; não é necessário interromper uma transcrição em andamento. Para economizar VRAM, pode-se avaliar `int8_float16`; para retornar à CPU, use `cpu` e `int8`.
 
 ## Skills de voz e plugins
 

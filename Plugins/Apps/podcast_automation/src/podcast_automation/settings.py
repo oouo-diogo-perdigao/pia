@@ -4,27 +4,23 @@ import json
 import os
 from functools import lru_cache
 from pathlib import Path
-from src.env_types import load_dotenv
+from src.settings_store import values,document
+from src.user_paths import user_path
 
-ROOT = Path(
-    os.getenv("PODCAST_ROOT", str(Path(__file__).resolve().parents[2]))
-).resolve()
-load_dotenv(ROOT / ".env", override=False)
+ROOT=Path(__file__).resolve().parents[2]
+
+def option(name,default=None):return values('Apps/podcast_automation').get(name,default)
 
 
 def project_path(value: str) -> Path:
     path = Path(value).expanduser()
-    return path if path.is_absolute() else ROOT / path
+    return path if path.is_absolute() else user_path('apps/podcast_automation')/path
 
 
 @lru_cache(maxsize=1)
 def get_config() -> dict:
-    path = project_path(os.getenv("PODCAST_CONFIG", "config/config.json"))
-    if not path.is_file():
-        raise RuntimeError(
-            f"Configuração não encontrada: {path}. Copie docs/examples/config.example.json para config/config.json e personalize."
-        )
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data=document('Apps/podcast_automation/campaigns')
+    if data is None:data=json.loads((ROOT/'docs/examples/config.example.json').read_text(encoding='utf-8'))
     for key in (
         "nomes_reais",
         "campaign_details",
@@ -66,14 +62,14 @@ def get_config() -> dict:
 
 
 def env_bool(name: str, default: bool = False) -> bool:
-    value = os.getenv(name, str(default)).strip().lower()
+    value = option(name, str(default)).strip().lower()
     if value not in ("true", "false", "1", "0"):
         raise ValueError(f"{name} deve ser true ou false.")
     return value in ("true", "1")
 
 
 def get_download_dir() -> Path:
-    path = project_path(os.getenv("DOWNLOAD_DIR", "data/download"))
+    path = user_path('apps/podcast_automation/download')
     path.mkdir(parents=True, exist_ok=True)
     return path
 

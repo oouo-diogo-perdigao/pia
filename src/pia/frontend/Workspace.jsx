@@ -901,7 +901,31 @@ export default function Workspace({ standalone = null }) {
                         navigate({ view: "settings", section: "plugins" })
                       }
                     >
-                      {t("Variáveis dos plugins")}
+                      {t("Configurações dos plugins")}
+                    </Nav>
+                    <Nav
+                      active={route.section === "documents"}
+                      onClick={() =>
+                        navigate({ view: "settings", section: "documents" })
+                      }
+                    >
+                      Ativação e atalhos
+                    </Nav>
+                    <Nav
+                      active={route.section === "transfer"}
+                      onClick={() =>
+                        navigate({ view: "settings", section: "transfer" })
+                      }
+                    >
+                      Exportar / importar
+                    </Nav>
+                    <Nav
+                      active={route.section === "credentials"}
+                      onClick={() =>
+                        navigate({ view: "settings", section: "credentials" })
+                      }
+                    >
+                      Cofre
                     </Nav>
                     <Nav
                       active={route.section === "logs"}
@@ -958,6 +982,9 @@ export default function Workspace({ standalone = null }) {
                   <Stack gap={4}>
                     {[
                       ["principal", "Principal"],
+                      ...(route.app === "music"
+                        ? [["history", "Histórico"]]
+                        : []),
                       ...(route.app === "podcast_automation"
                         ? [["campaigns", "Campanhas"]]
                         : []),

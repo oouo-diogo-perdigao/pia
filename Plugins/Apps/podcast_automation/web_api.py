@@ -5,6 +5,8 @@ import secrets
 import threading
 from src.pia.service import Job
 from src.resource_plugins import save_json
+from src.settings_store import document,save_document,values
+from src.user_paths import user_path
 from .pipeline import initial, apply
 from . import power
 from .recording_queue import pending_files
@@ -18,13 +20,12 @@ _lock = threading.Lock()
 def handle(action, data, context):
     global _latest
     if action=='pending-preview':
-        from src.env_types import dotenv_values
         config=handle('config',{},context)
         options={**config.get('integrations',{}),**{key:data[key] for key in ('google_account','google_folder') if key in data}}
-        env=dotenv_values(ROOT/'.env')
+        env=values('Apps/podcast_automation')
         if str(env.get('DRIVE_PROCESS','true')).lower() in ('false','0'):
             folder=Path(env.get('LOCAL_DRIVE_FOLDER') or 'data/local-drive')
-            if not folder.is_absolute():folder=ROOT/folder
+            if not folder.is_absolute():folder=user_path('apps/podcast_automation')/folder
             files=[{'id':str(file),'name':file.name} for file in folder.glob('*') if file.is_file() and file.suffix.lower()=='.zip']
             path=str(folder)
         else:
@@ -63,10 +64,8 @@ def handle(action, data, context):
         task=_tasks.get(_latest)
         return task['pipeline'] if task else initial()
     if action == 'config':
-        path = ROOT / 'config/config.json'
-        if not path.exists():
-            path = ROOT / 'docs/examples/config.example.json'
-        return json.loads(path.read_text(encoding='utf-8'))
+        value=document('Apps/podcast_automation/campaigns')
+        return value if value is not None else json.loads((ROOT/'docs/examples/config.example.json').read_text(encoding='utf-8'))
     if action=='save-options':
         config=handle('config',{},context)
         outputs=data.get('outputs',{})
@@ -84,7 +83,7 @@ def handle(action, data, context):
         config['outputs']={**{name:True for name in ('resumo.json','srt','txt','vtt')},**outputs,'mp3':True}
         config['integrations']={**config.get('integrations',{}),**integrations}
         if 'discord_channels' in integrations:config['integrations'].pop('discord_channel',None)
-        save_json(ROOT/'config/config.json',config)
+        save_document('Apps/podcast_automation/campaigns',config)
         return {'ok':True}
     if action == 'save-config':
         value = data['value']
@@ -94,7 +93,7 @@ def handle(action, data, context):
         # Campaign editing must not overwrite newer account/folder selections.
         existing=handle('config',{},context)
         value={**value,**{key:existing[key] for key in ('integrations','outputs') if key in existing}}
-        save_json(ROOT / 'config/config.json', value)
+        save_document('Apps/podcast_automation/campaigns',value)
         return {'ok': True}
     if action == 'stop':
         with _lock:
@@ -131,7 +130,7 @@ def handle(action, data, context):
         elif task in ('merge_srt', 'merge_vtt'):
             module = 'utilities.' + task
             kind = task.split('_')[1]
-            directory = ROOT / 'data/web-tasks' / secrets.token_hex(8)
+            directory = user_path('apps/podcast_automation/web-tasks') / secrets.token_hex(8)
             directory.mkdir(parents=True)
             for key in ('first', 'second'):
                 value = data.get(key)

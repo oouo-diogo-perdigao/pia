@@ -7,13 +7,13 @@ import subprocess
 import sys
 import tempfile
 from src.config_paths import BASE_DIR
-from src.env_types import dotenv_values
+from src.settings_store import values as section_values, document, save_document
 
 ROOT=Path(__file__).resolve().parent
 
 def executable(provider):
     if provider not in ('codex','agy'):raise ValueError('Escolha codex ou agy (Google Antigravity).')
-    configured=dotenv_values(ROOT/'.env').get('AGENTS_'+provider.upper()+'_EXECUTABLE')
+    configured=section_values('Connectors/agents').get('AGENTS_'+provider.upper()+'_EXECUTABLE')
     found=configured or shutil.which(provider) or shutil.which(provider+'.cmd')
     if not found and provider=='agy':
         locations=[Path.home()/'.local/bin'/('agy.exe' if sys.platform=='win32' else 'agy')]

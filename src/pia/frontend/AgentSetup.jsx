@@ -98,9 +98,9 @@ export default function AgentSetup({ provider, opened, onClose, status }) {
         <Command>{path}</Command>
         <Text size="sm">
           Copie uma linha com o caminho completo, sem aspas, para{" "}
-          <Code>{variable}</Code> nas variáveis deste conector, logo abaixo do
-          painel de consulta. No Windows use o agy.exe nativo; para Codex pode
-          usar codex.cmd do npm ou codex.exe.
+          <Code>{variable}</Code> nas configurações deste conector, logo abaixo
+          do painel de consulta. No Windows use o agy.exe nativo; para Codex
+          pode usar codex.cmd do npm ou codex.exe.
         </Text>
         {!codex && platform === "windows" && (
           <Text size="sm">
@@ -116,7 +116,7 @@ export default function AgentSetup({ provider, opened, onClose, status }) {
         )}
         <Text fw={600}>4. Salve, reinicie e teste</Text>
         <Text size="sm">
-          Ao salvar variáveis, a PIA solicita o reinício. Se instalou o CLI
+          Ao salvar configurações, a PIA solicita o reinício. Se instalou o CLI
           depois de abrir a PIA, reinicie pelo menu da bandeja. Selecione o
           agente e envie uma pergunta curta, por exemplo “Responda apenas:
           conexão funcionando”. A consulta usa sua conta e está sujeita aos

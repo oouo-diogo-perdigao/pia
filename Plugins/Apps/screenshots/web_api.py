@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 from src.resource_plugins import save_json
+from src.settings_store import document,save_document
 
 ROOT = Path(__file__).resolve().parent
 DEFAULTS = {'format': 'png', 'quality': 92, 'prefill_title': True, 'prefill_url': False,
@@ -9,8 +10,8 @@ DEFAULTS = {'format': 'png', 'quality': 92, 'prefill_title': True, 'prefill_url'
 
 
 def config():
-    path = ROOT / 'config.json'
-    return {**DEFAULTS, **(json.loads(path.read_text(encoding='utf-8')) if path.exists() else {})}
+    from src.user_paths import user_path
+    return {**DEFAULTS,**document('Apps/screenshots',{}),'output_folder':str(user_path('screenshots'))}
 
 
 def handle(action, data, context):
@@ -23,7 +24,7 @@ def handle(action, data, context):
         for key in ('prefill_title', 'prefill_url', 'border', 'auto_save', 'auto_copy'):
             if not isinstance(value[key], bool):
                 raise ValueError('Preferência inválida.')
-        save_json(ROOT / 'config.json', {k: value[k] for k in DEFAULTS})
+        save_document('Apps/screenshots',{k:value[k] for k in DEFAULTS if k!='output_folder'})
         return {'ok': True}
     if action == 'status' and context.native_handler is None:
         return {'available': False, 'captures': []}

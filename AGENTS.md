@@ -14,8 +14,8 @@ PIA é uma assistente pessoal local para Windows e Linux, com chat web/desktop, 
 - `src/pia/`: workspace web e seus assets compilados.
 - `src/piamini/`: Mini PIA; imagens e sons em `src/images/` e `src/sounds/`.
 - `Plugins/{Apps,Bot,Connectors,Skills,Browser}/`: extensões com implementação própria.
-- `config/`: configurações nativas; configurações de extensões ficam na própria extensão.
-- `data/`: estado e resultados persistentes; `cache/`: conteúdo recuperável; `logs/`: diagnóstico e temporários específicos.
+- `config/`: schemas e exemplos imutáveis; schemas de extensões ficam na própria extensão.
+- Documentos do sistema `/pia/`: SQLite, estado e resultados persistentes. `cache/`: modelos/conteúdo recuperável; `logs/`: diagnóstico e temporários específicos.
 
 ## Regras duradouras
 
@@ -24,6 +24,7 @@ PIA é uma assistente pessoal local para Windows e Linux, com chat web/desktop, 
 - Nunca invente timestamps nem distribua texto uniformemente. Preserve a linha do tempo original; áudio sem fala é resultado vazio válido.
 - Apps usam contas e credenciais dos conectores. Conectores suportam contas distintas explicitamente selecionadas; não suponha conta pessoal/profissional.
 - Não exponha segredos em assets, manifestos, logs ou exemplos. Preserve autenticação das ações nativas e limites de upload.
+- Configuração usa `settings_store` e SQLite; credenciais usam exclusivamente o cofre do sistema. Não reintroduza `.env` nem variáveis de ambiente como configuração de usuário. `user_paths` resolve os caminhos padrão; exportação/importação usa backup criptografado por senha.
 - Operações longas rodam em jobs independentes da tela, com progresso estruturado e erro específico. Sair de um app não cancela o job.
 - Preserve paridade funcional da bandeja Windows/Linux. WSL é ambiente Linux; não é instalação nativa Windows.
 - Mantenha a raiz enxuta. Não crie novos launchers, cópias de apps ou arquivos de configuração na raiz sem necessidade justificada.

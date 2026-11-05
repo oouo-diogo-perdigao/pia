@@ -40,3 +40,5 @@ Comandos reproduzíveis e seleção de testes estão em [testing.md](testing.md)
 Use a branch solicitada pelo usuário; para uma nova branch sem nome especificado, prefira `codex/<assunto>`. Não mude branch com trabalho local sem avaliar como preservá-lo. Commit/PR/push são feitos quando autorizados, sem merge automático.
 
 Documente o comportamento final, não o histórico da conversa. Regras gerais pertencem ao AGENTS.md; operação e contratos aos docs/READMEs; decisões aos ADRs; pedidos pendentes a issues ou TODOs claramente identificados. Antes de citar um comando, confira que existe no repositório.
+
+Configuração e dados usam o [perfil SQLite/cofre](PROFILE_MIGRATION.md).
