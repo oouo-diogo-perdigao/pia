@@ -1,5 +1,7 @@
 # App Object Storage
 
+As contas aparecem como botões no app e em Configurações → Conectores → Object Storage. A selecionada usa fundo preenchido, a cor da conta e um check. No app, trocar de conta reinicia bucket e caminho; durante transferências a seleção fica bloqueada. Nas configurações, clicar na conta abre seu formulário de edição.
+
 O caminho é navegável: `bucket / pasta / pasta atual`. A primeira linha de uma
 subpasta é **.. / Voltar**; é também destino de arraste. Arraste arquivos ou
 seleções para uma pasta, Voltar ou um ancestral no caminho para movê-los dentro

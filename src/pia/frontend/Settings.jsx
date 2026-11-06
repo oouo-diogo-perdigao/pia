@@ -36,6 +36,7 @@ import {
   Unlink,
   Plus,
   Settings as Gear,
+  Check,
 } from "lucide-react";
 import { api, appApi, copy, report, safe, watchJob, session } from "./api";
 import { Icon, Nav, LogViewer, usePia } from "./shared";
@@ -210,27 +211,41 @@ export function StorageAccounts() {
   return (
     <Paper withBorder p="lg" mt="lg">
       <Title order={4}>Contas Object Storage</Title>
-      {accounts.map((account) => (
-        <Group key={account.id} mt="sm" justify="space-between">
-          <Text>{account.name}</Text>
-          {
-            <Group>
-              <Button variant="subtle" onClick={safe(() => edit(account))}>
-                Editar
-              </Button>
-              <Icon
-                icon={Trash2}
-                label="Remover conta"
-                confirm
-                onClick={async () => {
-                  await call("remove-account", { id: account.id });
-                  await refresh();
-                }}
-              />
-            </Group>
-          }
-        </Group>
-      ))}
+      <Group
+        mt="md"
+        gap="xs"
+        role="group"
+        aria-label="Editar contas Object Storage"
+      >
+        {accounts.map((account) => (
+          <Group key={account.id} gap={4} wrap="nowrap">
+            <Button
+              variant={form.id === account.id ? "filled" : "outline"}
+              color={account.color || "#9b7aff"}
+              aria-pressed={form.id === account.id}
+              leftSection={
+                form.id === account.id ? <Check size={16} /> : undefined
+              }
+              onClick={safe(() => edit(account))}
+            >
+              {account.name}
+            </Button>
+            <Icon
+              icon={Trash2}
+              label="Remover conta"
+              confirm
+              onClick={async () => {
+                await call("remove-account", { id: account.id });
+                if (form.id === account.id) {
+                  setForm({ provider: "s3", region: "auto" });
+                  setSavedForm(fingerprint({ provider: "s3", region: "auto" }));
+                }
+                await refresh();
+              }}
+            />
+          </Group>
+        ))}
+      </Group>
       <Stack mt="lg">
         <ColorInput
           label="Cor da conta"
