@@ -287,6 +287,34 @@ class WorkspaceService:
         if path=='/settings/export':
             from src.config_transfer import export_config
             return export_config(data['password'])
+        if path == '/settings/google-backup':
+            import base64
+            from Plugins.Connectors.google.drive import Drive
+            from src.config_transfer import LIMIT, MAGIC, export_config
+
+            resources = self.backend.resources
+            if method == 'GET':
+                return {'accounts': [
+                    {'id': account['id'], 'label': account.get('label') or account['id'],
+                     'email': account.get('email', '')}
+                    for account in resources.accounts('google')
+                ]}
+            account = data.get('account')
+            if not isinstance(account, str) or not account.strip():
+                raise ValueError('Selecione uma conta Google.')
+            drive = Drive(resources)
+            drive.account(account)
+            name = 'pia-configuracoes.pia-backup'
+            if data.get('action') == 'export':
+                backup = export_config(data['password'])
+                file = drive.save_app_data(account, name, base64.b64decode(backup['data']))
+                return {'created': file.get('createdTime')}
+            if data.get('action') == 'download':
+                file, content = drive.latest_app_data(account, name, len(MAGIC) + 16 + 12 + LIMIT + 16)
+                if not content.startswith(MAGIC):
+                    raise ValueError('O arquivo no Google Drive não é um backup da PIA.')
+                return {'created': file.get('createdTime'), 'data': base64.b64encode(content).decode('ascii')}
+            raise ValueError('Ação de backup inválida.')
         if path=='/settings/import-preview':
             from src.config_transfer import preview_config
             return preview_config(data['data'],data['password'])

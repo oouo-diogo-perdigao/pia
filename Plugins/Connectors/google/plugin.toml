@@ -2,4 +2,4 @@ id = "google"
 provider = "google"
 name = "Google · Gmail, Agenda e Drive"
 setup_url = "https://console.cloud.google.com/apis/credentials"
-scopes = ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/calendar.readonly", "https://www.googleapis.com/auth/drive"]
+scopes = ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/calendar.readonly", "https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/drive.appdata"]

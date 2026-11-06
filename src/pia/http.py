@@ -119,7 +119,7 @@ def route(handler):
                 else:respond(handler,200,file.read_bytes(),mimetypes.guess_type(file.name)[0])
                 return True
             if handler.command == 'GET' and not path.startswith('/api/pia/events/') and path.removeprefix('/api/pia') not in {
-                '/state', '/chat/messages', '/settings', '/accounts', '/bots', '/bots/secretaria', '/logs', '/preferences', '/notifications', '/notifications/counts','/settings/documents','/settings/credentials','/settings/storage'}:
+                '/state', '/chat/messages', '/settings', '/accounts', '/bots', '/bots/secretaria', '/logs', '/preferences', '/notifications', '/notifications/counts','/settings/documents','/settings/credentials','/settings/storage','/settings/google-backup'}:
                 respond(handler, 405, {'error': 'Use POST para esta operação.'})
                 return True
             if path.startswith('/api/pia/events/'):

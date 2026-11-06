@@ -2,6 +2,8 @@
 
 ## Drive compartilhado com apps
 
+O backup do perfil usa o escopo `drive.appdata` e a pasta privada de dados da PIA no Drive. Autorize novamente contas conectadas antes da inclusão desse escopo. Para restaurar entre computadores, conecte a mesma conta com o mesmo cliente OAuth. O Drive recebe apenas o backup criptografado. [Como exportar e importar](../../../docs/PROFILE_MIGRATION.md).
+
 `drive.py` utiliza as contas OAuth autorizadas em **Conectores / Google**, compartilhadas com Gmail e Agenda. O podcast guarda apenas a conta e a pasta escolhidas no seu config.json. Não é necessário `GOOGLE_APPLICATION_CREDENTIALS__FILE`; arquivos antigos não são usados nem apagados. A pasta de gravações é escolhida no navegador de pastas do próprio podcast e deve ser confirmada em **Salvar opções**.
 
 API: `Drive(resources).accounts()`, `.list(account,folder,folders_only,cursor,search)`, `.download(file_id,destination,account)` e `.rename(file_id,name,account)`. A listagem suporta paginação e drives compartilhados; download grava em arquivo temporário e só substitui o destino quando termina. Skills podem listar pastas com `piaPlugins('google','drive.folders',account='ID')`.

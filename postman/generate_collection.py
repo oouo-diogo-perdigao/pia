@@ -53,6 +53,7 @@ BODIES = {
     '/chat/read': {'chat': '{{chat_id}}', 'through': 1},
     '/folder/save': {'name': 'Minha pasta'}, '/folder/delete': {'id': '{{folder_id}}'},
     '/settings/export': {'password': '{{backup_password}}'},
+    '/settings/google-backup': {'action': 'export', 'account': '{{account_id}}', 'password': '{{backup_password}}'},
     '/settings/import-preview': {'data': '{{backup_base64}}', 'password': '{{backup_password}}'},
     '/settings/import': {'data': '{{backup_base64}}', 'password': '{{backup_password}}'},
     '/settings/credential': {'name': '{{credential_name}}'},
@@ -152,7 +153,7 @@ def build():
     readable = {'/state', '/chat/messages', '/settings', '/accounts', '/bots', '/bots/secretaria', '/logs', '/preferences', '/notifications', '/notifications/counts', '/settings/documents', '/settings/credentials', '/settings/storage'}
     for fn in functions('src/pia/service.py', {'_dispatch'}):
         for path in sorted(compared(fn, 'path')):
-            methods = ['GET', 'POST'] if path in ('/preferences', '/bots/secretaria', '/settings/documents') else ['GET' if path in readable else 'POST']
+            methods = ['GET', 'POST'] if path in ('/preferences', '/bots/secretaria', '/settings/documents', '/settings/google-backup') else ['GET' if path in readable else 'POST']
             for method in methods:
                 body = BODIES.get(path, {})
                 if path == '/bots/secretaria':
