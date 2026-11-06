@@ -46,9 +46,9 @@ export function TransferSettings() {
       <Stack>
         <Text fw={600}>Migrar configurações entre computadores</Text>
         <Text size="sm">
-          Exporta as configurações e as credenciais do cofre em um arquivo
-          criptografado por senha. O arquivo funciona no Windows e Linux. Chats,
-          músicas, capturas e modelos não fazem parte deste backup.
+          Exporta as configurações e as credenciais do cofre em um arquivo com
+          senha opcional. O arquivo funciona no Windows e Linux. Chats, músicas,
+          capturas e modelos não fazem parte deste backup.
         </Text>
         {storage && (
           <Text size="sm" c="dimmed">
@@ -61,8 +61,8 @@ export function TransferSettings() {
           </Text>
         ))}
         <PasswordInput
-          label="Senha do arquivo de migração"
-          description="Mínimo de 12 caracteres. Você precisará desta senha no outro computador."
+          label="Senha do arquivo de migração (opcional)"
+          description="Preencha para criptografar o backup. Use a mesma senha ao importar."
           value={password}
           onChange={(event) => {
             setPassword(event.target.value);
@@ -70,6 +70,11 @@ export function TransferSettings() {
           }}
           autoComplete="new-password"
         />
+        {!password && (
+          <Text size="sm" c="orange">
+            Sem senha, o backup contém as credenciais em texto legível.
+          </Text>
+        )}
         <PasswordInput
           label="Confirmar senha para exportar"
           value={confirmation}
@@ -78,7 +83,7 @@ export function TransferSettings() {
         />
         <Group>
           <Button
-            disabled={busy || password.length < 12 || password !== confirmation}
+            disabled={busy || password !== confirmation}
             onClick={safe(() =>
               work(async () => {
                 const result = await api("/settings/export", { password });
@@ -103,7 +108,9 @@ export function TransferSettings() {
                 setPassword("");
                 setConfirmation("");
                 setMessage(
-                  "Arquivo de migração preparado. Guarde a senha separadamente.",
+                  password
+                    ? "Arquivo de migração preparado. Guarde a senha separadamente."
+                    : "Arquivo de migração preparado sem senha.",
                 );
               }),
             )}
@@ -126,7 +133,7 @@ export function TransferSettings() {
                 setData(encoded);
                 setPreview(null);
                 setMessage(
-                  "Arquivo carregado. Informe sua senha e clique em Verificar.",
+                  "Arquivo carregado. Informe a senha, se houver, e clique em Verificar importação.",
                 );
               }),
             )}
@@ -138,7 +145,7 @@ export function TransferSettings() {
             )}
           </FileButton>
           <Button
-            disabled={busy || !data || password.length < 12}
+            disabled={busy || !data}
             onClick={safe(() =>
               work(async () =>
                 setPreview(
@@ -164,12 +171,7 @@ export function TransferSettings() {
         <Group>
           <Button
             variant="light"
-            disabled={
-              busy ||
-              !googleAccount ||
-              password.length < 12 ||
-              password !== confirmation
-            }
+            disabled={busy || !googleAccount || password !== confirmation}
             onClick={safe(() =>
               work(async () => {
                 await api("/settings/google-backup", {
@@ -179,7 +181,11 @@ export function TransferSettings() {
                 });
                 setPassword("");
                 setConfirmation("");
-                setMessage("Backup criptografado salvo no Google Drive.");
+                setMessage(
+                  password
+                    ? "Backup criptografado salvo no Google Drive."
+                    : "Backup sem senha salvo no Google Drive.",
+                );
               }),
             )}
           >
@@ -200,7 +206,7 @@ export function TransferSettings() {
                   ? ` (${new Date(result.created).toLocaleString()})`
                   : "";
                 setMessage(
-                  `Backup do Google Drive carregado${date}. Informe a senha e clique em Verificar importação.`,
+                  `Backup do Google Drive carregado${date}. Informe a senha, se houver, e clique em Verificar importação.`,
                 );
               }),
             )}
