@@ -10,7 +10,7 @@ Configurações e credenciais na instalação dificultavam migração Windows/Li
 
 Configurações são gerenciadas pela interface e persistidas no SQLite em Documentos/pia. Credenciais ficam no cofre do sistema. Schemas versionados descrevem campos sem segredos. Dados persistentes usam o perfil; cache, logs e ambiente Python permanecem na instalação. O launcher importa arquivos antigos uma vez.
 
-A exportação usa AES-GCM e chave derivada por Scrypt com senha do usuário. Inclui configurações e entradas lógicas do cofre; histórico e mídia ficam fora desse arquivo.
+A exportação usa AES-GCM e chave derivada por Scrypt quando o usuário informa uma senha. Com a senha em branco, o backup fica em texto legível. Inclui configurações e entradas lógicas do cofre. Histórico e mídia ficam fora desse arquivo.
 
 ## Consequências
 

@@ -1,4 +1,4 @@
-"""Portable authenticated-encryption backup. Passwords/plaintext never touch disk."""
+"""Portable profile backup with optional authenticated encryption."""
 import base64
 import json
 import os
@@ -11,17 +11,19 @@ from .settings_store import get_store,synchronized
 from .user_paths import USER_DIR
 
 MAGIC=b'PIA-BACKUP-1\n'
+PLAIN_MAGIC=b'PIA-BACKUP-PLAIN-1\n'
+BACKUP_HEADERS=(MAGIC,PLAIN_MAGIC)
 LIMIT=16*1024**2
+MAX_BACKUP_BYTES=LIMIT+len(MAGIC)+16+12+16
 
 
 def key(password,salt):
-    if not isinstance(password,str) or len(password)<12 or len(password)>1024:
-        raise ValueError('Use uma senha de 12 a 1024 caracteres para o arquivo de migração.')
     return Scrypt(salt=salt,length=32,n=2**15,r=8,p=1).derive(password.encode('utf-8'))
 
 
 @synchronized
 def export_config(password,store=None):
+    if not isinstance(password,str):raise ValueError('Senha inválida.')
     store=store or get_store()
     secret_names=[row[0] for row in store.rows('vault_entries')]
     secrets={name:store.vault.get(name) for name in secret_names}
@@ -43,19 +45,27 @@ def export_config(password,store=None):
                 payload['preferences']=db.execute("SELECT key,value FROM values_store WHERE key LIKE 'ui:%' OR key='notifications:settings'").fetchall()
     raw=json.dumps(payload).encode('utf-8')
     if len(raw)>LIMIT:raise ValueError('Configurações excedem o limite de 16 MiB.')
-    salt=os.urandom(16);nonce=os.urandom(12)
-    blob=MAGIC+salt+nonce+AESGCM(key(password,salt)).encrypt(nonce,raw,MAGIC)
+    if password:
+        salt=os.urandom(16);nonce=os.urandom(12)
+        blob=MAGIC+salt+nonce+AESGCM(key(password,salt)).encrypt(nonce,raw,MAGIC)
+    else:
+        blob=PLAIN_MAGIC+raw
     return {'filename':'pia-configuracoes.pia-backup','data':base64.b64encode(blob).decode('ascii')}
 
 
 def decode(data,password):
+    if not isinstance(password,str):raise ValueError('Senha inválida.')
     if not isinstance(data,str) or len(data)>24*1024**2:raise ValueError('Arquivo de migração inválido ou maior que 16 MiB.')
     try:blob=base64.b64decode(data,validate=True)
     except ValueError:raise ValueError('Arquivo de migração inválido.') from None
-    if not blob.startswith(MAGIC) or len(blob)<len(MAGIC)+44:raise ValueError('Formato de migração não reconhecido.')
-    offset=len(MAGIC);salt=blob[offset:offset+16];nonce=blob[offset+16:offset+28]
-    try:raw=AESGCM(key(password,salt)).decrypt(nonce,blob[offset+28:],MAGIC)
-    except InvalidTag:raise ValueError('Senha incorreta ou arquivo adulterado.') from None
+    if blob.startswith(PLAIN_MAGIC):
+        raw=blob[len(PLAIN_MAGIC):]
+    elif blob.startswith(MAGIC) and len(blob)>=len(MAGIC)+44:
+        if not password:raise ValueError('Informe a senha deste backup.')
+        offset=len(MAGIC);salt=blob[offset:offset+16];nonce=blob[offset+16:offset+28]
+        try:raw=AESGCM(key(password,salt)).decrypt(nonce,blob[offset+28:],MAGIC)
+        except InvalidTag:raise ValueError('Senha incorreta ou arquivo adulterado.') from None
+    else:raise ValueError('Formato de migração não reconhecido.')
     if len(raw)>LIMIT:raise ValueError('Arquivo excede o limite de 16 MiB.')
     try:value=json.loads(raw)
     except ValueError:raise ValueError('Conteúdo de migração inválido.') from None

@@ -253,9 +253,9 @@ class DesktopUI(QObject):
         if action=='save-config-backup':
             import base64
             from .user_paths import user_path
-            from .config_transfer import MAGIC
+            from .config_transfer import BACKUP_HEADERS, MAX_BACKUP_BYTES
             raw=base64.b64decode(payload['data'],validate=True)
-            if len(raw)>24*1024**2 or not raw.startswith(MAGIC):raise ValueError('Backup inválido.')
+            if len(raw)>MAX_BACKUP_BYTES or not raw.startswith(BACKUP_HEADERS):raise ValueError('Backup inválido.')
             folder=user_path('exports');folder.mkdir(parents=True,exist_ok=True)
             target,_=QFileDialog.getSaveFileName(self.window,'Exportar configurações',str(folder/'pia-configuracoes.pia-backup'),'PIA backup (*.pia-backup)')
             if not target:return {'cancelled':True}

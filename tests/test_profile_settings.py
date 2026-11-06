@@ -26,10 +26,11 @@ def test_no_env_override_and_secrets_never_enter_sqlite(isolated_profile,monkeyp
     assert isolated_profile.vault.get('setting:general:OPENAI_COMPAT_API_KEY')=='fixture-secret'
 
 
-def test_google_backup_roundtrip_through_private_drive_space(isolated_profile):
+@pytest.mark.parametrize('password', ['x', ''])
+def test_google_backup_roundtrip_through_private_drive_space(isolated_profile, password):
     from unittest.mock import MagicMock, Mock
     from src.pia.service import WorkspaceService
-    from src.config_transfer import MAGIC
+    from src.config_transfer import MAGIC, PLAIN_MAGIC
 
     isolated_profile.save('general', {'OPENAI_COMPAT_API_KEY': 'fixture-secret'})
     session = Mock()
@@ -41,7 +42,6 @@ def test_google_backup_roundtrip_through_private_drive_space(isolated_profile):
     workspace = SimpleNamespace(backend=SimpleNamespace(resources=resources))
     path = '/settings/google-backup'
     dispatch = WorkspaceService._dispatch
-    password = 'fixture backup password'
     assert dispatch(workspace, 'GET', path, {}, {})['accounts'][0]['id'] == 'backup-account'
     with pytest.raises(ValueError):
         dispatch(workspace, 'POST', path, {'action': 'export', 'password': password}, {})
@@ -59,17 +59,16 @@ def test_google_backup_roundtrip_through_private_drive_space(isolated_profile):
     upload_start, upload_put = session.request.call_args_list
     assert upload_start.kwargs['json']['parents'] == ['appDataFolder']
     assert upload_put.args == ('PUT', upload_url)
-    ciphertext = upload_put.kwargs['data']
-    assert ciphertext.startswith(MAGIC)
-    assert b'fixture-secret' not in ciphertext
-    assert password.encode() not in ciphertext
+    content = upload_put.kwargs['data']
+    assert content.startswith(MAGIC if password else PLAIN_MAGIC)
+    assert (b'fixture-secret' in content) == (not password)
 
     listing = MagicMock(status_code=200)
     listing.__enter__.return_value = listing
     listing.json.return_value = {'files': [saved_file]}
     download = MagicMock(status_code=200)
     download.__enter__.return_value = download
-    download.iter_content.return_value = [ciphertext[:32], ciphertext[32:]]
+    download.iter_content.return_value = [content[:32], content[32:]]
     session.request.side_effect = [listing, download]
     backup = dispatch(workspace, 'POST', path, {'action': 'download', 'account': 'backup-account'}, {})
     assert session.request.call_args_list[-2].kwargs['params']['spaces'] == 'appDataFolder'

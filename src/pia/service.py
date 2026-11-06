@@ -290,7 +290,7 @@ class WorkspaceService:
         if path == '/settings/google-backup':
             import base64
             from Plugins.Connectors.google.drive import Drive
-            from src.config_transfer import LIMIT, MAGIC, export_config
+            from src.config_transfer import BACKUP_HEADERS, MAX_BACKUP_BYTES, export_config
 
             resources = self.backend.resources
             if method == 'GET':
@@ -310,8 +310,8 @@ class WorkspaceService:
                 file = drive.save_app_data(account, name, base64.b64decode(backup['data']))
                 return {'created': file.get('createdTime')}
             if data.get('action') == 'download':
-                file, content = drive.latest_app_data(account, name, len(MAGIC) + 16 + 12 + LIMIT + 16)
-                if not content.startswith(MAGIC):
+                file, content = drive.latest_app_data(account, name, MAX_BACKUP_BYTES)
+                if not content.startswith(BACKUP_HEADERS):
                     raise ValueError('O arquivo no Google Drive não é um backup da PIA.')
                 return {'created': file.get('createdTime'), 'data': base64.b64encode(content).decode('ascii')}
             raise ValueError('Ação de backup inválida.')

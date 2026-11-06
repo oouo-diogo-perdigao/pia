@@ -28680,7 +28680,7 @@ function n6() {
   }
   return /* @__PURE__ */ d.jsx(ct, { withBorder: !0, p: "lg", children: /* @__PURE__ */ d.jsxs(ft, { children: [
     /* @__PURE__ */ d.jsx(ye, { fw: 600, children: "Migrar configurações entre computadores" }),
-    /* @__PURE__ */ d.jsx(ye, { size: "sm", children: "Exporta as configurações e as credenciais do cofre em um arquivo criptografado por senha. O arquivo funciona no Windows e Linux. Chats, músicas, capturas e modelos não fazem parte deste backup." }),
+    /* @__PURE__ */ d.jsx(ye, { size: "sm", children: "Exporta as configurações e as credenciais do cofre em um arquivo com senha opcional. O arquivo funciona no Windows e Linux. Chats, músicas, capturas e modelos não fazem parte deste backup." }),
     S && /* @__PURE__ */ d.jsxs(ye, { size: "sm", c: "dimmed", children: [
       "Perfil: ",
       S.folder
@@ -28689,8 +28689,8 @@ function n6() {
     /* @__PURE__ */ d.jsx(
       So,
       {
-        label: "Senha do arquivo de migração",
-        description: "Mínimo de 12 caracteres. Você precisará desta senha no outro computador.",
+        label: "Senha do arquivo de migração (opcional)",
+        description: "Preencha para criptografar o backup. Use a mesma senha ao importar.",
         value: a,
         onChange: (M) => {
           i(M.target.value), m(null);
@@ -28698,6 +28698,7 @@ function n6() {
         autoComplete: "new-password"
       }
     ),
+    !a && /* @__PURE__ */ d.jsx(ye, { size: "sm", c: "orange", children: "Sem senha, o backup contém as credenciais em texto legível." }),
     /* @__PURE__ */ d.jsx(
       So,
       {
@@ -28711,7 +28712,7 @@ function n6() {
       /* @__PURE__ */ d.jsx(
         Le,
         {
-          disabled: g || a.length < 12 || a !== l,
+          disabled: g || a !== l,
           onClick: Ue(
             () => z(async () => {
               const M = await Oe("/settings/export", { password: a });
@@ -28730,7 +28731,7 @@ function n6() {
                 I.href = D, I.download = M.filename, I.click(), setTimeout(() => URL.revokeObjectURL(D), 1e3);
               }
               i(""), u(""), x(
-                "Arquivo de migração preparado. Guarde a senha separadamente."
+                a ? "Arquivo de migração preparado. Guarde a senha separadamente." : "Arquivo de migração preparado sem senha."
               );
             })
           ),
@@ -28751,7 +28752,7 @@ function n6() {
                 G.onload = () => D(G.result.split(",")[1]), G.onerror = I, G.readAsDataURL(M);
               });
               f(T), m(null), x(
-                "Arquivo carregado. Informe sua senha e clique em Verificar."
+                "Arquivo carregado. Informe a senha, se houver, e clique em Verificar importação."
               );
             })
           ),
@@ -28761,7 +28762,7 @@ function n6() {
       /* @__PURE__ */ d.jsx(
         Le,
         {
-          disabled: g || !c || a.length < 12,
+          disabled: g || !c,
           onClick: Ue(
             () => z(
               async () => m(
@@ -28792,14 +28793,16 @@ function n6() {
         Le,
         {
           variant: "light",
-          disabled: g || !A || a.length < 12 || a !== l,
+          disabled: g || !A || a !== l,
           onClick: Ue(
             () => z(async () => {
               await Oe("/settings/google-backup", {
                 action: "export",
                 account: A,
                 password: a
-              }), i(""), u(""), x("Backup criptografado salvo no Google Drive.");
+              }), i(""), u(""), x(
+                a ? "Backup criptografado salvo no Google Drive." : "Backup sem senha salvo no Google Drive."
+              );
             })
           ),
           children: "Exportar para Google Drive"
@@ -28819,7 +28822,7 @@ function n6() {
               f(M.data), m(null);
               const T = M.created ? ` (${new Date(M.created).toLocaleString()})` : "";
               x(
-                `Backup do Google Drive carregado${T}. Informe a senha e clique em Verificar importação.`
+                `Backup do Google Drive carregado${T}. Informe a senha, se houver, e clique em Verificar importação.`
               );
             })
           ),

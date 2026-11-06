@@ -47,21 +47,21 @@ Na instalação continuam código, assets versionados, schemas, `.venv`, `cache/
 
 Para usar o Google Drive, autorize a mesma conta Google com o mesmo cliente OAuth da PIA nos dois computadores. Se a conta já estava conectada, autorize-a novamente para conceder o acesso ao espaço privado de dados da PIA no Drive.
 
-Em **Exportar / importar**, selecione a conta, preencha a senha e a confirmação e clique em **Exportar para Google Drive**. Cada exportação grava uma nova cópia criptografada. No outro computador, **Importar do Google Drive** carrega a cópia mais recente. Informe a senha original, clique em **Verificar importação** e confirme a restauração. A senha fica com você. A operação é manual e os backups não aparecem em Meu Drive. [Espaço de dados do aplicativo no Google Drive](https://developers.google.com/workspace/drive/api/guides/appdata).
+Em **Exportar / importar**, selecione a conta e clique em **Exportar para Google Drive**. Cada exportação grava uma nova cópia com a proteção escolhida. No outro computador, **Importar do Google Drive** carrega a cópia mais recente. Informe a senha original, se houver, clique em **Verificar importação** e confirme a restauração. A operação é manual e os backups não aparecem em Meu Drive. [Espaço de dados do aplicativo no Google Drive](https://developers.google.com/workspace/drive/api/guides/appdata).
 
 1. No computador de origem, abra **Exportar / importar**.
-2. Escolha uma senha de pelo menos 12 caracteres, confirme e exporte.
-3. Leve o arquivo `.pia-backup` ao outro computador. Guarde a senha separadamente.
+2. Para criptografar, escolha e confirme uma senha. Para exportar sem criptografia, deixe os dois campos vazios.
+3. Leve o arquivo `.pia-backup` ao outro computador. Se usou senha, guarde-a separadamente.
 4. Inicie uma instalação nova da PIA no destino, com o cofre do sistema disponível.
-5. Selecione o arquivo, informe a senha e clique em **Verificar importação**.
+5. Selecione o arquivo, informe a senha se houver e clique em **Verificar importação**.
 6. Confira a quantidade de configurações/credenciais e confirme **Importar e
    substituir configurações**. Aguarde a conclusão; no desktop a PIA reinicia.
 
-O arquivo usa AES-256-GCM autenticado, salt aleatório de 16 bytes, nonce aleatório
-de 12 bytes e chave derivada por Scrypt (`n=32768,r=8,p=1`). Senha e conteúdo
-descriptografado não são gravados em disco. A senha não pode ser recuperada pela
-PIA. Senha incorreta, alteração do arquivo ou versão incompatível são rejeitadas
-antes de mudar o destino. O formato tem limite de 16 MiB de conteúdo e cada arquivo
+Com senha, o arquivo usa AES-256-GCM autenticado, salt aleatório de 16 bytes, nonce aleatório
+de 12 bytes e chave derivada por Scrypt (`n=32768,r=8,p=1`). Backups criptografados
+rejeitam senha incorreta e adulteração antes de mudar o destino.
+Sem senha, o arquivo contém configurações e credenciais legíveis por quem tiver acesso
+a ele. Ambos os formatos têm limite de 16 MiB de conteúdo e cada arquivo
 de configuração até 5 MiB. Consulte as primitivas da
 [biblioteca cryptography](https://cryptography.io/en/latest/hazmat/primitives/aead/).
 
