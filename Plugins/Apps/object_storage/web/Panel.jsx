@@ -26,6 +26,7 @@ import {
   Settings,
   X,
   GripVertical,
+  Check,
 } from "lucide-react";
 import {
   appApi,
@@ -303,14 +304,36 @@ export default function Storage({ sub = "principal" }) {
   return (
     <Stack>
       <Paper withBorder p="lg" style={{ borderColor: color }}>
+        <Stack gap="xs" mb="md">
+          <Text size="sm" fw={500}>
+            Contas
+          </Text>
+          <Group gap="xs" role="group" aria-label="Contas Object Storage">
+            {accounts.map((item) => (
+              <Button
+                key={item.id}
+                variant={item.id === account ? "filled" : "outline"}
+                color={item.color || "#9b7aff"}
+                aria-pressed={item.id === account}
+                leftSection={
+                  item.id === account ? <Check size={16} /> : undefined
+                }
+                disabled={active}
+                onClick={() => {
+                  if (item.id !== account) changeAccount(item.id);
+                }}
+              >
+                {item.name}
+              </Button>
+            ))}
+            {!accounts.length && (
+              <Text size="sm" c="dimmed">
+                Nenhuma conta configurada.
+              </Text>
+            )}
+          </Group>
+        </Stack>
         <Group align="end">
-          <Select
-            label="Conta"
-            data={accounts.map((a) => ({ value: a.id, label: a.name }))}
-            value={account || null}
-            onChange={changeAccount}
-            disabled={active}
-          />
           <Select
             label="Bucket"
             data={buckets}
