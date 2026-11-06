@@ -45,6 +45,10 @@ Na instalação continuam código, assets versionados, schemas, `.venv`, `cache/
 
 ## Exportar e importar
 
+Para usar o Google Drive, autorize a mesma conta Google com o mesmo cliente OAuth da PIA nos dois computadores. Se a conta já estava conectada, autorize-a novamente para conceder o acesso ao espaço privado de dados da PIA no Drive.
+
+Em **Exportar / importar**, selecione a conta, preencha a senha e a confirmação e clique em **Exportar para Google Drive**. Cada exportação grava uma nova cópia criptografada. No outro computador, **Importar do Google Drive** carrega a cópia mais recente. Informe a senha original, clique em **Verificar importação** e confirme a restauração. A senha fica com você. A operação é manual e os backups não aparecem em Meu Drive. [Espaço de dados do aplicativo no Google Drive](https://developers.google.com/workspace/drive/api/guides/appdata).
+
 1. No computador de origem, abra **Exportar / importar**.
 2. Escolha uma senha de pelo menos 12 caracteres, confirme e exporte.
 3. Leve o arquivo `.pia-backup` ao outro computador. Guarde a senha separadamente.

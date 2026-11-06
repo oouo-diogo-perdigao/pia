@@ -15,7 +15,7 @@ import { api, safe, report } from "./api";
 import { usePia } from "./shared";
 
 export function TransferSettings() {
-  const { state } = usePia();
+  const { state, navigate } = usePia();
   const [password, setPassword] = useState(""),
     [confirmation, setConfirmation] = useState(""),
     [data, setData] = useState(""),
@@ -23,8 +23,15 @@ export function TransferSettings() {
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
   const [storage, setStorage] = useState(null);
+  const [googleAccounts, setGoogleAccounts] = useState([]);
+  const [googleAccount, setGoogleAccount] = useState(null);
   useEffect(() => {
     safe(async () => setStorage(await api("/settings/storage")))();
+    safe(async () => {
+      const { accounts } = await api("/settings/google-backup");
+      setGoogleAccounts(accounts);
+      if (accounts.length === 1) setGoogleAccount(accounts[0].id);
+    })();
   }, []);
   async function work(fn) {
     setBusy(true);
@@ -143,6 +150,77 @@ export function TransferSettings() {
             Verificar importação
           </Button>
         </Group>
+        <Select
+          label="Conta Google para backup"
+          placeholder="Selecione uma conta"
+          value={googleAccount}
+          onChange={setGoogleAccount}
+          disabled={busy}
+          data={googleAccounts.map(({ id, label, email }) => ({
+            value: id,
+            label: email ? `${label} · ${email}` : label,
+          }))}
+        />
+        <Group>
+          <Button
+            variant="light"
+            disabled={
+              busy ||
+              !googleAccount ||
+              password.length < 12 ||
+              password !== confirmation
+            }
+            onClick={safe(() =>
+              work(async () => {
+                await api("/settings/google-backup", {
+                  action: "export",
+                  account: googleAccount,
+                  password,
+                });
+                setPassword("");
+                setConfirmation("");
+                setMessage("Backup criptografado salvo no Google Drive.");
+              }),
+            )}
+          >
+            Exportar para Google Drive
+          </Button>
+          <Button
+            variant="light"
+            disabled={busy || !googleAccount}
+            onClick={safe(() =>
+              work(async () => {
+                const result = await api("/settings/google-backup", {
+                  action: "download",
+                  account: googleAccount,
+                });
+                setData(result.data);
+                setPreview(null);
+                const date = result.created
+                  ? ` (${new Date(result.created).toLocaleString()})`
+                  : "";
+                setMessage(
+                  `Backup do Google Drive carregado${date}. Informe a senha e clique em Verificar importação.`,
+                );
+              }),
+            )}
+          >
+            Importar do Google Drive
+          </Button>
+          <Button
+            variant="subtle"
+            disabled={busy}
+            onClick={() =>
+              navigate({ view: "connectors", connector: "google" })
+            }
+          >
+            Conectar ou autorizar conta Google
+          </Button>
+        </Group>
+        <Text size="xs" c="dimmed">
+          Use a mesma conta e o mesmo cliente OAuth nos dois computadores. A
+          importação carrega o backup mais recente salvo pela PIA nessa conta.
+        </Text>
         {message && <Text size="sm">{message}</Text>}
         <Text size="xs" c="dimmed">
           A importação substitui as configurações correspondentes. Caminhos
