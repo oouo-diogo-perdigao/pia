@@ -12,6 +12,7 @@ import {
 } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "./workspace.css";
+import palette from "./palette.json";
 import Workspace from "./Workspace";
 import CaptureEditor from "../../../Plugins/Apps/screenshots/web/CaptureEditor.jsx";
 import { api, session, watchJob, report, safe } from "./api";
@@ -20,20 +21,7 @@ const theme = createTheme({
   primaryColor: "violet",
   defaultRadius: "md",
   fontFamily: "Inter, Segoe UI, sans-serif",
-  colors: {
-    dark: [
-      "#eeeeF5",
-      "#c8c4d4",
-      "#a09aac",
-      "#827c93",
-      "#494251",
-      "#34303e",
-      "#24212c",
-      "#19171f",
-      "#131218",
-      "#0e0d13",
-    ],
-  },
+  colors: palette,
   components: {
     Button: { defaultProps: { variant: "filled" } },
     Paper: { defaultProps: { radius: "lg" } },

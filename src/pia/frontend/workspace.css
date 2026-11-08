@@ -11,8 +11,8 @@ body,
   margin: 0;
 }
 body {
-  background: #19171f;
-  color: #eeeef5;
+  background: #11121b;
+  color: #edeaf6;
 }
 button {
   font: inherit;
@@ -30,8 +30,8 @@ button:disabled {
   align-items: center;
   gap: 4px;
   padding: 0 12px;
-  background: #101016;
-  border-bottom: 1px solid #302b3a;
+  background: #191928;
+  border-bottom: 1px solid #35314a;
 }
 .page-menu .mantine-Button-root {
   color: #c3bed0;
@@ -46,8 +46,8 @@ button:disabled {
 }
 .activity-rail {
   width: 58px;
-  background: #101016;
-  border-right: 1px solid #292430;
+  background: #191928;
+  border-right: 1px solid #35314a;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -59,7 +59,7 @@ button:disabled {
   height: 43px;
 }
 .app-activities {
-  border-top: 1px solid #302b3a;
+  border-top: 1px solid #35314a;
   width: 100%;
   padding-top: 15px;
   display: flex;
@@ -71,8 +71,8 @@ button:disabled {
   border-radius: 9px;
 }
 .app-drop {
-  outline: 2px solid #b48aff;
-  background: #5d3886;
+  outline: 2px solid #bcadf2;
+  background: #352957;
 }
 .rail-bottom {
   margin-top: auto;
@@ -81,7 +81,7 @@ button:disabled {
   width: 260px;
   flex-shrink: 0;
   padding: 19px 12px;
-  background: #131218;
+  background: #1b1b2b;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -96,7 +96,7 @@ button:disabled {
   height: 62px;
   flex-shrink: 0;
   padding: 12px 22px;
-  border-bottom: 1px solid #302b3a;
+  border-bottom: 1px solid #35314a;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -168,7 +168,7 @@ button:disabled {
 .message-body pre {
   max-width: 100%;
   overflow: auto;
-  background: #101016;
+  background: #191928;
   padding: 16px;
   border-radius: 12px;
 }
@@ -207,7 +207,7 @@ button:disabled {
   border-radius: 24px;
 }
 .composer textarea {
-  color: #eeeef5;
+  color: #edeaf6;
 }
 .chat-list {
   flex: 1;
@@ -265,11 +265,11 @@ button:disabled {
 .sidebar-footer {
   margin-top: auto;
   padding-top: 14px;
-  border-top: 1px solid #302b3a;
+  border-top: 1px solid #35314a;
 }
 .drop-target {
-  background: #5d3886 !important;
-  outline: 2px solid #b48aff;
+  background: #352957 !important;
+  outline: 2px solid #bcadf2;
   border-radius: 7px;
 }
 .conversation-menu {
@@ -554,7 +554,7 @@ button:disabled {
 }
 .notification-count {
   background: #ef4444;
-  box-shadow: 0 0 0 2px #19171f;
+  box-shadow: 0 0 0 2px #11121b;
   font-weight: 700;
   font-size: 10px;
   line-height: 17px;
