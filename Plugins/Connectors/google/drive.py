@@ -47,7 +47,7 @@ class Drive:
         if folder:query.append("'"+self.escape(folder)+"' in parents")
         if folders_only:query.append("mimeType = 'application/vnd.google-apps.folder'")
         if search:query.append("name contains '"+self.escape(search)+"'")
-        params=dict(q=' and '.join(query),pageSize=100,fields='nextPageToken,files(id,name,mimeType,size,createdTime,modifiedTime)',supportsAllDrives=True,includeItemsFromAllDrives=True)
+        params=dict(q=' and '.join(query),pageSize=100,fields='nextPageToken,files(id,name,mimeType,size,createdTime,modifiedTime,appProperties)',supportsAllDrives=True,includeItemsFromAllDrives=True)
         if cursor:params['pageToken']=cursor
         with self.request('GET','',account,params=params) as response:return response.json()
     def download(self,identity,destination,account=None):
