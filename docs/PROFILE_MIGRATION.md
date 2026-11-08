@@ -21,7 +21,6 @@ de pastas do Linux, com fallback para `~/Documents`. Dentro dela:
 | `pia/images/` | Imagens salvas por ações nativas |
 | `pia/apps/podcast_automation/` | Downloads, trabalho e artefatos locais do podcast |
 | `pia/files/` | Arquivos de configuração gerenciados que não são credenciais |
-| `pia/exports/` | Destino inicial do diálogo de exportação desktop |
 
 O cofre do sistema mantém chaves, senhas, client secrets, tokens OAuth e credenciais
 de storage sob o serviço `PIA`. SQLite contém referências, nunca esses valores.
@@ -36,51 +35,23 @@ Na instalação continuam código, assets versionados, schemas, `.venv`, `cache/
 ## Interface
 
 - **Configurações / Geral e plugins:** formulários tipados, com segredos mascarados.
-- **Configurações / Conectores:** contas e credenciais das integrações.
+- **Configurações / Conectores:** pareamento e acesso ao cadastro de integrações na PIA Server.
 - **Configurações / Ativação e atalhos:** palavras de ativação, atalhos e catálogo,
   armazenados no SQLite. Os nomes históricos `.txt`/`.yaml` identificam documentos
   lógicos, não arquivos que precisam ser editados na instalação.
 - **Configurações / Cofre:** lista de entradas geridas pela PIA; revelar é explícito.
-- **Configurações / Exportar / importar:** migração de configurações e credenciais.
 
-## Exportar e importar
+## Conectores centralizados
 
-Para usar o Google Drive, autorize a mesma conta Google com o mesmo cliente OAuth da PIA nos dois computadores. Se a conta já estava conectada, autorize-a novamente para conceder o acesso ao espaço privado de dados da PIA no Drive.
+No desktop, abra **Configurações / Conectores / PIA Server** e pareie cada computador.
+Cadastre as contas Google, Microsoft, Object Storage, Discord e Taverns no painel
+da PIA Server. Na primeira consulta o servidor aproveita o cadastro do último
+perfil recebido. As alterações ficam disponíveis aos computadores pareados.
+A interface não exporta nem importa arquivos de credenciais.
 
-Em **Exportar / importar**, selecione a conta e clique em **Exportar para Google Drive**. Cada exportação grava uma nova cópia com a proteção escolhida. No outro computador, **Importar do Google Drive** carrega a cópia mais recente. Informe a senha original, se houver, clique em **Verificar importação** e confirme a restauração. A operação é manual e os backups não aparecem em Meu Drive. [Espaço de dados do aplicativo no Google Drive](https://developers.google.com/workspace/drive/api/guides/appdata).
-
-1. No computador de origem, abra **Exportar / importar**.
-2. Para criptografar, escolha e confirme uma senha. Para exportar sem criptografia, deixe os dois campos vazios.
-3. Leve o arquivo `.pia-backup` ao outro computador. Se usou senha, guarde-a separadamente.
-4. Inicie uma instalação nova da PIA no destino, com o cofre do sistema disponível.
-5. Selecione o arquivo, informe a senha se houver e clique em **Verificar importação**.
-6. Confira a quantidade de configurações/credenciais e confirme **Importar e
-   substituir configurações**. Aguarde a conclusão; no desktop a PIA reinicia.
-
-Com senha, o arquivo usa AES-256-GCM autenticado, salt aleatório de 16 bytes, nonce aleatório
-de 12 bytes e chave derivada por Scrypt (`n=32768,r=8,p=1`). Backups criptografados
-rejeitam senha incorreta e adulteração antes de mudar o destino.
-Sem senha, o arquivo contém configurações e credenciais legíveis por quem tiver acesso
-a ele. Ambos os formatos têm limite de 16 MiB de conteúdo e cada arquivo
-de configuração até 5 MiB. Consulte as primitivas da
-[biblioteca cryptography](https://cryptography.io/en/latest/hazmat/primitives/aead/).
-
-Inclui configurações, documentos lógicos, metadados de contas, preferências gerais,
-arquivos de configuração gerenciados e credenciais registradas no cofre da PIA.
-Credenciais são regravadas no cofre nativo do destino, sem depender do formato do
-cofre Windows/Linux. CLI Codex/AGY mantém login próprio e precisa ser autenticado
-no destino. Provedores OAuth também podem exigir reconexão ou aprovação.
-
-Não inclui conversas, histórico de notificações, gravações, músicas, imagens,
-logs, modelos nem outros dados grandes. Para levar esse conteúdo, copie os arquivos
-de `Documentos/pia` com a PIA encerrada, além de importar as credenciais. Não copie
-somente o SQLite antes de restaurar o cofre: as referências precisam das credenciais
-correspondentes. Caminhos de saída padrão são recalculados; caminhos externos
-inexistentes ficam vazios e devem ser selecionados novamente na interface.
-
-Importar exige que nenhum job esteja em execução. SQLite usa transação; alterações
-no cofre e arquivos são revertidas em caso de falha quando o sistema permite.
-Não há fallback para guardar segredos em texto se o cofre estiver bloqueado ou ausente.
+O perfil compartilhado ainda permite copiar configurações e conversas. Esse fluxo
+não altera o cadastro dos conectores. Instalações com credenciais legadas preservam
+as entradas locais, usadas apenas em modo não pareado.
 
 ## Atualização da instalação existente
 

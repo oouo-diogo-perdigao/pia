@@ -1,0 +1,44 @@
+[
+  {
+    "name": "PIA_SERVER_URL",
+    "type": "string",
+    "default": "https://pia.travelrpg.com",
+    "label": "URL do servidor (HTTPS)",
+    "link": "https://pia.travelrpg.com"
+  },
+  {
+    "name": "PIA_SERVER_DEVICE_TOKEN",
+    "type": "secret",
+    "default": "",
+    "label": "Token de pareamento do computador",
+    "link": "https://pia.travelrpg.com"
+  },
+  {
+    "name": "PIA_SERVER_ALLOW_SCREENSHOT",
+    "type": "bool",
+    "default": "false",
+    "label": "Permitir captura de tela pelo servidor",
+    "link": "https://pia.travelrpg.com"
+  },
+  {
+    "name": "PIA_SERVER_SYNC_MEDIA",
+    "type": "bool",
+    "default": "false",
+    "label": "Enviar capturas salvas e músicas geradas ao Drive",
+    "link": "https://pia.travelrpg.com"
+  },
+  {
+    "name": "PIA_SERVER_SECRETARY",
+    "type": "bool",
+    "default": "false",
+    "label": "Receber avisos da Secretária do servidor neste computador",
+    "link": "https://pia.travelrpg.com"
+  },
+  {
+    "name": "PIA_SERVER_ALLOW_CAMERA",
+    "type": "bool",
+    "default": "false",
+    "label": "Permitir acesso à câmera pelo servidor",
+    "link": "https://pia.travelrpg.com"
+  }
+]

@@ -40,6 +40,23 @@ class WorkspaceOptionsTests(unittest.TestCase):
             for call in bot.return_value.send.call_args_list:
                 self.assertEqual(call.args[0],'Campanha - Sessão\nMP3: '+links['MP3']+'\nRSS: '+links['RSS']+'\nTRANSCRIÇÃO: '+links['Transcrições gerais'])
 
+    def test_taverns_selection_persists_and_publishes_links(self):
+        destination = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+        save_document('Apps/podcast_automation/campaigns', copy.deepcopy(EXAMPLE))
+        with self.assertRaisesRegex(ValueError, 'Selecione pelo menos um canal'):
+            web_api.handle('save-options', {'integrations': {'taverns_notify': True}}, None)
+        web_api.handle('save-options', {
+            'integrations': {'taverns_notify': True, 'taverns_channels': [destination]},
+        }, None)
+        with patch('Plugins.Connectors.taverns.service.Taverns') as bot:
+            self.assertTrue(notification.announce_publication(
+                'Sessão', 'Campanha', {'MP3': 'https://example.invalid/episodio.mp3'},
+                season=1, number=2,
+            ))
+            bot.return_value.send.assert_called_once_with(
+                'Campanha - S01E02 - Sessão\nMP3: https://example.invalid/episodio.mp3', destination,
+            )
+
     def test_reader_contains_every_transcript_with_escaped_content_and_tools(self):
         episodes=[dict(title='Sessão <1>',content='Fala única '+str(i)+'\n<script>alert("bad")</script>') for i in range(3)]
         page=render(episodes,'https://example.invalid/cover.png',{'title':'Mesa <RPG>'})

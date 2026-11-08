@@ -282,6 +282,9 @@ class NativeApp:
             path.parent.mkdir(parents=True, exist_ok=True)
             if not image.save(str(path), 'JPEG' if kind == 'jpg' else kind.upper(), int(prefs['quality'])):
                 raise RuntimeError('Não foi possível salvar a captura.')
+            if action in ('finalize', 'save', 'desktop'):
+                from Plugins.Connectors.pia_server.media import enqueue
+                enqueue(path)
             if action == 'edit':
                 QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
             if action == 'drag':

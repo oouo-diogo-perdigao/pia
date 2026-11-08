@@ -4,10 +4,13 @@ import json
 from urllib.parse import quote, urlsplit
 from src.settings_store import values as section_values, document, save_document
 from src.resource_plugins import get_resources
+from Plugins.Connectors.pia_server.remote import managed, runtime
 ROOT=Path(__file__).resolve().parent
 class Drive:
     def __init__(self,resources=None,root=ROOT):self.resources=resources or get_resources();self.root=Path(root);self._credentials=None
-    def config(self):return section_values('Connectors/google')
+    def config(self):
+        if managed():return runtime('google')['settings']
+        return section_values('Connectors/google')
     @property
     def default_folder(self):return self.config().get('GOOGLE_DRIVE_FOLDER_ID','')
     def accounts(self):

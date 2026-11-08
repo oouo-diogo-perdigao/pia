@@ -26,53 +26,12 @@ def test_no_env_override_and_secrets_never_enter_sqlite(isolated_profile,monkeyp
     assert isolated_profile.vault.get('setting:general:OPENAI_COMPAT_API_KEY')=='fixture-secret'
 
 
-@pytest.mark.parametrize('password', ['x', ''])
-def test_google_backup_roundtrip_through_private_drive_space(isolated_profile, password):
-    from unittest.mock import MagicMock, Mock
+@pytest.mark.parametrize('path', ['/settings/export', '/settings/import-preview', '/settings/import', '/settings/google-backup'])
+def test_manual_credential_transfer_routes_are_removed(path):
     from src.pia.service import WorkspaceService
-    from src.config_transfer import MAGIC, PLAIN_MAGIC
 
-    isolated_profile.save('general', {'OPENAI_COMPAT_API_KEY': 'fixture-secret'})
-    session = Mock()
-    resources = SimpleNamespace(
-        accounts=lambda plugin: [{'id': 'backup-account', 'label': 'Backup'}],
-        session=session,
-        _access_token=lambda plugin, account: 'fixture-oauth',
-    )
-    workspace = SimpleNamespace(backend=SimpleNamespace(resources=resources))
-    path = '/settings/google-backup'
-    dispatch = WorkspaceService._dispatch
-    assert dispatch(workspace, 'GET', path, {}, {})['accounts'][0]['id'] == 'backup-account'
-    with pytest.raises(ValueError):
-        dispatch(workspace, 'POST', path, {'action': 'export', 'password': password}, {})
-    session.request.assert_not_called()
-
-    upload_url = 'https://www.googleapis.com/upload/drive/v3/files?upload_id=fixture'
-    saved_file = {'id': 'fixture-file', 'createdTime': '2026-11-06T12:00:00Z'}
-    start = MagicMock(status_code=200, headers={'Location': upload_url})
-    start.__enter__.return_value = start
-    saved = MagicMock(status_code=200)
-    saved.__enter__.return_value = saved
-    saved.json.return_value = saved_file
-    session.request.side_effect = [start, saved]
-    dispatch(workspace, 'POST', path, {'action': 'export', 'account': 'backup-account', 'password': password}, {})
-    upload_start, upload_put = session.request.call_args_list
-    assert upload_start.kwargs['json']['parents'] == ['appDataFolder']
-    assert upload_put.args == ('PUT', upload_url)
-    content = upload_put.kwargs['data']
-    assert content.startswith(MAGIC if password else PLAIN_MAGIC)
-    assert (b'fixture-secret' in content) == (not password)
-
-    listing = MagicMock(status_code=200)
-    listing.__enter__.return_value = listing
-    listing.json.return_value = {'files': [saved_file]}
-    download = MagicMock(status_code=200)
-    download.__enter__.return_value = download
-    download.iter_content.return_value = [content[:32], content[32:]]
-    session.request.side_effect = [listing, download]
-    backup = dispatch(workspace, 'POST', path, {'action': 'download', 'account': 'backup-account'}, {})
-    assert session.request.call_args_list[-2].kwargs['params']['spaces'] == 'appDataFolder'
-    assert preview_config(backup['data'], password)['credentials'] == 1
+    with pytest.raises(ValueError, match='Operação não encontrada'):
+        WorkspaceService._dispatch(SimpleNamespace(), 'POST', path, {}, {})
 
 
 def test_encrypted_roundtrip_and_tamper_rejection(tmp_path):

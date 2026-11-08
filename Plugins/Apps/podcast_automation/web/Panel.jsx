@@ -77,6 +77,7 @@ export default function Podcast({ sub = "principal" }) {
     [google, setGoogle] = useState([]),
     [accounts, setAccounts] = useState([]),
     [channels, setChannels] = useState([]),
+    [taverns, setTaverns] = useState({ channels: [], loading: true }),
     [result, setResult] = useState(null),
     [merge, setMerge] = useState(null),
     [files, setFiles] = useState([null, null]);
@@ -90,6 +91,20 @@ export default function Podcast({ sub = "principal" }) {
       }));
   const settings = (plugin) =>
     navigate({ view: "connectors", connector: plugin });
+  useEffect(() => {
+    let active = true;
+    api("/integrations/taverns/channels", {}).then(
+      (result) => {
+        if (active) setTaverns(result);
+      },
+      (error) => {
+        if (active) setTaverns({ channels: [], error: error.message });
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
   function watch(identity, after = 0) {
     source.current?.close();
     setJob(identity);
@@ -537,6 +552,51 @@ export default function Podcast({ sub = "principal" }) {
                   icon={Settings}
                   label="Configurar Discord"
                   onClick={() => settings("discord")}
+                />
+              </Group>
+              <Switch
+                className="full-row"
+                size="md"
+                label="Anunciar publicação na Tav.gg"
+                checked={!!opts.taverns_notify}
+                onChange={(event) =>
+                  patch("taverns_notify", event.currentTarget.checked)
+                }
+              />
+              <Group className="full-row" wrap="nowrap" align="end">
+                <MultiSelect
+                  className="grow"
+                  label="Tavernas / canais da Tav.gg"
+                  description={
+                    taverns.loading
+                      ? "Carregando canais…"
+                      : taverns.error ||
+                        (taverns.configured
+                          ? "Escolha onde publicar os links da sessão."
+                          : "Configure o bot no conector Taverns.")
+                  }
+                  data={[
+                    ...taverns.channels,
+                    ...(opts.taverns_channels || [])
+                      .filter(
+                        (value) =>
+                          !taverns.channels.some(
+                            (channel) => channel.value === value,
+                          ),
+                      )
+                      .map((value) => ({
+                        value,
+                        label: "Canal indisponível · " + value,
+                      })),
+                  ]}
+                  value={opts.taverns_channels || []}
+                  onChange={(value) => patch("taverns_channels", value)}
+                  searchable
+                />
+                <Icon
+                  icon={Settings}
+                  label="Configurar Taverns"
+                  onClick={() => settings("taverns")}
                 />
               </Group>
             </div>

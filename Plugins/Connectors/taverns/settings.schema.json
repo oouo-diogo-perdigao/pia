@@ -1,0 +1,9 @@
+[
+  {
+    "name": "TAVERNS_BOT_TOKEN",
+    "type": "secret",
+    "default": "",
+    "label": "Token do bot Taverns",
+    "link": "https://tav.gg/developers/home"
+  }
+]

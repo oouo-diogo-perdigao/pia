@@ -144,7 +144,13 @@ class DesktopUI(QObject):
         self.controls = MiniControls(self)
         self.setup_tray()
         self.window.hidden.connect(lambda: self.main_action.setChecked(False))
-        self.backend.secretary.start()
+        from src.settings_store import get
+        from Plugins.Connectors.pia_server.service import start as start_bridge
+        server_secretary = get('PIA_SERVER_SECRETARY', 'false', section='Connectors/pia_server') == 'true'
+        if not server_secretary or not get('PIA_SERVER_DEVICE_TOKEN', '', section='Connectors/pia_server'):
+            self.backend.secretary.start()
+        if hasattr(self.service, 'notifications'):
+            start_bridge(self.service.notifications)
         if hasattr(self.backend, 'start_connectors'):
             self.backend.start_connectors()
         if __import__('os').environ.pop('PIA_OPEN_MAIN', '')=='1':
@@ -250,23 +256,6 @@ class DesktopUI(QObject):
         return self.native_apps[identity].handle(action, payload)
 
     def command(self, action, payload):
-        if action=='save-config-backup':
-            import base64
-            from .user_paths import user_path
-            from .config_transfer import BACKUP_HEADERS, MAX_BACKUP_BYTES
-            raw=base64.b64decode(payload['data'],validate=True)
-            if len(raw)>MAX_BACKUP_BYTES or not raw.startswith(BACKUP_HEADERS):raise ValueError('Backup inválido.')
-            folder=user_path('exports');folder.mkdir(parents=True,exist_ok=True)
-            target,_=QFileDialog.getSaveFileName(self.window,'Exportar configurações',str(folder/'pia-configuracoes.pia-backup'),'PIA backup (*.pia-backup)')
-            if not target:return {'cancelled':True}
-            from pathlib import Path
-            import secrets
-            file=Path(target);temporary=file.with_name(file.name+'.'+secrets.token_hex(8)+'.tmp')
-            try:
-                with temporary.open('xb') as out:out.write(raw)
-                temporary.chmod(0o600);temporary.replace(file)
-            finally:temporary.unlink(missing_ok=True)
-            return {'ok':True}
         if action == 'restart':
             import subprocess
             import os

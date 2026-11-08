@@ -52,17 +52,12 @@ BODIES = {
     '/chat/delete': {'chat': '{{chat_id}}'}, '/chat/delete-many': {'chats': ['{{chat_id}}']},
     '/chat/read': {'chat': '{{chat_id}}', 'through': 1},
     '/folder/save': {'name': 'Minha pasta'}, '/folder/delete': {'id': '{{folder_id}}'},
-    '/settings/export': {'password': '{{backup_password}}'},
-    '/settings/google-backup': {'action': 'export', 'account': '{{account_id}}', 'password': '{{backup_password}}'},
     '/settings/import-preview': {'data': '{{backup_base64}}', 'password': '{{backup_password}}'},
-    '/settings/import': {'data': '{{backup_base64}}', 'password': '{{backup_password}}'},
     '/settings/credential': {'name': '{{credential_name}}'},
     '/settings/documents': {'name': 'keywords.txt', 'value': 'pia'},
     '/settings/save': {'section': 'general', 'values': {}},
     '/settings/upload': {'section': '{{section}}', 'name': '{{file_variable}}', 'filename': 'example.json', 'data': '{{file_base64}}'},
     '/preferences': {'language': 'pt-BR'}, '/apps/order': {'order': ['music', 'object_storage', 'podcast_automation', 'screenshots']},
-    '/accounts/connect': {'plugin': 'google', 'client_id': '{{client_id}}', 'client_secret': '{{client_secret}}', 'label': 'Minha conta'},
-    '/accounts/disconnect': {'plugin': 'google', 'account': '{{account_id}}'},
     '/notifications/settings': {'read_aloud': False, 'muted': []},
     '/notifications/read': {'source': 'Apps/music'},
     '/notifications/publish': {'source': 'Apps/music', 'title': 'Teste', 'text': 'Notificação de teste', 'links': []},
@@ -80,8 +75,6 @@ APP_BODIES = {
     'screenshots/list-saved': {'offset': 0, 'limit': 24}, 'screenshots/color': {'value': '#8257e5'},
     'screenshots/delete-saved': {'names': ['{{capture_name}}']},
     'screenshots/save-config': {'value': {'format': 'png', 'quality': 92}},
-    'object_storage/save-account': {'name': 'Minha conta', 'endpoint': '{{storage_endpoint}}', 'region': 'auto', 'access_key': '{{storage_access_key}}', 'secret_key': '{{storage_secret_key}}'},
-    'object_storage/remove-account': {'id': '{{account_id}}'},
     'object_storage/delete': {'keys': ['{{object_key}}']},
     'object_storage/upload-begin': {'key': '{{object_key}}', 'size': 0},
     'object_storage/upload-chunk': {'id': '{{upload_id}}', 'offset': 0, 'data': '{{file_base64}}'},
@@ -142,6 +135,24 @@ def build():
                         variant['request']['header'] = item['request']['header'].copy()
                         variant['request']['body'] = json.loads(json.dumps(item['request']['body']))
                         next(f for f in variant['request']['body']['formdata'] if f['key'] == 'response_format')['value'] = fmt
+    mini = '04 · Mini PIA e voz'
+    for label, action, payload, detail in (
+        ('Mostrar Mini PIA', 'mini', {'visible': True}, 'Mostra a Mini PIA.'),
+        ('Ocultar Mini PIA', 'mini', {'visible': False}, 'Oculta a Mini PIA e mantém o aplicativo ativo.'),
+        ('Alternar microfone', 'voice', {}, 'Alterna o microfone da Mini PIA. Pode iniciar a gravação.'),
+        ('Expandir janela principal', 'show', {'visible': True}, 'Abre a janela principal da PIA.'),
+        ('Fechar compositor', 'mini-compose-close', {}, 'Fecha o compositor. Salve o rascunho antes se necessário.'),
+        ('Ler resposta do chat', 'mini-job', {'job': '{{job_id}}'}, 'Lê em voz alta a resposta de um job de chat existente.'),
+    ):
+        add(mini, 'POST', '/api/pia/native', {'action': action, 'payload': payload},
+            suffix=label, description='Requer PIA desktop e sessão local. ' + detail)
+    add(mini, 'GET', '/api/pia/chat/messages', query='?chat=_mini',
+        suffix='Consultar rascunho da Mini PIA', description='Consulta o rascunho da Mini PIA. Requer sessão local.')
+    add(mini, 'POST', '/api/pia/chat/draft', {'chat': '_mini', 'text': 'Rascunho de exemplo'},
+        suffix='Salvar rascunho da Mini PIA', description='Substitui o rascunho da Mini PIA. Requer sessão local.')
+    add(mini, 'POST', '/api/pia/chat/send', BODIES['/chat/send'],
+        suffix='Enviar mensagem pela Mini PIA',
+        description='Use o ID de uma conversa existente. Copie o job retornado para acompanhar os eventos ou ler a resposta. Requer sessão local.')
     for method, path in [('GET', '/v1/images/files/{{image_token}}'), ('GET', '/v1/audio/transcriptions/progress/{{transcription_id}}'), ('GET', '/v1/music/files/{{music_file}}'), ('POST', '/action/camera'), ('POST', '/v1/music/generations')]:
         add('05 · Câmera e música', method, path)
     for name, body in [('initialize', {'protocolVersion': '2025-11-25', 'capabilities': {}, 'clientInfo': {'name': 'postman', 'version': '1.0'}}), ('ping', {}), ('tools/list', {}), ('tools/call', {'name': 'pia_accounts', 'arguments': {}}), ('notifications/initialized', {})]:
@@ -153,7 +164,7 @@ def build():
     readable = {'/state', '/chat/messages', '/settings', '/accounts', '/bots', '/bots/secretaria', '/logs', '/preferences', '/notifications', '/notifications/counts', '/settings/documents', '/settings/credentials', '/settings/storage'}
     for fn in functions('src/pia/service.py', {'_dispatch'}):
         for path in sorted(compared(fn, 'path')):
-            methods = ['GET', 'POST'] if path in ('/preferences', '/bots/secretaria', '/settings/documents', '/settings/google-backup') else ['GET' if path in readable else 'POST']
+            methods = ['GET', 'POST'] if path in ('/preferences', '/bots/secretaria', '/settings/documents') else ['GET' if path in readable else 'POST']
             for method in methods:
                 body = BODIES.get(path, {})
                 if path == '/bots/secretaria':
@@ -164,13 +175,14 @@ def build():
     integrations = {
         'agents': {'status': {}, 'ask': {'provider': 'codex', 'prompt': 'Explique suas capacidades.'}},
         'google': {'accounts': {}, 'folders': {'account': '{{account_id}}', 'folder': 'root'}},
-        'object_storage': {'secrets': {'account': '{{account_id}}'}},
         'discord': {n: {} for n in ('status', 'logs', 'channels', 'diagnose', 'test', 'register-link', 'unlink')},
+        'taverns': {'channels': {}, 'test': {'destination': '{{taverns_destination}}'}},
+        'pia_server': {'account': None, 'login-start': {'server': 'https://pia.travelrpg.com'}, 'login-poll': {'id': '{{device_login_id}}'}, 'logout': {}, 'profile-status': {}, 'profile-push': {'revision': '0'}, 'profile-pull': {'revision': '1'}},
     }
     integrations['discord'].update(send={'text': 'Mensagem de exemplo', 'channel': '{{discord_channel_id}}'}, listener={'enabled': True})
     for plugin, actions in integrations.items():
         for action, body in actions.items():
-            add('08 · Conectores', 'POST', '/api/pia/integrations/' + plugin + '/' + action, body)
+            add('08 · Conectores', 'GET' if body is None else 'POST', '/api/pia/integrations/' + plugin + '/' + action, body)
     for file in sorted((ROOT / 'Plugins/Apps').glob('*/web_api.py')):
         app = file.parent.name
         for fn in functions(file.relative_to(ROOT), {'handle'}):
@@ -188,7 +200,7 @@ def build():
                 for guard in ast.walk(fn):
                     if isinstance(guard, ast.If) and action in compared(guard.test, 'action'):
                         body = example_for_node(ast.Module(body=guard.body, type_ignores=[]), body)
-                if app == 'object_storage' and action not in ('accounts', 'save-account', 'remove-account', 'cancel', 'upload-chunk', 'upload-finish', 'upload-cancel'):
+                if app == 'object_storage' and action not in ('accounts', 'cancel', 'upload-chunk', 'upload-finish', 'upload-cancel'):
                     body = {'account': '{{account_id}}', 'bucket': '{{bucket}}', **body}
                 if app == 'screenshots':
                     if action in ('copy', 'save', 'desktop', 'drag', 'print', 'edit', 'finalize'):

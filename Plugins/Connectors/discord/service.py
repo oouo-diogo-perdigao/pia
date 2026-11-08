@@ -11,6 +11,7 @@ import requests
 from src.settings_store import get_store, values, document, save_document
 from src.env_types import split_key
 from src.resource_plugins import save_json
+from Plugins.Connectors.pia_server.remote import managed, runtime
 
 ROOT = Path(__file__).resolve().parent
 API = 'https://discord.com/api/v10'
@@ -24,6 +25,7 @@ class Discord:
         self.log_path = Path(log_path or (ROOT.parents[2] / 'logs/discord.log' if self.root == ROOT else self.root / 'discord.log'))
 
     def config(self):
+        if managed():return runtime('discord')['settings']
         return values('Connectors/discord')
 
     def clean(self, text):
@@ -185,10 +187,12 @@ class Discord:
         return {'channel': str(channel), 'text': f'Canal vinculado à PIA local.\nDISCORD_CHANNEL_ID={channel}\nO valor já foi salvo nas configurações da PIA. Publicações com um canal específico no Podcast Automation continuam usando esse canal; deixe-o vazio para usar o padrão.'}
 
     def channels(self):
-        file=self.root/'config.json'
-        data=document('Connectors/discord',{})
+        data=runtime('discord')['config'] if managed() else document('Connectors/discord',{})
         rows=data.get('channels',[])
         if not rows and data.get('linked'):rows=[data['linked']]
+        default=self.config().get('DISCORD_CHANNEL_ID')
+        if default and not any(row.get('channel')==default for row in rows):
+            rows=[*rows, {'guild':'Discord','channel':default,'name':default}]
         return rows
 
     def unlink(self):

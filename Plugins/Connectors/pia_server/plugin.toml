@@ -1,0 +1,4 @@
+id = "pia_server"
+name = "PIA Server"
+provider = "pia_server"
+setup_url = "https://pia.travelrpg.com"

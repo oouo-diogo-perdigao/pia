@@ -87,7 +87,7 @@ a secretária local, dependências gráficas e os testes.
 
 # Configuração
 
-As configurações são editadas pela interface e ficam no SQLite em **Documentos/pia**. Credenciais ficam no cofre do sistema. Atalhos, catálogo e palavras de ativação são documentos lógicos no banco. Não há configuração por `.env` ou variáveis de ambiente. Veja [perfil, cofre e exportação/importação](docs/PROFILE_MIGRATION.md). Os identificadores abaixo descrevem campos internos da interface, não arquivos de configuração.
+As configurações são editadas pela interface e ficam no SQLite em **Documentos/pia**. As credenciais dos conectores gerenciados na PIA Server ficam no servidor. As credenciais locais ficam no cofre do sistema. Atalhos, catálogo e palavras de ativação são documentos lógicos no banco. Não há configuração por `.env` ou variáveis de ambiente. Veja [perfil, cofre e migração](docs/PROFILE_MIGRATION.md). Os identificadores abaixo descrevem campos internos da interface, não arquivos de configuração.
 
 ## Servidor
 

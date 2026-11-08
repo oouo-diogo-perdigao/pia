@@ -77,10 +77,16 @@ class ResourcePlugins:
 
     def config(self, plugin):
         self.manifest(plugin)
+        from Plugins.Connectors.pia_server.remote import managed, runtime
+        if managed():
+            return runtime(plugin)['config']
         from .settings_store import document
         return document('Connectors/'+plugin,{})
 
     def configure(self, plugin, client_id, client_secret=None):
+        from Plugins.Connectors.pia_server.remote import managed
+        if managed():
+            raise ValueError('Gerencie o cliente OAuth no painel da PIA Server.')
         with self.lock:
             data = self.config(plugin)
             data['client_id'] = client_id.strip()
@@ -99,6 +105,9 @@ class ResourcePlugins:
             return result
 
     def disconnect(self, plugin, account):
+        from Plugins.Connectors.pia_server.remote import managed
+        if managed():
+            raise ValueError('Remova a conta no painel da PIA Server.')
         with self.lock:
             data = self.config(plugin)
             data['accounts'] = [a for a in data.get('accounts', []) if a['id'] != account]
@@ -125,6 +134,9 @@ class ResourcePlugins:
 
     def connect(self, plugin, label):
         """Interactive installed-app PKCE flow. Call from a worker, never the Qt thread."""
+        from Plugins.Connectors.pia_server.remote import managed
+        if managed():
+            raise ValueError('Adicione a conta no painel da PIA Server.')
         manifest, config = self.manifest(plugin), self.config(plugin)
         client_id = config.get('client_id', '')
         if not client_id:
@@ -194,6 +206,9 @@ class ResourcePlugins:
         return account_id
 
     def _access_token(self, plugin, account):
+        from Plugins.Connectors.pia_server.remote import managed, request
+        if managed():
+            return request('access', plugin, account)['token']
         with self.lock:
             if not any(a['id'] == account for a in self.accounts(plugin)):
                 raise ValueError('Conta não conectada ao plugin selecionado.')
