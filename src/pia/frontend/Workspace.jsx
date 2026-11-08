@@ -232,10 +232,11 @@ export default function Workspace({ standalone = null }) {
           .then((value) => {
             if (
               active &&
-              Object.keys(value.chat_counts || {}).some(
-                (id) =>
-                  !latestState.current.chats.some((chat) => chat.id === id),
-              )
+              ((value.profile_revision && value.profile_revision !== latestState.current.notifications?.profile_revision) ||
+                Object.keys(value.chat_counts || {}).some(
+                  (id) =>
+                    !latestState.current.chats.some((chat) => chat.id === id),
+                ))
             ) {
               refresh().catch(report);
               return;

@@ -151,6 +151,7 @@ class DesktopUI(QObject):
             self.backend.secretary.start()
         if hasattr(self.service, 'notifications'):
             start_bridge(self.service.notifications)
+            self.service.start_profile_sync()
         if hasattr(self.backend, 'start_connectors'):
             self.backend.start_connectors()
         if __import__('os').environ.pop('PIA_OPEN_MAIN', '')=='1':

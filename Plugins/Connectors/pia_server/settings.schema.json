@@ -21,13 +21,6 @@
     "link": "https://pia.travelrpg.com"
   },
   {
-    "name": "PIA_SERVER_SYNC_MEDIA",
-    "type": "bool",
-    "default": "false",
-    "label": "Enviar capturas salvas e músicas geradas ao Drive",
-    "link": "https://pia.travelrpg.com"
-  },
-  {
     "name": "PIA_SERVER_SECRETARY",
     "type": "bool",
     "default": "false",
