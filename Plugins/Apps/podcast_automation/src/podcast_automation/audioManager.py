@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from .settings import get_config
 from .ui_events import emit
 from .audioEditing import edit_pauses, save_timeline
@@ -33,6 +34,7 @@ class AudioManager:
         self.object_storage_manager: ObjectStorageManager = object_storage_manager
         self.name = name
         self.pasta_extraida = pasta_extraida
+        self.track_usernames = self.ler_nomes_das_faixas(Path(pasta_extraida))
         self.NomesReais = NomesReais
         self.PersonagensDoJogo = PersonagensDoJogo
         self.arquivos_participantes = self.listar_arquivos_participantes()
@@ -45,8 +47,8 @@ class AudioManager:
             self.rss,
         ) = self.deduzir_participantes()
         self.session, self.episode = self.obter_temporada_episodio()
-        self.ano, self.mes, self.dia = self.name.split("_")[-2].split("-")
-        self.dataJogo = f"{self.ano}-{self.mes.zfill(2)}-{self.dia.zfill(2)}"
+        self.ano, self.mes, self.dia = self.data_da_gravacao(self.name).split("-")
+        self.dataJogo = f"{self.ano}-{self.mes}-{self.dia}"
         self.audio_mix_path = None
         self.audio_path = None
         self.edit_timeline = []
@@ -57,9 +59,39 @@ class AudioManager:
         nome = re.sub(r"\s+", " ", nome)
         return nome.strip(" .") or "Sessao sem nome"
 
+    @staticmethod
+    def data_da_gravacao(nome: str) -> str:
+        pia = re.search(r"(\d{8})\d{9}-", nome)
+        if pia:
+            return datetime.strptime(pia[1], "%Y%m%d").date().isoformat()
+        ano, mes, dia = nome.split("_")[-2].split("-")
+        return f"{ano}-{mes.zfill(2)}-{dia.zfill(2)}"
+
+    @staticmethod
+    def ler_nomes_das_faixas(pasta: Path) -> dict[str, str]:
+        arquivo = pasta / "pia-session.json"
+        if not arquivo.is_file():
+            return {}
+        with arquivo.open(encoding="utf-8") as entrada:
+            dados = json.load(entrada)
+        if not isinstance(dados, dict) or dados.get("source") != "pia-server-discord":
+            return {}
+        faixas = dados.get("tracks")
+        if not isinstance(faixas, list):
+            return {}
+        return {
+            faixa["filename"]: faixa["username"]
+            for faixa in faixas
+            if isinstance(faixa, dict)
+            and isinstance(faixa.get("filename"), str)
+            and isinstance(faixa.get("username"), str)
+        }
+
     def identificar_pessoa(self, caminho_arquivo: str) -> str:
         nome_base = os.path.splitext(os.path.basename(caminho_arquivo))[0]
-        identificador = nome_base.split("-", 1)[1] if "-" in nome_base else nome_base
+        identificador = self.track_usernames.get(os.path.basename(caminho_arquivo))
+        if not identificador:
+            identificador = nome_base.split("-", 1)[1] if "-" in nome_base else nome_base
         nome_real = self.NomesReais.get(identificador, identificador)
         if nome_real == identificador:
             print(
