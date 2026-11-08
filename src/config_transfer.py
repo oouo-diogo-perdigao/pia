@@ -3,7 +3,7 @@ import base64
 import json
 import os
 import re
-from contextlib import closing
+from contextlib import closing, nullcontext
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
@@ -103,28 +103,54 @@ def preview_config(data,password):
 
 
 @synchronized
-def import_config(data,password,store=None):
+def import_config(data,password,store=None,*,remove=None,preserve_local=False,connection=None):
     value=decode(data,password);store=store or get_store();undo=[];file_undo=[]
     # Runtime locations are recomputed on the destination. Paths to external tools
     # and user-selected resources must be reviewed in the UI after moving OS.
     from .profile_migration import portable_settings,portable_documents
     settings=portable_settings(value['settings'],value.get('user_dir',''),store.path.parent)
     documents=portable_documents(value['documents'],value.get('user_dir',''))
-    with store.connection() as db:
+    remove=remove or {}
+    with (store.connection() if connection is None else nullcontext(connection)) as db:
         try:
+            for section,name,*_ in remove.get('settings',[]):
+                db.execute('DELETE FROM settings WHERE section=? AND name=?',(section,name))
+            for name,_ in remove.get('documents',[]):
+                if preserve_local and name=='Apps/screenshots':
+                    old=db.execute('SELECT value FROM documents WHERE name=?',(name,)).fetchone()
+                    if old and 'output_folder' in json.loads(old[0]):
+                        db.execute('UPDATE documents SET value=? WHERE name=?',
+                                   (json.dumps({'output_folder':json.loads(old[0])['output_folder']}),name))
+                        continue
+                db.execute('DELETE FROM documents WHERE name=?',(name,))
+            for name in remove.get('secrets',[]):
+                undo.append((name,store.vault.get(name)));store.vault.delete(name)
+                db.execute('DELETE FROM vault_entries WHERE name=?',(name,))
             for name,secret in value['secrets'].items():
                 undo.append((name,store.vault.get(name)));store.vault.set(name,secret)
                 if store.vault.get(name)!=secret:raise RuntimeError('O cofre não confirmou a importação.')
                 db.execute('INSERT OR IGNORE INTO vault_entries VALUES(?)',(name,))
             for row in settings:db.execute('INSERT OR REPLACE INTO settings VALUES(?,?,?,?,?)',row)
-            for row in documents:db.execute('INSERT OR REPLACE INTO documents VALUES(?,?)',row)
-            for name,encoded in value.get('files',{}).items():
+            for name,raw in documents:
+                if preserve_local and name=='Apps/screenshots':
+                    old=db.execute('SELECT value FROM documents WHERE name=?',(name,)).fetchone()
+                    if old and 'output_folder' in json.loads(old[0]):
+                        raw=json.dumps({**json.loads(raw),'output_folder':json.loads(old[0])['output_folder']})
+                db.execute('INSERT OR REPLACE INTO documents VALUES(?,?)',(name,raw))
+            files=dict.fromkeys(remove.get('files',[]))
+            files.update(value.get('files',{}))
+            for name,encoded in files.items():
                 target=store.path.parent/'files'/name
                 if target.is_symlink() or not target.resolve().is_relative_to((store.path.parent/'files').resolve()):raise ValueError('Destino de arquivo inválido.')
                 file_undo.append((target,target.read_bytes() if target.exists() else None))
-                target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(base64.b64decode(encoded));target.chmod(0o600)
+                if encoded is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(base64.b64decode(encoded));target.chmod(0o600)
             preferences=value.get('preferences',[])
             db.execute('CREATE TABLE IF NOT EXISTS values_store(key TEXT PRIMARY KEY,value TEXT)')
+            for name,_ in remove.get('preferences',[]):
+                db.execute('DELETE FROM values_store WHERE key=?',(name,))
             for name,raw in preferences:
                 if name.startswith('ui:') or name=='notifications:settings':
                     json.loads(raw);db.execute('INSERT OR REPLACE INTO values_store VALUES(?,?)',(name,raw))

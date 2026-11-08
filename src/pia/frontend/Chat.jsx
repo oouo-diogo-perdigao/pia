@@ -260,6 +260,10 @@ export default function Chat({ chat }) {
     };
   }, [chat]);
   useEffect(() => {
+    if (chat && !running && state.notifications?.profile_revision)
+      load().catch(report);
+  }, [state.notifications?.profile_revision]);
+  useEffect(() => {
     if (follow.current && scroll.current)
       scroll.current.scrollTop = scroll.current.scrollHeight;
   }, [messages, streaming]);

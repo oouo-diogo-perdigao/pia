@@ -105,6 +105,21 @@ class WorkspaceService:
         self.notifications=getattr(self.backend,'notifications',None) or NotificationCenter(self.store,self.notify,getattr(self.backend,'speak',lambda text:None))
         from src.media import MediaSessions
         self.media=MediaSessions()
+        if backend is None:
+            self.start_profile_sync()
+
+    def start_profile_sync(self):
+        from Plugins.Connectors.pia_server.profile_sync import start
+        def idle():
+            return not any(job.status == 'running' for job in list(self.jobs.values()))
+
+        def reload_runtime():
+            if self.native_handler:
+                while not idle():
+                    time.sleep(.5)
+                self.native('restart')
+
+        start(self.store, idle, reload_runtime)
 
     def notify(self, title, text, speak=False):
         if self.native_handler:
@@ -123,9 +138,10 @@ class WorkspaceService:
                 'notifications':self.notification_counts(),'bots':self.bot_records()}
 
     def notification_counts(self):
+        from Plugins.Connectors.pia_server.profile_sync import status
         counts={k:v for k,v in self.notifications.snapshot().items() if k in ('counts','unread','settings')}
         chats=self.store.unread_chats()
-        return {**counts,'chat_counts':chats,'chat_unread':sum(chats.values())}
+        return {**counts,'chat_counts':chats,'chat_unread':sum(chats.values()),'profile_revision':status(self.store).get('revision')}
 
     def bot_records(self):
         records=[]
@@ -197,7 +213,7 @@ class WorkspaceService:
             known={item['name'] for item in definitions}
             definitions=definitions+[dict(name=name,type=kind,label=name.replace('_',' ').title()) for group,name,_,kind,_ in get_store().rows('settings') if group==identity and name not in known]
             if identity == 'Connectors/pia_server':
-                definitions = [item for item in definitions if item['name'] != 'PIA_SERVER_DEVICE_TOKEN']
+                definitions = [item for item in definitions if item['name'] not in ('PIA_SERVER_DEVICE_TOKEN', 'PIA_SERVER_SYNC_MEDIA')]
             if not definitions:continue
             values=get_store().values(identity)
             rows=[dict(name=item['name'],base=item['name'],label=item.get('label',item['name']),type=item['type'],
@@ -278,6 +294,9 @@ class WorkspaceService:
             write(identity,parts[-1])
             if isinstance(result,dict) and result.get('job') in self.jobs:
                 self.jobs[result['job']].plugin_identity=identity
+        if method == 'POST' and (path.startswith(('/settings/', '/bots/', '/chat/', '/folder/')) or path == '/preferences'):
+            from Plugins.Connectors.pia_server.profile_sync import wake
+            wake(self.store)
         return result
 
     def _dispatch(self, method, path, data, query):
@@ -453,7 +472,10 @@ class WorkspaceService:
                 if action == 'login-start':
                     return login.begin(data.get('server', ''))
                 if action == 'logout':
-                    return login.logout()
+                    from Plugins.Connectors.pia_server.profile_sync import stop
+                    result = login.logout()
+                    stop(self.store)
+                    return result
                 identity = data.get('id')
                 if not isinstance(identity, str):
                     raise ValueError('Pedido de login inválido.')
@@ -461,12 +483,11 @@ class WorkspaceService:
                 if result.pop('changed', False):
                     from Plugins.Connectors.pia_server.service import start
                     start(self.notifications)
+                    self.start_profile_sync()
                 return result
-            if plugin == 'pia_server' and action in ('profile-status', 'profile-push', 'profile-pull'):
-                from Plugins.Connectors.pia_server.profile import transfer
-                if action == 'profile-pull' and any(job.status == 'running' for job in self.jobs.values()):
-                    raise ValueError('Aguarde os trabalhos em andamento antes de carregar o perfil.')
-                return transfer(action.removeprefix('profile-'), self.store, data.get('revision'))
+            if plugin == 'pia_server' and action == 'profile-status':
+                from Plugins.Connectors.pia_server.profile_sync import status
+                return status(self.store)
             if plugin=='agents':
                 from Plugins.Connectors.agents.service import ask,status
                 if action=='status':return status()

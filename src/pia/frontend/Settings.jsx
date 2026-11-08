@@ -3,100 +3,53 @@ import { DocumentSettings, VaultSettings } from "./ProfileSettings";
 import LogsPanel from "./LogsPanel";
 import { fingerprint } from "./forms";
 import React, { useState, useEffect, useRef } from "react";
-import { Button, Group, Paper, Text, Title, TextInput, PasswordInput, Select, Stack, Modal, FileButton, Anchor } from "@mantine/core";
+import { Button, Group, Paper, Text, Title, TextInput, PasswordInput, Select, Stack, FileButton, Anchor } from "@mantine/core";
 import { ExternalLink, Folder, Upload } from "lucide-react";
 import { api, report, safe, session } from "./api";
 import { Icon, Nav, usePia } from "./shared";
 
 function ServerProfilePanel() {
-  const [revision, setRevision] = useState(null);
-  const [pending, setPending] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
+  const [profile, setProfile] = useState({ state: "pending" });
 
-  async function transfer(action) {
-    setBusy(true);
-    try {
-      const result = await api("/integrations/pia_server/profile-" + action, {
-        revision,
-      });
-      setRevision(result.revision);
-      setPending(null);
-      if (action === "push") setMessage("Perfil salvo no servidor.");
-      if (action === "pull")
-        setMessage(
-          "Perfil carregado. Reinicie a PIA para aplicar as configurações.",
-        );
-    } finally {
-      setBusy(false);
+  useEffect(() => {
+    let active = true;
+    async function refresh() {
+      try {
+        const result = await api("/integrations/pia_server/profile-status");
+        if (active) setProfile(result);
+      } catch {
+        if (active) setProfile({ state: "retrying" });
+      }
     }
-  }
+    refresh();
+    const timer = setInterval(refresh, 5000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  const messages = {
+    pending: "Sincronização pendente.",
+    synced: "Perfil sincronizado.",
+    retrying: "Não foi possível sincronizar. A PIA tentará novamente.",
+    disconnected: "Entre na PIA Server para sincronizar.",
+    "different-account": "Este perfil pertence a outra conta. Entre com a conta original para sincronizar.",
+  };
 
   return (
     <Paper withBorder p="lg">
       <Stack>
-        <Title order={4}>Perfil compartilhado</Title>
+        <Title order={4}>Sincronização automática</Title>
         <Text size="sm">
-          Configurações e conversas podem ser copiadas entre computadores. As contas dos conectores são gerenciadas no servidor. As
-          preferências de notificação ficam neste computador.
+          A PIA sincroniza configurações e conversas em segundo plano. As contas
+          dos conectores são gerenciadas no servidor. Caminhos e preferências
+          deste computador são mantidos localmente.
         </Text>
-        <Anchor
-          href="https://pia.travelrpg.com"
-          target="_blank"
-          rel="noreferrer"
-        >
+        <Text size="sm" role="status">{messages[profile.state]}</Text>
+        <Anchor href="https://pia.travelrpg.com" target="_blank" rel="noreferrer">
           Abrir painel da PIA Server
         </Anchor>
-        <Text size="sm">
-          {revision === null
-            ? "Consulte o perfil antes de sincronizar."
-            : revision === "0"
-              ? "Ainda não existe um perfil no servidor."
-              : "Revisão no servidor: " + revision}
-        </Text>
-        <Group>
-          <Button
-            variant="light"
-            disabled={busy}
-            onClick={safe(() => transfer("status"))}
-          >
-            Consultar perfil
-          </Button>
-          <Button
-            disabled={busy || revision === null}
-            onClick={() => setPending("push")}
-          >
-            Enviar perfil local
-          </Button>
-          <Button
-            variant="light"
-            disabled={busy || !revision || revision === "0"}
-            onClick={() => setPending("pull")}
-          >
-            Carregar perfil do servidor
-          </Button>
-        </Group>
-        {message && (
-          <Text size="sm" role="status">
-            {message}
-          </Text>
-        )}
-        <Modal
-          opened={!!pending}
-          onClose={() => !busy && setPending(null)}
-          title="Sincronizar perfil"
-        >
-          <Stack>
-            <Text>
-              {pending === "pull"
-                ? "As conversas locais serão substituídas pelas do servidor. As configurações correspondentes também serão atualizadas."
-                : "O servidor passará a guardar a cópia deste computador. A revisão atual será substituída."}
-            </Text>
-            <Button loading={busy} onClick={safe(() => transfer(pending))}>
-              Confirmar sincronização
-            </Button>
-          </Stack>
-        </Modal>
       </Stack>
     </Paper>
   );

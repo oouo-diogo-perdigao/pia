@@ -29,7 +29,7 @@ def device_key(config):
 def enqueue(path):
     try:
         config = values(SECTION)
-        if config.get('PIA_SERVER_SYNC_MEDIA') != 'true' or not config.get('PIA_SERVER_DEVICE_TOKEN'):
+        if not config.get('PIA_SERVER_DEVICE_TOKEN'):
             return
         path = Path(path).resolve(strict=True)
         mime = FORMATS.get(path.suffix.lower())
@@ -47,7 +47,7 @@ def enqueue(path):
 def run():
     config = values(SECTION)
     token = config.get('PIA_SERVER_DEVICE_TOKEN', '')
-    if config.get('PIA_SERVER_SYNC_MEDIA') != 'true' or not token:
+    if not token:
         return
     url = urlsplit(config['PIA_SERVER_URL'])
     if url.scheme != 'https' or not url.hostname or url.username or url.password or url.query or url.fragment or url.path not in ('', '/'):

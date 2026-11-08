@@ -1,10 +1,17 @@
 """Local chat history and drafts, independent of Qt and provider SDKs."""
 import json
+import secrets
 import sqlite3
 import time
 import uuid
 from pathlib import Path
 from contextlib import contextmanager
+
+
+def message_id(after=0):
+    """Sortable integer IDs that can be created independently on each device."""
+    clock = (time.time_ns() // 1_000_000 - 1_750_000_000_000) << 13
+    return max(clock, after) + 1 + secrets.randbits(13)
 
 
 class WorkspaceStore:
@@ -134,7 +141,6 @@ class WorkspaceStore:
             leaf = db.execute('SELECT leaf FROM chats WHERE id=?',(chat,)).fetchone()[0]
             if leaf in doomed: db.execute('UPDATE chats SET leaf=? WHERE id=?',(row[0],chat))
             db.executemany('DELETE FROM messages WHERE id=?',[(i,) for i in doomed])
-            # SQLite can reuse the largest deleted id. Keep future replies unread.
             db.execute('UPDATE chats SET read_message=MIN(read_message,COALESCE((SELECT MAX(id) FROM messages WHERE chat=?),0)) WHERE id=?',(chat,chat))
             if leaf in doomed:
                 sibling = db.execute('SELECT id FROM messages WHERE chat=? AND parent IS ? ORDER BY id DESC LIMIT 1',(chat,row[0])).fetchone()
@@ -192,11 +198,14 @@ class WorkspaceStore:
 
     def append(self, chat, role, text):
         with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT leaf FROM chats WHERE id=?',(chat,)).fetchone()
             if not row: raise ValueError('Conversa não encontrada.')
-            cursor = db.execute('INSERT INTO messages(chat,role,text,parent) VALUES(?,?,?,?)', (chat, role, text,row[0]))
-            db.execute('UPDATE chats SET leaf=? WHERE id=?',(cursor.lastrowid,chat))
-            db.execute('INSERT OR REPLACE INTO values_store VALUES(?,?)',(f'branch:{chat}:{row[0]}',json.dumps(cursor.lastrowid)))
+            previous = db.execute('SELECT MAX(id) FROM messages').fetchone()[0] or 0
+            identity = message_id(previous)
+            db.execute('INSERT INTO messages(id,chat,role,text,parent) VALUES(?,?,?,?,?)', (identity, chat, role, text, row[0]))
+            db.execute('UPDATE chats SET leaf=? WHERE id=?',(identity,chat))
+            db.execute('INSERT OR REPLACE INTO values_store VALUES(?,?)',(f'branch:{chat}:{row[0]}',json.dumps(identity)))
             if role == 'user':
                 db.execute("UPDATE chats SET title=? WHERE id=? AND title='Nova conversa'", (text[:60], chat))
 

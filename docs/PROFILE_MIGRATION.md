@@ -49,9 +49,12 @@ da PIA Server. Na primeira consulta o servidor aproveita o cadastro do último
 perfil recebido. As alterações ficam disponíveis aos computadores pareados.
 A interface não exporta nem importa arquivos de credenciais.
 
-O perfil compartilhado ainda permite copiar configurações e conversas. Esse fluxo
-não altera o cadastro dos conectores. Instalações com credenciais legadas preservam
-as entradas locais, usadas apenas em modo não pareado.
+O perfil compartilhado sincroniza configurações e conversas automaticamente
+quando o desktop se conecta. A sincronização compara mudanças por registro e usa
+revisões para reconciliar alterações concorrentes. Contas dos conectores
+continuam sendo gerenciadas no servidor. Caminhos locais, permissões e preferências
+de notificação continuam no computador. Para impedir o envio do histórico de um
+usuário para outro, um perfil local sincronizado fica associado à sua conta Google.
 
 ## Atualização da instalação existente
 
