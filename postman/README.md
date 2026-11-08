@@ -35,6 +35,8 @@ veja [MCP e Codex](../docs/MCP_CODEX.md).
 
 ## Uso e limites
 
+Em **04 · Mini PIA e voz**, os exemplos de `/api/pia/native` mostram e ocultam a Mini PIA, alternam o microfone, expandem a janela principal, fecham o compositor e leem a resposta de um job de chat. A pasta também inclui consulta e gravação de rascunho e envio de mensagem. Abra a sessão local antes das chamadas `/api/pia/*`. Abrir o compositor, arrastar a Mini PIA e reações de hover são interações da interface Qt, sem ação HTTP correspondente.
+
 Não execute a collection inteira no Runner: há operações que excluem dados,
 publicam mensagens, alteram configurações, reiniciam a PIA ou usam hardware e
 modelos. Os exemplos precisam de IDs existentes; os campos opcionais completos

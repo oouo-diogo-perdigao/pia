@@ -1,0 +1,7 @@
+{
+  "nome": "Taverns · bot e notificações",
+  "app_id": "taverns",
+  "info": "Publique mensagens em canais da Tav.gg.",
+  "type": "connector",
+  "lang": "lang/pt-BR.json"
+}

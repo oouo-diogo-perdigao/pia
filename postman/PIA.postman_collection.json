@@ -121,16 +121,6 @@
       "type": "string"
     },
     {
-      "key": "backup_base64",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "backup_password",
-      "value": "",
-      "type": "string"
-    },
-    {
       "key": "bucket",
       "value": "",
       "type": "string"
@@ -151,22 +141,17 @@
       "type": "string"
     },
     {
-      "key": "client_id",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "client_secret",
-      "value": "",
-      "type": "string"
-    },
-    {
       "key": "credential_name",
       "value": "",
       "type": "string"
     },
     {
       "key": "data",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "device_login_id",
       "value": "",
       "type": "string"
     },
@@ -226,22 +211,12 @@
       "type": "string"
     },
     {
-      "key": "storage_access_key",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "storage_endpoint",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "storage_secret_key",
-      "value": "",
-      "type": "string"
-    },
-    {
       "key": "target",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "taverns_destination",
       "value": "",
       "type": "string"
     },
@@ -964,6 +939,272 @@
             "body": {
               "mode": "raw",
               "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/native · Mostrar Mini PIA",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/native",
+            "description": "Requer PIA desktop e sessão local. Mostra a Mini PIA.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"mini\",\n  \"payload\": {\n    \"visible\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/native · Ocultar Mini PIA",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/native",
+            "description": "Requer PIA desktop e sessão local. Oculta a Mini PIA e mantém o aplicativo ativo.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"mini\",\n  \"payload\": {\n    \"visible\": false\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/native · Alternar microfone",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/native",
+            "description": "Requer PIA desktop e sessão local. Alterna o microfone da Mini PIA. Pode iniciar a gravação.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"voice\",\n  \"payload\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/native · Expandir janela principal",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/native",
+            "description": "Requer PIA desktop e sessão local. Abre a janela principal da PIA.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"show\",\n  \"payload\": {\n    \"visible\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/native · Fechar compositor",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/native",
+            "description": "Requer PIA desktop e sessão local. Fecha o compositor. Salve o rascunho antes se necessário.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"mini-compose-close\",\n  \"payload\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/native · Ler resposta do chat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/native",
+            "description": "Requer PIA desktop e sessão local. Lê em voz alta a resposta de um job de chat existente.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"mini-job\",\n  \"payload\": {\n    \"job\": \"{{job_id}}\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/pia/chat/messages · Consultar rascunho da Mini PIA",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/chat/messages?chat=_mini",
+            "description": "Consulta o rascunho da Mini PIA. Requer sessão local.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/chat/draft · Salvar rascunho da Mini PIA",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/chat/draft",
+            "description": "Substitui o rascunho da Mini PIA. Requer sessão local.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"chat\": \"_mini\",\n  \"text\": \"Rascunho de exemplo\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/chat/send · Enviar mensagem pela Mini PIA",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/chat/send",
+            "description": "Use o ID de uma conversa existente. Copie o job retornado para acompanhar os eventos ou ler a resposta. Requer sessão local.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"chat\": \"{{chat_id}}\",\n  \"text\": \"Olá!\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1808,68 +2049,6 @@
             "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
             "auth": {
               "type": "noauth"
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /api/pia/accounts/connect",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{base_url}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/pia/accounts/connect",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
-            "auth": {
-              "type": "noauth"
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"plugin\": \"google\",\n  \"client_id\": \"{{client_id}}\",\n  \"client_secret\": \"{{client_secret}}\",\n  \"label\": \"Minha conta\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /api/pia/accounts/disconnect",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{base_url}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/pia/accounts/disconnect",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
-            "auth": {
-              "type": "noauth"
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"plugin\": \"google\",\n  \"account\": \"{{account_id}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
             }
           },
           "response": []
@@ -2841,148 +3020,6 @@
           "response": []
         },
         {
-          "name": "POST /api/pia/settings/export",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{base_url}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/pia/settings/export",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
-            "auth": {
-              "type": "noauth"
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"password\": \"{{backup_password}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "GET /api/pia/settings/google-backup",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{base_url}}"
-              }
-            ],
-            "url": "{{base_url}}/api/pia/settings/google-backup",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
-            "auth": {
-              "type": "noauth"
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /api/pia/settings/google-backup",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{base_url}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/pia/settings/google-backup",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
-            "auth": {
-              "type": "noauth"
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"action\": \"export\",\n  \"account\": \"{{account_id}}\",\n  \"password\": \"{{backup_password}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /api/pia/settings/import",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{base_url}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/pia/settings/import",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
-            "auth": {
-              "type": "noauth"
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"data\": \"{{backup_base64}}\",\n  \"password\": \"{{backup_password}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /api/pia/settings/import-preview",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{base_url}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/pia/settings/import-preview",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
-            "auth": {
-              "type": "noauth"
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"data\": \"{{backup_base64}}\",\n  \"password\": \"{{backup_password}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
           "name": "POST /api/pia/settings/save",
           "request": {
             "method": "POST",
@@ -3200,37 +3237,6 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"account\": \"{{account_id}}\",\n  \"folder\": \"root\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /api/pia/integrations/object_storage/secrets",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{base_url}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/pia/integrations/object_storage/secrets",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
-            "auth": {
-              "type": "noauth"
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"account\": \"{{account_id}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3510,6 +3516,272 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/integrations/taverns/channels",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/integrations/taverns/channels",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/integrations/taverns/test",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/integrations/taverns/test",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"destination\": \"{{taverns_destination}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/pia/integrations/pia_server/account",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/integrations/pia_server/account",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/integrations/pia_server/login-start",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/integrations/pia_server/login-start",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"server\": \"https://pia.travelrpg.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/integrations/pia_server/login-poll",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/integrations/pia_server/login-poll",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{device_login_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/integrations/pia_server/logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/integrations/pia_server/logout",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/integrations/pia_server/profile-status",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/integrations/pia_server/profile-status",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/integrations/pia_server/profile-push",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/integrations/pia_server/profile-push",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"revision\": \"0\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/integrations/pia_server/profile-pull",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/integrations/pia_server/profile-pull",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"revision\": \"1\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4109,68 +4381,6 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"account\": \"{{account_id}}\",\n  \"bucket\": \"{{bucket}}\",\n  \"key\": \"{{key}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /api/pia/apps/object_storage/remove-account",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{base_url}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/pia/apps/object_storage/remove-account",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
-            "auth": {
-              "type": "noauth"
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"id\": \"{{account_id}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /api/pia/apps/object_storage/save-account",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{base_url}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/pia/apps/object_storage/save-account",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
-            "auth": {
-              "type": "noauth"
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Minha conta\",\n  \"endpoint\": \"{{storage_endpoint}}\",\n  \"region\": \"auto\",\n  \"access_key\": \"{{storage_access_key}}\",\n  \"secret_key\": \"{{storage_secret_key}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

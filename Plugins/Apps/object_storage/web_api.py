@@ -30,8 +30,6 @@ def task(context,worker):
 def handle(action,data,context):
     store=storage();account=data.get('account');bucket=data.get('bucket')
     if action=='accounts':return {'accounts':store.accounts(),'default':store.config().get('default')}
-    if action=='save-account':return store.save_account(data)
-    if action=='remove-account':store.remove_account(data['id']);return {'ok':True}
     if action=='buckets':
         metadata=store.account(account)
         if metadata.get('bucket'):return {'buckets':[metadata['bucket']]}

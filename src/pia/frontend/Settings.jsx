@@ -1,431 +1,110 @@
 import { fieldGroup } from "./settings-groups";
-import {
-  TransferSettings,
-  DocumentSettings,
-  VaultSettings,
-} from "./ProfileSettings";
+import { DocumentSettings, VaultSettings } from "./ProfileSettings";
 import LogsPanel from "./LogsPanel";
 import { fingerprint } from "./forms";
 import React, { useState, useEffect, useRef } from "react";
-import {
-  Button,
-  Group,
-  Paper,
-  Text,
-  Title,
-  TextInput,
-  PasswordInput,
-  Select,
-  Textarea,
-  Switch,
-  Stack,
-  Modal,
-  FileButton,
-  Anchor,
-  Badge,
-  ColorInput,
-} from "@mantine/core";
-import {
-  ExternalLink,
-  Folder,
-  Upload,
-  Trash2,
-  Copy,
-  RefreshCw,
-  Link,
-  Unlink,
-  Plus,
-  Settings as Gear,
-  Check,
-} from "lucide-react";
-import { api, appApi, copy, report, safe, watchJob, session } from "./api";
-import { Icon, Nav, LogViewer, usePia } from "./shared";
+import { Button, Group, Paper, Text, Title, TextInput, PasswordInput, Select, Stack, Modal, FileButton, Anchor } from "@mantine/core";
+import { ExternalLink, Folder, Upload } from "lucide-react";
+import { api, report, safe, session } from "./api";
+import { Icon, Nav, usePia } from "./shared";
 
-export function DiscordPanel({ onChange = () => {} }) {
-  const [state, setState] = useState(null),
-    [channel, setChannel] = useState(""),
-    [logs, setLogs] = useState(""),
-    [result, setResult] = useState(""),
-    [busy, setBusy] = useState(false),
-    [channels, setChannels] = useState([]);
-  const previous = useRef(null),
-    call = (action, data = {}) => api("/integrations/discord/" + action, data);
-  async function refresh() {
-    const value = await call("status");
-    setState(value);
-    if (previous.current !== value.channel) {
-      setChannel(value.channel);
-      previous.current = value.channel;
-      onChange(value);
-    }
-    setChannels((await call("channels")).channels);
-  }
-  async function loadLogs() {
-    setLogs((await call("logs")).text);
-  }
-  useEffect(() => {
-    refresh().catch(report);
-    loadLogs().catch(report);
-    const timer = setInterval(() => refresh().catch(report), 5000);
-    return () => clearInterval(timer);
-  }, []);
-  async function action(name, data = {}) {
+function ServerProfilePanel() {
+  const [revision, setRevision] = useState(null);
+  const [pending, setPending] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function transfer(action) {
     setBusy(true);
     try {
-      const value = await call(name, data);
-      setResult(
-        name === "test"
-          ? "Mensagem de teste enviada: " + value.id
-          : name === "diagnose"
-            ? "Conexão válida: " + value.name
-            : "Operação concluída.",
-      );
-      await refresh();
-      await loadLogs();
-    } catch (error) {
-      setResult(error.message);
-      await loadLogs();
-      throw error;
+      const result = await api("/integrations/pia_server/profile-" + action, {
+        revision,
+      });
+      setRevision(result.revision);
+      setPending(null);
+      if (action === "push") setMessage("Perfil salvo no servidor.");
+      if (action === "pull")
+        setMessage(
+          "Perfil carregado. Reinicie a PIA para aplicar as configurações.",
+        );
     } finally {
       setBusy(false);
     }
   }
-  return (
-    <Stack mt="lg">
-      <Paper withBorder p="lg">
-        <Title order={4}>Conexão e publicação</Title>
-        <Text size="sm" mt="sm">
-          {state?.configured ? "Token configurado" : "Configure o token"} ·{" "}
-          {state?.gateway?.state}
-          {state?.gateway?.error ? " · " + state.gateway.error : ""}
-        </Text>
-        <Select
-          mt="md"
-          label="Canal da mensagem de teste"
-          placeholder="Vincule um canal com /link"
-          value={channel || null}
-          data={[
-            ...channels.map((item) => ({
-              value: item.channel,
-              label:
-                (item.guild_name || item.guild) +
-                " / #" +
-                (item.name || item.channel),
-            })),
-            ...(channel && !channels.some((item) => item.channel === channel)
-              ? [
-                  {
-                    value: channel,
-                    label: "Canal padrão antigo · use /link para atualizar",
-                  },
-                ]
-              : []),
-          ]}
-          onChange={(value) => setChannel(value || "")}
-        />
-        <Group mt="md">
-          <Button
-            disabled={busy}
-            onClick={safe(() => action("diagnose", { channel }))}
-          >
-            Verificar conexão
-          </Button>
-          <Button
-            disabled={busy}
-            onClick={safe(() => action("test", { channel }))}
-          >
-            Enviar mensagem de teste
-          </Button>
-        </Group>
-        <Text size="sm" mt="sm">
-          {result}
-        </Text>
-      </Paper>
-      <Paper withBorder p="lg">
-        <Title order={4}>Canais para publicação</Title>
-        <Text size="sm" my="md">
-          Use /link no Discord com permissão Administrador. Cada canal vinculado
-          aparece aqui e no seletor do Podcast Automation.
-        </Text>
-        {channels.map((item) => (
-          <Group key={item.channel} justify="space-between">
-            <Text>
-              {item.guild_name || item.guild} / #{item.name || item.channel}
-            </Text>
-            <Icon
-              feedback
-              icon={Copy}
-              label="Copiar ID do canal"
-              onClick={() => copy(item.channel)}
-            />
-          </Group>
-        ))}
-        <Group mt="md">
-          <Button disabled={busy} onClick={safe(() => action("register-link"))}>
-            Registrar /link e conectar
-          </Button>
-          <Icon
-            icon={RefreshCw}
-            label="Reconectar"
-            onClick={() => action("listener", { enabled: true })}
-          />
-          <Icon
-            icon={Unlink}
-            label="Desativar listener"
-            onClick={() => action("listener", { enabled: false })}
-          />
-          <Icon
-            icon={Trash2}
-            label="Remover vínculo padrão"
-            confirm
-            onClick={() => action("unlink")}
-          />
-        </Group>
-      </Paper>
-      <LogViewer text={logs} title="Log do Discord" />
-      <Icon icon={RefreshCw} label="Atualizar log" onClick={loadLogs} />
-    </Stack>
-  );
-}
 
-export function StorageAccounts() {
-  const [accounts, setAccounts] = useState([]),
-    [form, setForm] = useState({ provider: "s3", region: "auto" }),
-    [savedForm, setSavedForm] = useState(
-      fingerprint({ provider: "s3", region: "auto" }),
-    );
-  const call = (action, data = {}) => appApi("object_storage", action, data);
-  async function refresh() {
-    setAccounts((await call("accounts")).accounts);
-  }
-  useEffect(() => {
-    refresh().catch(report);
-  }, []);
-  async function edit(account) {
-    const secrets = await api("/integrations/object_storage/secrets", {
-      account: account.id,
-    });
-    setForm({ ...account, ...secrets });
-    setSavedForm(fingerprint({ ...account, ...secrets }));
-  }
   return (
-    <Paper withBorder p="lg" mt="lg">
-      <Title order={4}>Contas Object Storage</Title>
-      <Group
-        mt="md"
-        gap="xs"
-        role="group"
-        aria-label="Editar contas Object Storage"
-      >
-        {accounts.map((account) => (
-          <Group key={account.id} gap={4} wrap="nowrap">
-            <Button
-              variant={form.id === account.id ? "filled" : "outline"}
-              color={account.color || "#9b7aff"}
-              aria-pressed={form.id === account.id}
-              leftSection={
-                form.id === account.id ? <Check size={16} /> : undefined
-              }
-              onClick={safe(() => edit(account))}
-            >
-              {account.name}
-            </Button>
-            <Icon
-              icon={Trash2}
-              label="Remover conta"
-              confirm
-              onClick={async () => {
-                await call("remove-account", { id: account.id });
-                if (form.id === account.id) {
-                  setForm({ provider: "s3", region: "auto" });
-                  setSavedForm(fingerprint({ provider: "s3", region: "auto" }));
-                }
-                await refresh();
-              }}
-            />
-          </Group>
-        ))}
-      </Group>
-      <Stack mt="lg">
-        <ColorInput
-          label="Cor da conta"
-          value={form.color || ""}
-          placeholder="Automática"
-          onChange={(color) => setForm({ ...form, color })}
-        />
-        {[
-          "name",
-          "provider",
-          "endpoint",
-          "region",
-          "bucket",
-          "public_url",
-          "access_key",
-          "secret_key",
-          "session_token",
-        ].map((key) =>
-          key === "provider" ? (
-            <Select
-              key={key}
-              label="Provedor"
-              value={form[key] || "s3"}
-              data={["s3", "r2", "compatible"]}
-              onChange={(value) => setForm({ ...form, [key]: value })}
-            />
-          ) : key.includes("key") || key === "session_token" ? (
-            <PasswordInput
-              key={key}
-              label={key}
-              value={form[key] || ""}
-              onChange={(event) =>
-                setForm({ ...form, [key]: event.target.value })
-              }
-            />
-          ) : (
-            <TextInput
-              key={key}
-              label={key}
-              value={form[key] || ""}
-              onChange={(event) =>
-                setForm({ ...form, [key]: event.target.value })
-              }
-            />
-          ),
-        )}
-        <Switch
-          label="Conta padrão"
-          checked={!!form.default}
-          onChange={(event) =>
-            setForm({ ...form, default: event.currentTarget.checked })
-          }
-        />
+    <Paper withBorder p="lg">
+      <Stack>
+        <Title order={4}>Perfil compartilhado</Title>
+        <Text size="sm">
+          Configurações e conversas podem ser copiadas entre computadores. As contas dos conectores são gerenciadas no servidor. As
+          preferências de notificação ficam neste computador.
+        </Text>
+        <Anchor
+          href="https://pia.travelrpg.com"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Abrir painel da PIA Server
+        </Anchor>
+        <Group>
+          <Button variant="light" color="red" onClick={safe(async () => {
+            await api("/integrations/pia_server/logout", {});
+            location.reload();
+          })}>Sair neste computador</Button>
+        </Group>
+        <Text size="sm">
+          {revision === null
+            ? "Consulte o perfil antes de sincronizar."
+            : revision === "0"
+              ? "Ainda não existe um perfil no servidor."
+              : "Revisão no servidor: " + revision}
+        </Text>
         <Group>
           <Button
-            disabled={fingerprint(form) === savedForm}
-            onClick={safe(async () => {
-              await call("save-account", form);
-              setForm({ provider: "s3", region: "auto" });
-              setSavedForm(fingerprint({ provider: "s3", region: "auto" }));
-              await refresh();
-            })}
+            variant="light"
+            disabled={busy}
+            onClick={safe(() => transfer("status"))}
           >
-            Salvar conta
+            Consultar perfil
           </Button>
-          <Icon
-            icon={Plus}
-            label="Nova conta"
-            onClick={() => {
-              setForm({ provider: "s3", region: "auto" });
-              setSavedForm(fingerprint({ provider: "s3", region: "auto" }));
-            }}
-          />
+          <Button
+            disabled={busy || revision === null}
+            onClick={() => setPending("push")}
+          >
+            Enviar perfil local
+          </Button>
+          <Button
+            variant="light"
+            disabled={busy || !revision || revision === "0"}
+            onClick={() => setPending("pull")}
+          >
+            Carregar perfil do servidor
+          </Button>
         </Group>
+        {message && (
+          <Text size="sm" role="status">
+            {message}
+          </Text>
+        )}
+        <Modal
+          opened={!!pending}
+          onClose={() => !busy && setPending(null)}
+          title="Sincronizar perfil"
+        >
+          <Stack>
+            <Text>
+              {pending === "pull"
+                ? "As conversas locais serão substituídas pelas do servidor. As configurações correspondentes também serão atualizadas."
+                : "O servidor passará a guardar a cópia deste computador. A revisão atual será substituída."}
+            </Text>
+            <Button loading={busy} onClick={safe(() => transfer(pending))}>
+              Confirmar sincronização
+            </Button>
+          </Stack>
+        </Modal>
       </Stack>
     </Paper>
-  );
-}
-
-export function Accounts({ providerId }) {
-  const [data, setData] = useState(null),
-    [forms, setForms] = useState({});
-  useEffect(() => {
-    api("/accounts")
-      .then((result) => {
-        setData(result);
-        setForms(
-          Object.fromEntries(
-            result.providers.map((provider) => [
-              provider.id,
-              {
-                client: result.clients[provider.id],
-                secret: result.client_secrets?.[provider.id] || "",
-                label: "",
-              },
-            ]),
-          ),
-        );
-      })
-      .catch(report);
-  }, []);
-  if (!data) return <Text>Carregando contas…</Text>;
-  return (
-    <Stack>
-      {data.providers
-        .filter((provider) => !providerId || provider.id === providerId)
-        .map((provider) => (
-          <Paper withBorder p="lg" key={provider.id}>
-            <Title order={4}>{provider.name}</Title>
-            <Anchor href={provider.setup_url} target="_blank" rel="noreferrer">
-              Obter credenciais ↗
-            </Anchor>
-            <Stack mt="md">
-              {["client", "secret", "label"].map((key) => {
-                const Field = key === "secret" ? PasswordInput : TextInput;
-                return (
-                  <Field
-                    key={key}
-                    label={
-                      {
-                        client: "Client ID",
-                        secret: "Client Secret",
-                        label: "Nome local da conta",
-                      }[key]
-                    }
-                    value={forms[provider.id][key]}
-                    onChange={(event) =>
-                      setForms({
-                        ...forms,
-                        [provider.id]: {
-                          ...forms[provider.id],
-                          [key]: event.target.value,
-                        },
-                      })
-                    }
-                  />
-                );
-              })}
-              <Button
-                onClick={safe(async () => {
-                  const form = forms[provider.id],
-                    job = await api("/accounts/connect", {
-                      plugin: provider.id,
-                      client_id: form.client,
-                      client_secret: form.secret,
-                      label: form.label,
-                    });
-                  watchJob(job.job, (event) => {
-                    if (event.type === "error") report(event.error);
-                    if (event.type === "done")
-                      api("/accounts").then(setData).catch(report);
-                  });
-                })}
-              >
-                Conectar conta
-              </Button>
-              {data.accounts
-                .filter((account) => account.plugin === provider.id)
-                .map((account) => (
-                  <Group key={account.id}>
-                    <Text>
-                      {account.label} · {account.email}
-                    </Text>
-                    <Icon
-                      icon={Unlink}
-                      label="Desconectar conta"
-                      onClick={async () => {
-                        await api("/accounts/disconnect", {
-                          plugin: provider.id,
-                          account: account.id,
-                        });
-                        setData(await api("/accounts"));
-                      }}
-                    />
-                  </Group>
-                ))}
-            </Stack>
-          </Paper>
-        ))}
-    </Stack>
   );
 }
 
@@ -440,7 +119,7 @@ export default function SettingsPanel({ section = "general" }) {
   useEffect(() => {
     let active = true;
     if (
-      !["logs", "accounts", "transfer", "documents", "credentials"].includes(
+      !["logs", "documents", "credentials"].includes(
         section,
       )
     ) {
@@ -461,9 +140,7 @@ export default function SettingsPanel({ section = "general" }) {
       active = false;
     };
   }, [section]);
-  if (section === "accounts") return <Accounts />;
   if (section === "logs") return <LogsPanel />;
-  if (section === "transfer") return <TransferSettings />;
   if (section === "documents") return <DocumentSettings />;
   if (section === "credentials") return <VaultSettings />;
   const selected = sections.find((s) => s.id === section) || sections[0];
@@ -698,8 +375,7 @@ export default function SettingsPanel({ section = "general" }) {
           {notice && <Text size="sm">{notice}</Text>}
         </Stack>
       </Paper>
-      {selected.id === "Connectors/discord" && <DiscordPanel />}{" "}
-      {selected.id === "Connectors/object_storage" && <StorageAccounts />}
+      {selected.id === "Connectors/pia_server" && <ServerProfilePanel />}
     </Stack>
   );
 }

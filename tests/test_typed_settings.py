@@ -53,13 +53,13 @@ class TypedSettingsTests(unittest.TestCase):
     def test_managed_upload_is_in_user_profile_and_invalid_data_preserves_file(self):
         from src.user_paths import user_path
         service=WorkspaceService.__new__(WorkspaceService);name='INPUT_FILE'
-        service.settings=lambda:[dict(id='Connectors/google',fields=[dict(name=name,type='file')])]
+        service.settings=lambda:[dict(id='Connectors/agents',fields=[dict(name=name,type='file')])]
         definitions=[dict(name=name,type='file',default='')]
-        payload=dict(section='Connectors/google',name=name,filename='example.json',data=base64.b64encode(b'{"fixture":true}').decode())
+        payload=dict(section='Connectors/agents',name=name,filename='example.json',data=base64.b64encode(b'{"fixture":true}').decode())
         with patch('src.settings_store.schema',return_value=definitions):
             response=service.upload_setting(payload);target=Path(response['path'])
-            self.assertEqual(target,user_path('files/Connectors_google/google_INPUT_FILE.json'))
-            self.assertEqual(get_store().values('Connectors/google')[name],str(target))
+            self.assertEqual(target,user_path('files/Connectors_agents/agents_INPUT_FILE.json'))
+            self.assertEqual(get_store().values('Connectors/agents')[name],str(target))
             original=target.read_bytes();payload['data']='invalid-base64'
             with self.assertRaises(ValueError):service.upload_setting(payload)
             self.assertEqual(target.read_bytes(),original)

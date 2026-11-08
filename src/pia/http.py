@@ -21,7 +21,7 @@ def respond(handler, status, data, mime='application/json; charset=utf-8', heade
     handler.send_header('Content-Length', str(len(body)))
     handler.send_header('Cache-Control', 'no-store')
     handler.send_header('X-Content-Type-Options', 'nosniff')
-    handler.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'")
+    handler.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.googleusercontent.com; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'")
     for key, value in (headers or {}).items():
         handler.send_header(key, value)
     handler.end_headers()
@@ -119,7 +119,7 @@ def route(handler):
                 else:respond(handler,200,file.read_bytes(),mimetypes.guess_type(file.name)[0])
                 return True
             if handler.command == 'GET' and not path.startswith('/api/pia/events/') and path.removeprefix('/api/pia') not in {
-                '/state', '/chat/messages', '/settings', '/accounts', '/bots', '/bots/secretaria', '/logs', '/preferences', '/notifications', '/notifications/counts','/settings/documents','/settings/credentials','/settings/storage','/settings/google-backup'}:
+                '/state', '/chat/messages', '/settings', '/accounts', '/bots', '/bots/secretaria', '/logs', '/preferences', '/notifications', '/notifications/counts','/settings/documents','/settings/credentials','/settings/storage','/integrations/pia_server/account'}:
                 respond(handler, 405, {'error': 'Use POST para esta operação.'})
                 return True
             if path.startswith('/api/pia/events/'):

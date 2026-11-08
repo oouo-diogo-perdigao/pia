@@ -187,6 +187,8 @@ def generate(prompt,lyrics='',provider='local',duration=30,progress=lambda text:
             (destination/name).write_bytes(raw)
             result={'file':name,'provider':provider,'prompt':prompt,'lyrics':lyrics,'requested_duration':duration,'audio_url':'/api/pia/music/files/'+name}
             save_json(destination/(name+'.json'),result)
+            from Plugins.Connectors.pia_server.media import enqueue
+            enqueue(destination/name)
             return result
     finally:
         try:

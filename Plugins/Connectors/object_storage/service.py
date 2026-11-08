@@ -6,6 +6,7 @@ import threading
 _CONFIG_LOCK=threading.RLock()
 from src.settings_store import values as section_values, document, save_document
 from src.resource_plugins import KeyringVault,save_json
+from Plugins.Connectors.pia_server.remote import managed, runtime
 import json
 import re
 import secrets
@@ -27,15 +28,16 @@ class ObjectStorage:
         if self._vault is None:self._vault=KeyringVault()
         return self._vault
     def config(self):
+        if managed():return runtime('object_storage')['config']
         return document('Connectors/object_storage',{'accounts':[]})
     def legacy(self):return None
     def accounts(self):
         with _CONFIG_LOCK:
             config=self.config();result=config.get('accounts',[]);changed=False
             for account in result:
-                if not account.get('color'):account['color']=random_color();changed=True
-            if changed:save_document('Connectors/object_storage',config)
-        overrides=json.loads(section_values('Connectors/object_storage').get('OBJECT_STORAGE_ACCOUNT_COLORS') or '{}')
+                if not account.get('color'):account['color']='#9b7aff' if managed() else random_color();changed=True
+            if changed and not managed():save_document('Connectors/object_storage',config)
+        overrides=json.loads('{}' if managed() else section_values('Connectors/object_storage').get('OBJECT_STORAGE_ACCOUNT_COLORS') or '{}')
         if not isinstance(overrides,dict):raise ValueError('OBJECT_STORAGE_ACCOUNT_COLORS deve ser um objeto JSON de ID para cor.')
         for account in result:
             account['color']=valid_color(overrides.get(account['id'],account.get('color','#9b7aff')))
@@ -46,6 +48,7 @@ class ObjectStorage:
         if account is None:raise ValueError('Selecione uma conta de Object Storage nas configurações.')
         return account
     def save_account(self,value):
+        if managed():raise ValueError('Gerencie contas de Object Storage na PIA Server.')
         with _CONFIG_LOCK:return self._save_account(value)
     def _save_account(self,value):
         config=self.config();identity=value.get('id') or uuid.uuid4().hex
@@ -69,6 +72,7 @@ class ObjectStorage:
         save_document('Connectors/object_storage',config)
         return {'id':identity}
     def remove_account(self,identity):
+        if managed():raise ValueError('Gerencie contas de Object Storage na PIA Server.')
         with _CONFIG_LOCK:return self._remove_account(identity)
     def _remove_account(self,identity):
         config=self.config();config['accounts']=[a for a in config.get('accounts',[]) if a['id']!=identity]
@@ -76,7 +80,8 @@ class ObjectStorage:
         self.vault.delete('storage:'+identity);save_document('Connectors/object_storage',config)
     def client(self,identity=None):
         account=self.account(identity)
-        secret=self.vault.get('storage:'+account['id'])
+        secret=(runtime('object_storage', account['id']).get('secret') if managed()
+                else self.vault.get('storage:'+account['id']))
         if not secret:raise ValueError('Credenciais não disponíveis no cofre.')
         import boto3
         from botocore.config import Config

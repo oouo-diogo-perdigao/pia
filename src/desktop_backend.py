@@ -31,6 +31,9 @@ class DesktopBackend:
         self.agent = None
 
     def start_connectors(self):
+        from Plugins.Connectors.pia_server.remote import managed
+        if managed():
+            return
         from Plugins.Connectors.discord.runtime import get_runtime
         get_runtime().start_if_enabled()
 

@@ -23,6 +23,8 @@ import {
   Checkbox,
   Loader,
   Overlay,
+  Avatar as AccountAvatar,
+  Tooltip,
 } from "@mantine/core";
 import {
   MessageCircle,
@@ -54,6 +56,7 @@ import { Context, Icon, Nav, ErrorAlert } from "./shared";
 import { ScreenHistory } from "./navigation";
 import Chat from "./Chat";
 import SettingsPanel from "./Settings";
+import ServerLogin from "./ServerLogin";
 import Podcast from "../../../Plugins/Apps/podcast_automation/web/Panel.jsx";
 import Screenshots from "../../../Plugins/Apps/screenshots/web/Panel.jsx";
 import Storage from "../../../Plugins/Apps/object_storage/web/Panel.jsx";
@@ -118,6 +121,7 @@ function Avatar() {
 }
 
 export default function Workspace({ standalone = null }) {
+  const [account, setAccount] = useState(null);
   const [state, setState] = useState({
       chats: [],
       folders: [],
@@ -172,6 +176,10 @@ export default function Workspace({ standalone = null }) {
     let active = true;
     session()
       .then(async () => {
+        const profile = await api("/integrations/pia_server/account");
+        if (!active) return;
+        setAccount(profile);
+        if (!profile.authenticated) return;
         const [data, prefs] = await Promise.all([
           api("/state"),
           api("/preferences"),
@@ -494,6 +502,7 @@ export default function Workspace({ standalone = null }) {
     ) : (
       <iframe title={currentApp?.name || "Aplicativo"} src={currentApp?.url} />
     );
+  if (account && !account.authenticated) return <ServerLogin server={account.server} />;
   if (!ready)
     return (
       <>
@@ -678,6 +687,20 @@ export default function Workspace({ standalone = null }) {
                     </span>
                   )}
                 </NotificationMenu>
+                {account?.email && (
+                  <Tooltip label={account.email}>
+                    <AccountAvatar
+                      size={32}
+                      mx="auto"
+                      color="violet"
+                      src={account.picture || null}
+                      alt={account.email}
+                      imageProps={{ referrerPolicy: "no-referrer" }}
+                    >
+                      {account.email[0].toUpperCase()}
+                    </AccountAvatar>
+                  </Tooltip>
+                )}
                 <Icon
                   icon={Settings}
                   label={t("Configurações")}
@@ -910,14 +933,6 @@ export default function Workspace({ standalone = null }) {
                       }
                     >
                       Ativação e atalhos
-                    </Nav>
-                    <Nav
-                      active={route.section === "transfer"}
-                      onClick={() =>
-                        navigate({ view: "settings", section: "transfer" })
-                      }
-                    >
-                      Exportar / importar
                     </Nav>
                     <Nav
                       active={route.section === "credentials"}

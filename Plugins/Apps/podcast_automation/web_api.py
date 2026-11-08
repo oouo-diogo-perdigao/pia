@@ -71,17 +71,26 @@ def handle(action, data, context):
         outputs=data.get('outputs',{})
         if not isinstance(outputs,dict) or set(outputs)-{'mp3','resumo.json','srt','vtt','txt'} or any(not isinstance(v,bool) for v in outputs.values()):raise ValueError('Formatos de saída inválidos.')
         integrations=data.get('integrations',{})
-        allowed={'google_account','google_folder','google_folder_name','google_folder_path','storage_account','storage_bucket','announce','discord_notify','discord_channel','discord_channels'}
+        allowed={'google_account','google_folder','google_folder_name','google_folder_path','storage_account','storage_bucket','announce','discord_notify','discord_channel','discord_channels','taverns_notify','taverns_channels'}
         if not isinstance(integrations,dict) or set(integrations)-allowed:raise ValueError('Integrações inválidas.')
         for key,value in integrations.items():
             if key=='discord_channels':
                 if not isinstance(value,list) or any(not isinstance(v,str) or not v.isdigit() for v in value):raise ValueError('Canais Discord inválidos.')
                 continue
-            if key in ('announce','discord_notify'):
+            if key == 'taverns_channels':
+                from Plugins.Connectors.taverns.service import destination_ids
+                if not isinstance(value, list):
+                    raise ValueError('Canais Tav.gg inválidos.')
+                for destination in value:
+                    destination_ids(destination)
+                continue
+            if key in ('announce','discord_notify','taverns_notify'):
                 if not isinstance(value,bool):raise ValueError('Preferência inválida.')
             elif not isinstance(value,str):raise ValueError('Integração inválida.')
         config['outputs']={**{name:True for name in ('resumo.json','srt','txt','vtt')},**outputs,'mp3':True}
         config['integrations']={**config.get('integrations',{}),**integrations}
+        if config['integrations'].get('taverns_notify') and not config['integrations'].get('taverns_channels'):
+            raise ValueError('Selecione pelo menos um canal da Tav.gg para publicar.')
         if 'discord_channels' in integrations:config['integrations'].pop('discord_channel',None)
         save_document('Apps/podcast_automation/campaigns',config)
         return {'ok':True}

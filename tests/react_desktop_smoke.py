@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import json
-import base64
 import tempfile
 import threading
 from types import SimpleNamespace
@@ -48,7 +47,7 @@ with tempfile.TemporaryDirectory() as directory:
         answer='# Resposta\n\n**React funciona.**'
         on_delta(answer);store.append(chat,'assistant',answer);return answer
     backend=SimpleNamespace(store=store,reply=reply,speak=Mock(),resources=resources,secretary=secretary)
-    calls=[];storage_calls=[];backups=[]
+    calls=[];storage_calls=[]
     config={'nomes_reais':{},'campaign_details':{},'publication':{},'audio':{},'processing':{},'integrations':{'google_account':'work','google_folder':'old-folder'},'outputs':{}}
     class FakeApps(Apps):
         def call(self,identity,action,payload,context):
@@ -98,7 +97,6 @@ with tempfile.TemporaryDirectory() as directory:
     capture_image=QImage(32,32,QImage.Format.Format_ARGB32);capture_image.fill(QColor('#7755cc'))
     service=WorkspaceService(backend=backend,apps=FakeApps())
     def native(action,payload):
-        if action=='save-config-backup':backups.append(payload['data']);return {'ok':True}
         if action=='restart':return {'ok':True}
         if action in ('notify','media-state'):return {'ok':True}
         if action=='dictate':
@@ -106,7 +104,13 @@ with tempfile.TemporaryDirectory() as directory:
         raise ValueError('Native fixture action not allowed')
     service.native_handler=native
     original_dispatch=service.dispatch
+    login_state={'authenticated':False,'server':'https://pia.example.invalid','email':'fixture@example.invalid','picture':None}
     def dispatch(method,path,data,query):
+        if path=='/integrations/pia_server/account':return login_state
+        if path=='/integrations/pia_server/login-start':return {'id':'fixture','code':'123456','url':'https://pia.example.invalid/auth/device/fixture'}
+        if path=='/integrations/pia_server/login-poll':
+            login_state['authenticated']=True
+            return {'status':'authorized'}
         if path=='/integrations/google/accounts':return {'accounts':[{'id':'work','label':'Work','email':'fixture@example.invalid'}],'folder':''}
         if path=='/integrations/google/folders':return {'files':[{'id':'recordings','name':'Gravações'}] if data.get('folder')=='root' else [],'nextPageToken':None}
         if path=='/integrations/discord/channels':return {'channels':[]}
@@ -121,6 +125,10 @@ with tempfile.TemporaryDirectory() as directory:
     with patch.object(http,'get_service',return_value=service):
         shell=WebShell(origin+'/',origin);shell.show()
         shell.view.page().javaScriptConsoleMessage=lambda level,message,line,source:errors.append(message)
+        wait(lambda:js(shell,"document.body?.textContent.includes('Continuar com Google')"))
+        assert not js(shell,"!!document.querySelector('.activity-rail')")
+        js(shell,"document.querySelector('button[type=submit]').click()")
+        wait(lambda:js(shell,"document.querySelector('[aria-label=\"Código de autorização\"]')?.textContent==='123456'"))
         wait(lambda:js(shell,"!!document.querySelector('.activity-rail')"))
         js(shell,"document.querySelector('.chat-name').click()")
         wait(lambda:js(shell,"document.querySelector('.view-title')?.textContent==='Fixture chat'"))
@@ -135,7 +143,7 @@ with tempfile.TemporaryDirectory() as directory:
         assert js(shell,"document.querySelector('#prompt').value==='' && document.querySelector('.message.assistant strong').textContent==='React funciona.'")
         js(shell,"document.querySelector('.app-activities [aria-label=\"Podcast Automation\"]').click()")
         wait(lambda:js(shell,"!!document.querySelector('#process')"))
-        wait(lambda:js(shell,"document.body.textContent.includes('2 sessões ZIP a processar')"))
+        wait(lambda:js(shell,"document.body?.textContent.includes('2 sessões ZIP a processar')"))
         assert js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Pasta de gravações:')).textContent.includes('Meu Drive / Antigas')")
         # Shutdown and continuous monitoring are mutually exclusive run options.
         shutdown_toggle="document.querySelector('#shutdown-after-processing')"
@@ -164,7 +172,7 @@ with tempfile.TemporaryDirectory() as directory:
         assert config['integrations']['google_account']=='work'
         wait(lambda:js(shell,"!!document.querySelector('.success-toast')"))
         js(shell,"window.dispatchEvent(new Event('pia:toast-history'))")
-        wait(lambda:js(shell,"document.body.textContent.includes('Histórico de notificações')"))
+        wait(lambda:js(shell,"document.body?.textContent.includes('Histórico de notificações')"))
         js(shell,"document.querySelector('.mantine-Modal-close').click()")
         js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Bucket de destino:')).click()")
         wait(lambda:js(shell,"[...document.querySelectorAll('button')].some(b=>b.textContent==='podcasts')"))
@@ -201,11 +209,11 @@ with tempfile.TemporaryDirectory() as directory:
         wait(lambda:js(shell,"document.querySelector('.log-viewer')?.textContent.includes('line 149')"))
         js(shell,"var log=document.querySelector('.log-viewer');log.scrollTop=0;log.dispatchEvent(new Event('scroll',{bubbles:true}));")
         job.emit('log',text='after manual scroll')
-        wait(lambda:js(shell,"document.querySelector('.log-viewer').textContent.includes('after manual scroll')"))
+        wait(lambda:js(shell,"document.querySelector('.log-viewer')?.textContent.includes('after manual scroll')"))
         assert js(shell,"document.querySelector('.log-viewer').scrollTop===0")
         js(shell,"var log=document.querySelector('.log-viewer');log.scrollTop=log.scrollHeight;log.dispatchEvent(new Event('scroll',{bubbles:true}));")
         job.emit('log',text='following again')
-        wait(lambda:js(shell,"document.querySelector('.log-viewer').textContent.includes('following again')"))
+        wait(lambda:js(shell,"document.querySelector('.log-viewer')?.textContent.includes('following again')"))
         assert js(shell,"(()=>{var log=document.querySelector('.log-viewer');return log.scrollHeight-log.scrollTop-log.clientHeight<25;})()")
         preview=Path(__file__).resolve().parents[1]/'cache/main/desktop/previews';preview.mkdir(parents=True,exist_ok=True)
         QTest.qWait(300);shell.view.grab().save(str(preview/'react-podcast.png'))
@@ -231,17 +239,18 @@ with tempfile.TemporaryDirectory() as directory:
         wait(lambda:js(shell,"!!document.querySelector('.settings-tree-children')"))
         js(shell,"[...document.querySelectorAll('.settings-tree-children button')].find(b=>b.textContent==='Google').click()")
         wait(lambda:js(shell,"document.querySelector('.view-title')?.textContent==='Configurações / Conectores / Google'"))
-        wait(lambda:js(shell,"[...document.querySelectorAll('label')].some(label=>label.textContent==='Client ID')"))
+        wait(lambda:js(shell,"!!document.querySelector('a[href=\"https://pia.travelrpg.com/#connectors\"]')"))
+        assert not js(shell,"[...document.querySelectorAll('label')].some(label=>label.textContent==='Client ID')")
         js(shell,"[...document.querySelectorAll('.settings-tree-children button')].find(b=>b.textContent==='Agentes externos').click()")
         wait(lambda:js(shell,"!!document.querySelector('[aria-label=\"Como instalar e configurar o agente\"]')"))
         js(shell,"document.querySelector('[aria-label=\"Como instalar e configurar o agente\"]').click()")
-        wait(lambda:js(shell,"document.body.textContent.includes('npm install -g @openai/codex') && document.body.textContent.includes('AGENTS_CODEX_EXECUTABLE')"))
+        wait(lambda:js(shell,"document.body?.textContent.includes('npm install -g @openai/codex') && document.body?.textContent.includes('AGENTS_CODEX_EXECUTABLE')"))
         js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='Entendi').click()")
         js(shell,"[...document.querySelectorAll('label')].find(label=>label.textContent==='Agente').control.click()")
         wait(lambda:js(shell,"!![...document.querySelectorAll('[role=option]')].find(option=>option.textContent==='Google Antigravity · AGY')"))
         js(shell,"[...document.querySelectorAll('[role=option]')].find(option=>option.textContent==='Google Antigravity · AGY').click()")
         js(shell,"document.querySelector('[aria-label=\"Como instalar e configurar o agente\"]').click()")
-        wait(lambda:js(shell,"document.body.textContent.includes('AGENTS_AGY_EXECUTABLE') && document.body.textContent.includes('antigravity.google/cli/install.ps1')"))
+        wait(lambda:js(shell,"document.body?.textContent.includes('AGENTS_AGY_EXECUTABLE') && document.body?.textContent.includes('antigravity.google/cli/install.ps1')"))
         js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='Entendi').click()")
         # Environment settings use an isolated fixture and do not expose live secrets.
         service.settings=lambda:[dict(id='general',name='PIA · Geral',fields=[dict(name=name,base=name.split('__')[0],type='int',value='1',sensitive=False,link='https://example.invalid') for name in ('COUNT__INT','STT_THREADS__INT','TTS_SPEED__INT')])]
@@ -275,10 +284,10 @@ with tempfile.TemporaryDirectory() as directory:
         wait(lambda:service.store.unread_chats()=={})
         service.notifications.publish('Bot/secretaria','Fixture notification','Reunião',[{'label':'Abrir Meet','url':'https://meet.google.com/fixture'}])
         js(shell,"document.querySelector('[aria-label=\"Notificações\"]').click()")
-        wait(lambda:js(shell,"document.body.textContent.includes('Fixture notification')"))
+        wait(lambda:js(shell,"document.body?.textContent.includes('Fixture notification')"))
         assert js(shell,"document.querySelector('a[href=\"https://meet.google.com/fixture\"]')?.textContent.includes('Abrir Meet')")
         js(shell,"document.querySelector('[aria-label=\"Marcar como lida\"]').click()")
-        wait(lambda:js(shell,"document.body.textContent.includes('0 não lidas')"))
+        wait(lambda:js(shell,"document.body?.textContent.includes('0 não lidas')"))
         js(shell,"document.querySelector('.app-activities [aria-label=\"Música\"]').click()")
         wait(lambda:js(shell,"[...document.querySelectorAll('label')].some(label=>label.textContent==='Descrição musical')"))
         js(shell,"var promptField=[...document.querySelectorAll('label')].find(label=>label.textContent==='Descrição musical').control;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(promptField,'Piano fixture');promptField.dispatchEvent(new Event('input',{bubbles:true}));var countField=[...document.querySelectorAll('label')].find(label=>label.textContent==='Quantidade de músicas').control;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(countField,'2');countField.dispatchEvent(new Event('input',{bubbles:true}));")
@@ -291,16 +300,16 @@ with tempfile.TemporaryDirectory() as directory:
         js(shell,"document.querySelector('.app-activities [aria-label=\"Object Storage\"]').click()")
         wait(lambda:js(shell,"document.querySelector('[aria-label=\"Caminho do bucket\"]')?.textContent.includes('podcasts')"))
         js(shell,"[...document.querySelectorAll('button')].find(button=>button.textContent==='exams/').click()")
-        wait(lambda:js(shell,"document.body.textContent.includes('.. / Voltar')"))
+        wait(lambda:js(shell,"document.body?.textContent.includes('.. / Voltar')"))
         assert not js(shell,"!!document.querySelector('[aria-label=\"Pasta anterior\"]')")
         js(shell,"[...document.querySelectorAll('button')].find(button=>button.textContent==='fixture.txt').click()")
-        wait(lambda:js(shell,"document.body.textContent.includes('Como deseja abrir este arquivo?')"))
+        wait(lambda:js(shell,"document.body?.textContent.includes('Como deseja abrir este arquivo?')"))
         js(shell,"[...document.querySelectorAll('button')].find(button=>button.textContent==='Abrir').click()")
         wait(lambda:any(action=='open-local' for action,payload in storage_calls))
         assert not js(shell,"!!document.querySelector('[aria-label=\"Cancelar envio local\"]')")
         assert js(shell,"document.querySelector('[aria-label=\"Contas Object Storage\"] [aria-pressed=true]').textContent==='Work storage'")
         js(shell,"[...document.querySelectorAll('[aria-label=\"Contas Object Storage\"] button')].find(button=>button.textContent==='Other storage').click()")
-        wait(lambda:js(shell,"document.querySelector('[aria-label=\"Contas Object Storage\"] [aria-pressed=true]').textContent==='Other storage'"))
+        wait(lambda:js(shell,"document.querySelector('[aria-label=\"Contas Object Storage\"] [aria-pressed=true]')?.textContent==='Other storage'"))
         wait(lambda:any(action=='list' and payload['account']=='other-storage' and payload['bucket']=='other-bucket' and payload['prefix']=='' for action,payload in storage_calls))
         print('Music history/reuse, storage breadcrumbs, file actions, transfer finish and account reset: OK')
         log=root/'logs/plugins/Apps/fixture.log';log.parent.mkdir(parents=True);log.write_text(''.join(f'old {n}\n' for n in range(130)),encoding='utf-8')
@@ -308,14 +317,14 @@ with tempfile.TemporaryDirectory() as directory:
             js(shell,"document.querySelector('.rail-bottom [aria-label=\"Configurações\"]').click()")
             wait(lambda:js(shell,"[...document.querySelectorAll('.sidebar button')].some(b=>b.textContent==='Inspeção e logs')"))
             js(shell,"[...document.querySelectorAll('.sidebar button')].find(b=>b.textContent==='Inspeção e logs').click()")
-            wait(lambda:js(shell,"document.body.textContent.includes('Apps · 1')"))
+            wait(lambda:js(shell,"document.body?.textContent.includes('Apps · 1')"))
             assert js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='Apps · 1').getAttribute('aria-expanded')==='true'")
             wait(lambda:js(shell,"[...document.querySelectorAll('button')].some(b=>b.textContent==='Apps/fixture')"))
             assert js(shell,"[...document.querySelectorAll('button')].find(b=>b.textContent==='Apps/fixture').getAttribute('aria-expanded')==='true'")
             wait(lambda:js(shell,"!!document.querySelector('.log-viewer')"))
             assert js(shell,"document.querySelector('.log-viewer').textContent.startsWith('old 30\\n')")
             with log.open('a',encoding='utf-8') as stream:stream.write('live appended\n')
-            wait(lambda:js(shell,"document.querySelector('.log-viewer').textContent.includes('live appended')"))
+            wait(lambda:js(shell,"document.querySelector('.log-viewer')?.textContent.includes('live appended')"))
         print('Compact env tabs, central notification links/read state, grouped live logs: OK')
         editor=WebShell(origin+'/apps/screenshots/capture.html?id=fixture',origin);editor.show()
         wait(lambda:js(editor,"!!window.piaCapture?.ready"))
@@ -328,23 +337,10 @@ with tempfile.TemporaryDirectory() as directory:
         for job in service.jobs.values():
             if job.status=='running':job.emit('done')
         js(shell,"document.querySelector('.rail-bottom [aria-label=\"Configurações\"]').click()")
-        wait(lambda:js(shell,"[...document.querySelectorAll('.sidebar button')].some(button=>button.textContent==='Exportar / importar')"))
-        js(shell,"[...document.querySelectorAll('.sidebar button')].find(button=>button.textContent==='Exportar / importar').click()")
-        wait(lambda:js(shell,"!![...document.querySelectorAll('label')].find(label=>label.textContent==='Senha do arquivo de migração (opcional)')"))
-        js(shell,"for(const text of ['Senha do arquivo de migração (opcional)','Confirmar senha para exportar']){const input=[...document.querySelectorAll('label')].find(label=>label.textContent===text).control;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'abc');input.dispatchEvent(new Event('input',{bubbles:true}));}")
-        wait(lambda:js(shell,"![...document.querySelectorAll('button')].find(button=>button.textContent==='Exportar configurações e credenciais').disabled"))
-        js(shell,"[...document.querySelectorAll('button')].find(button=>button.textContent==='Exportar configurações e credenciais').click()")
-        wait(lambda:len(backups)==1)
-        assert b'fixture-only-secret' not in base64.b64decode(backups[0])
-        settings_store.get_store().save('general',{'PORT':'8764'})
-        js(shell,"{const bytes=Uint8Array.from(atob("+json.dumps(backups[0])+"),c=>c.charCodeAt(0));const transfer=new DataTransfer();transfer.items.add(new File([bytes],'fixture.pia-backup'));const input=document.querySelector('input[accept=\".pia-backup\"]');input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));}")
-        js(shell,"{const input=[...document.querySelectorAll('label')].find(label=>label.textContent==='Senha do arquivo de migração (opcional)').control;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'abc');input.dispatchEvent(new Event('input',{bubbles:true}));}")
-        wait(lambda:js(shell,"![...document.querySelectorAll('button')].find(button=>button.textContent==='Verificar importação').disabled"))
-        js(shell,"[...document.querySelectorAll('button')].find(button=>button.textContent==='Verificar importação').click()")
-        wait(lambda:js(shell,"[...document.querySelectorAll('button')].some(button=>button.textContent==='Importar e substituir configurações')"))
-        js(shell,"[...document.querySelectorAll('button')].find(button=>button.textContent==='Importar e substituir configurações').click()")
-        wait(lambda:settings_store.get_store().values('general')['PORT']=='8763')
-        print('Encrypted settings export/import UI and credential restoration: OK')
+        wait(lambda:js(shell,"document.querySelector('.sidebar')?.textContent.includes('Conectores')"))
+        assert not js(shell,"document.querySelector('.sidebar').textContent.includes('Exportar / importar')")
+        assert js(shell,"document.querySelector('.rail-bottom .mantine-Avatar-root')?.textContent.trim()==='F'")
+        print('Manual credential transfer is absent from Settings: OK')
         shell.hide();shell.view.setUrl(__import__('PyQt6.QtCore',fromlist=['QUrl']).QUrl('about:blank'))
         server.shutdown();server.server_close()
         assert not [error for error in errors if 'Uncaught' in error],errors

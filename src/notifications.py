@@ -21,7 +21,7 @@ class NotificationCenter:
                     counts[item['source']]=counts.get(item['source'],0)+1
             return {'items':items,'settings':settings,'counts':counts,'unread':sum(counts.values())}
 
-    def publish(self,source,title,text,links=None):
+    def publish(self,source,title,text,links=None,*,external_id=None):
         if not isinstance(source,str) or not re.fullmatch(r'(Apps|Bot)/[a-zA-Z0-9_-]+',source):
             raise ValueError('Origem de notificação inválida.')
         if links is not None and (not isinstance(links,list) or len(links)>20 or any(not isinstance(link,dict) or not isinstance(link.get('url'),str) for link in links)):
@@ -33,7 +33,10 @@ class NotificationCenter:
             clean.append({'label':str(link.get('label','Abrir'))[:100],'url':url})
         with self.lock:
             state=self.snapshot();muted=source in state['settings']['muted']
-            item={'id':uuid.uuid4().hex,'source':source,'title':str(title)[:300],
+            if external_id:
+                for existing in state['items']:
+                    if existing['id']==external_id and existing['source']==source:return existing
+            item={'id':external_id or uuid.uuid4().hex,'source':source,'title':str(title)[:300],
                   'text':str(text)[:10000],'links':clean,'read':False,
                   'created_at':datetime.now(timezone.utc).isoformat()}
             self.store.set('notifications:items',[item,*state['items']][:1000])

@@ -8,3 +8,4 @@ ADRs registram decisões duradouras e seu motivo; não são histórico de tarefa
 Para acrescentar uma decisão, use número sequencial e título específico. Estrutura: Status, Contexto, Decisão, Consequências e referências. Não reescreva uma decisão antiga para fingir que sempre foi diferente: marque-a como substituída e referencie o novo ADR. Uma proposta ainda não implementada deve ter status Proposta.
 
 - [0003 — Perfil do usuário, SQLite e cofre](0003-user-profile.md)
+- [0004 — Apps de servidor da PIA](0004-server-apps.md) (proposta)

@@ -188,11 +188,16 @@ class WorkspaceService:
 
     def settings(self):
         from src.settings_store import schema,get_store,sensitive
+        from Plugins.Connectors.pia_server.remote import SECTIONS
         sections=[]
         for identity,folder in [('general',CONFIG_DIR),*self.plugin_folders()]:
+            if identity in SECTIONS:
+                continue
             definitions=schema(identity)
             known={item['name'] for item in definitions}
             definitions=definitions+[dict(name=name,type=kind,label=name.replace('_',' ').title()) for group,name,_,kind,_ in get_store().rows('settings') if group==identity and name not in known]
+            if identity == 'Connectors/pia_server':
+                definitions = [item for item in definitions if item['name'] != 'PIA_SERVER_DEVICE_TOKEN']
             if not definitions:continue
             values=get_store().values(identity)
             rows=[dict(name=item['name'],base=item['name'],label=item.get('label',item['name']),type=item['type'],
@@ -205,6 +210,9 @@ class WorkspaceService:
 
     def save_settings(self,section,values):
         from src.settings_store import get_store,schema
+        from Plugins.Connectors.pia_server.remote import SECTIONS
+        if section in SECTIONS:
+            raise ValueError('Gerencie esse conector no painel da PIA Server.')
         selected=next((item for item in self.settings() if item['id']==section),None)
         allowed={item['name'] for item in selected['fields']} if selected else set()
         if not isinstance(values,dict) or set(values)-allowed:raise ValueError('Configuração desconhecida.')
@@ -278,57 +286,15 @@ class WorkspaceService:
             return {'folder':str(user_path()),'database':str(get_store().path),'notes':document('migration/notes',[])}
         if path=='/settings/credentials':
             from src.settings_store import get_store
-            return {'items':[row[0] for row in get_store().rows('vault_entries')]}
+            from Plugins.Connectors.pia_server.remote import managed_secret
+            return {'items':[row[0] for row in get_store().rows('vault_entries') if not managed_secret(row[0]) and row[0] != 'setting:Connectors/pia_server:PIA_SERVER_DEVICE_TOKEN']}
         if path=='/settings/credential':
             from src.settings_store import get_store
+            from Plugins.Connectors.pia_server.remote import managed_secret
             store=get_store();name=data['name']
+            if managed_secret(name) or name == 'setting:Connectors/pia_server:PIA_SERVER_DEVICE_TOKEN':raise ValueError('Gerencie esse conector no painel da PIA Server.')
             if name not in {row[0] for row in store.rows('vault_entries')}:raise ValueError('Credencial não encontrada.')
             return {'value':store.vault.get(name)}
-        if path=='/settings/export':
-            from src.config_transfer import export_config
-            return export_config(data['password'])
-        if path == '/settings/google-backup':
-            import base64
-            from Plugins.Connectors.google.drive import Drive
-            from src.config_transfer import BACKUP_HEADERS, MAX_BACKUP_BYTES, export_config
-
-            resources = self.backend.resources
-            if method == 'GET':
-                return {'accounts': [
-                    {'id': account['id'], 'label': account.get('label') or account['id'],
-                     'email': account.get('email', '')}
-                    for account in resources.accounts('google')
-                ]}
-            account = data.get('account')
-            if not isinstance(account, str) or not account.strip():
-                raise ValueError('Selecione uma conta Google.')
-            drive = Drive(resources)
-            drive.account(account)
-            name = 'pia-configuracoes.pia-backup'
-            if data.get('action') == 'export':
-                backup = export_config(data['password'])
-                file = drive.save_app_data(account, name, base64.b64decode(backup['data']))
-                return {'created': file.get('createdTime')}
-            if data.get('action') == 'download':
-                file, content = drive.latest_app_data(account, name, MAX_BACKUP_BYTES)
-                if not content.startswith(BACKUP_HEADERS):
-                    raise ValueError('O arquivo no Google Drive não é um backup da PIA.')
-                return {'created': file.get('createdTime'), 'data': base64.b64encode(content).decode('ascii')}
-            raise ValueError('Ação de backup inválida.')
-        if path=='/settings/import-preview':
-            from src.config_transfer import preview_config
-            return preview_config(data['data'],data['password'])
-        if path=='/settings/import':
-            if any(job.status=='running' for job in self.jobs.values()):raise ValueError('Aguarde os trabalhos em andamento antes de importar configurações.')
-            from src.config_transfer import import_config
-            from contextlib import nullcontext
-            lock=getattr(getattr(self.backend,'resources',None),'lock',None)
-            with lock if hasattr(lock,'__enter__') else nullcontext():
-                result=import_config(data['data'],data['password'])
-            if self.native_handler:
-                threading.Timer(1,lambda:self.native('restart')).start()
-                result['restarting']=True
-            return result
         if path=='/settings/documents':
             from src.settings_store import document,save_document
             names=('keywords.txt','models.yaml','shortcuts.yaml')
@@ -465,25 +431,7 @@ class WorkspaceService:
                 result['restarting']=True
             return result
         if path == '/accounts':
-            return {'providers': self.backend.resources.manifests(), 'accounts': self.backend.resources.accounts(),
-                    'client_secrets': {p['id']: self.backend.resources.vault.get('client:'+p['id']) or '' for p in self.backend.resources.manifests()},
-                    'clients': {p['id']: self.backend.resources.config(p['id']).get('client_id', '') for p in self.backend.resources.manifests()}}
-        if path == '/accounts/connect':
-            resources = self.backend.resources
-            job = Job()
-            self.jobs[job.id] = job
-            def connect():
-                try:
-                    resources.configure(data['plugin'], data['client_id'], data.get('client_secret') or None)
-                    resources.connect(data['plugin'], data.get('label', ''))
-                    job.emit('done')
-                except Exception as exc:
-                    job.emit('error', error=str(exc))
-            threading.Thread(target=connect, daemon=True).start()
-            return {'job': job.id}
-        if path == '/accounts/disconnect':
-            self.backend.resources.disconnect(data['plugin'], data['account'])
-            return {'ok': True}
+            return {'providers': self.backend.resources.manifests(), 'accounts': self.backend.resources.accounts()}
         if path == '/bots':
             return self.bot_records()
         if path == '/bots/secretaria':
@@ -497,6 +445,28 @@ class WorkspaceService:
             return {'ok': True}
         if path.startswith('/integrations/'):
             _,_,plugin,action=path.split('/',3)
+            if plugin == 'pia_server' and action == 'account':
+                from Plugins.Connectors.pia_server.remote import account_profile
+                return account_profile()
+            if plugin == 'pia_server' and action in ('login-start', 'login-poll', 'logout'):
+                from Plugins.Connectors.pia_server import login
+                if action == 'login-start':
+                    return login.begin(data.get('server', ''))
+                if action == 'logout':
+                    return login.logout()
+                identity = data.get('id')
+                if not isinstance(identity, str):
+                    raise ValueError('Pedido de login inválido.')
+                result = login.poll(identity)
+                if result.pop('changed', False):
+                    from Plugins.Connectors.pia_server.service import start
+                    start(self.notifications)
+                return result
+            if plugin == 'pia_server' and action in ('profile-status', 'profile-push', 'profile-pull'):
+                from Plugins.Connectors.pia_server.profile import transfer
+                if action == 'profile-pull' and any(job.status == 'running' for job in self.jobs.values()):
+                    raise ValueError('Aguarde os trabalhos em andamento antes de carregar o perfil.')
+                return transfer(action.removeprefix('profile-'), self.store, data.get('revision'))
             if plugin=='agents':
                 from Plugins.Connectors.agents.service import ask,status
                 if action=='status':return status()
@@ -507,18 +477,22 @@ class WorkspaceService:
                         except Exception as exc:job.emit('error',error=str(exc))
                     threading.Thread(target=external,daemon=True).start()
                     return {'job':job.id}
-            if plugin=='object_storage' and action=='secrets':
-                from Plugins.Connectors.object_storage.service import ObjectStorage
-                storage=ObjectStorage()
-                account=storage.account(data['account'])
-                value=storage.vault.get('storage:'+account['id'])
-                return {key:(value or {}).get(key,'') for key in ('access_key','secret_key','session_token')}
             if plugin=='google':
                 from Plugins.Connectors.google.drive import Drive
                 drive=Drive(self.backend.resources)
                 if action=='accounts':return {'accounts':drive.accounts(),'folder':drive.config().get('GOOGLE_DRIVE_FOLDER_ID','')}
                 if action=='folders':return drive.list(account=data.get('account'),folder=data.get('folder'),folders_only=True,cursor=data.get('cursor'),search=data.get('search'))
+            if plugin == 'taverns':
+                from Plugins.Connectors.taverns.service import Taverns
+                bot = Taverns()
+                if action == 'channels':
+                    return bot.channels()
+                if action == 'test':
+                    return bot.send('PIA · Mensagem de teste. A publicação neste canal está funcionando.', data.get('destination'))
             if plugin=='discord':
+                from Plugins.Connectors.pia_server.remote import managed
+                if managed() and action in ('register-link','listener','unlink'):
+                    raise ValueError('Gerencie o bot Discord no painel da PIA Server.')
                 from Plugins.Connectors.discord.service import Discord
                 from Plugins.Connectors.discord.runtime import get_runtime
                 bot=Discord()
