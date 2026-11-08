@@ -24,7 +24,7 @@ import {
   Loader,
   Overlay,
   Avatar as AccountAvatar,
-  Tooltip,
+  ActionIcon,
 } from "@mantine/core";
 import {
   MessageCircle,
@@ -50,6 +50,8 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronRight,
+  LogOut,
+  UserRound,
 } from "lucide-react";
 import { api, session, safe, report } from "./api";
 import { Context, Icon, Nav, ErrorAlert } from "./shared";
@@ -68,23 +70,16 @@ const appIcons = {
   object_storage: HardDrive,
 };
 function normalizeRoute(route) {
-  if (
-    route.view === "settings" &&
-    (route.section === "accounts" || route.section?.startsWith("Connectors/"))
-  )
+  if (route.view === "connectors" || (route.view === "settings" &&
+      (["accounts", "connectors"].includes(route.section) || route.section?.startsWith("Connectors/")))) {
+    const connector = route.connector || route.section?.split("/")[1];
     return {
       view: "settings",
       section: "connectors",
-      connector:
-        route.section === "accounts" ? "google" : route.section.split("/")[1],
+      connector: connectors.some((item) => item.id === connector) ? connector : "pia_server",
     };
-  return route.view === "connectors"
-    ? {
-        view: "settings",
-        section: "connectors",
-        connector: route.connector || "google",
-      }
-    : route;
+  }
+  return route;
 }
 function parseRoute() {
   try {
@@ -157,6 +152,13 @@ export default function Workspace({ standalone = null }) {
     const value = await api("/state");
     setState(value);
     return value;
+  }
+  function openServerConnector(connector) {
+    const server = account?.server || "https://pia.travelrpg.com";
+    const url = new URL(server);
+    if (url.protocol !== "https:") return;
+    url.hash = connector ? "connectors/" + connector : "connectors";
+    window.open(url.href, "_blank", "noopener,noreferrer");
   }
   function navigate(next) {
     next = normalizeRoute(next);
@@ -473,7 +475,7 @@ export default function Workspace({ standalone = null }) {
       <Chat key={route.chat || "blank"} chat={route.chat} />
     ) : route.view === "settings" ? (
       ["accounts", "connectors"].includes(route.section) ? (
-        <Connectors connector={route.connector || "google"} />
+        <Connectors connector={route.connector || "pia_server"} />
       ) : route.section?.startsWith("Connectors/") ? (
         <Connectors connector={route.section.split("/")[1]} />
       ) : (
@@ -519,6 +521,7 @@ export default function Workspace({ standalone = null }) {
         state,
         route,
         navigate,
+        openServerConnector,
         refresh,
         language,
         setLanguage,
@@ -687,19 +690,26 @@ export default function Workspace({ standalone = null }) {
                     </span>
                   )}
                 </NotificationMenu>
-                {account?.email && (
-                  <Tooltip label={account.email}>
-                    <AccountAvatar
-                      size={32}
-                      mx="auto"
-                      color="violet"
-                      src={account.picture || null}
-                      alt={account.email}
-                      imageProps={{ referrerPolicy: "no-referrer" }}
-                    >
-                      {account.email[0].toUpperCase()}
-                    </AccountAvatar>
-                  </Tooltip>
+                {!standalone && account?.authenticated && (
+                  <Menu position="right-end" shadow="md">
+                    <Menu.Target>
+                      <ActionIcon variant="subtle" size={38} aria-label="Minha conta" title={account.email || "Minha conta"}>
+                        {account.email ? (
+                          <AccountAvatar size={30} color="violet" src={account.picture || null}
+                            alt="" imageProps={{ referrerPolicy: "no-referrer" }}>
+                            {account.email[0].toUpperCase()}
+                          </AccountAvatar>
+                        ) : <UserRound size={19} />}
+                      </ActionIcon>
+                    </Menu.Target>
+                    <Menu.Dropdown>
+                      <Menu.Label>{account.email || "Minha conta"}</Menu.Label>
+                      <Menu.Item color="red" leftSection={<LogOut size={16} />} onClick={safe(async () => {
+                        await api("/integrations/pia_server/logout", {});
+                        location.reload();
+                      })}>Sair</Menu.Item>
+                    </Menu.Dropdown>
+                  </Menu>
                 )}
                 <Icon
                   icon={Settings}
@@ -956,7 +966,7 @@ export default function Workspace({ standalone = null }) {
                     {connectors.map((item) => (
                       <Nav
                         key={item.id}
-                        active={(route.connector || "google") === item.id}
+                        active={(route.connector || "pia_server") === item.id}
                         onClick={() =>
                           navigate({ view: "connectors", connector: item.id })
                         }
@@ -1058,7 +1068,7 @@ export default function Workspace({ standalone = null }) {
                     ? currentApp?.info
                     : route.view === "connectors"
                       ? connectors.find(
-                          (item) => item.id === (route.connector || "google"),
+                          (item) => item.id === (route.connector || "pia_server"),
                         )?.info
                       : route.view === "chat"
                         ? t("Converse com a PIA ou dê um comando.")
@@ -1077,10 +1087,7 @@ export default function Workspace({ standalone = null }) {
                             section: "Apps/" + route.app,
                           })
                         : route.app === "object_storage"
-                          ? navigate({
-                              view: "connectors",
-                              connector: "object_storage",
-                            })
+                          ? openServerConnector("object_storage")
                           : navigate({ ...route, sub: "settings" })
                     }
                   />

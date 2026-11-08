@@ -57,7 +57,7 @@ function campaignConfig(value) {
 const id = "podcast_automation",
   call = (action, data = {}) => appApi(id, action, data);
 export default function Podcast({ sub = "principal" }) {
-  const { navigate, route } = usePia(),
+  const { navigate, route, openServerConnector } = usePia(),
     [config, setConfig] = useState(null),
     [original, setOriginal] = useState(""),
     [savedOptions, setSavedOptions] = useState(""),
@@ -89,8 +89,7 @@ export default function Podcast({ sub = "principal" }) {
         ...old,
         integrations: { ...old.integrations, [key]: value },
       }));
-  const settings = (plugin) =>
-    navigate({ view: "connectors", connector: plugin });
+  const settings = openServerConnector;
   useEffect(() => {
     let active = true;
     api("/integrations/taverns/channels", {}).then(

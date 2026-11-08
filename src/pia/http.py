@@ -159,7 +159,10 @@ def route(handler):
             return True
         if handler.command != 'GET':
             raise ValueError('Método não permitido.')
-        if path.startswith('/connectors/'):
+        if path in ('/pia/brand.svg', '/pia/google-signin.png'):
+            base = ROOT.parent / 'images'
+            relative = 'pia.svg' if path == '/pia/brand.svg' else 'google-signin.png'
+        elif path.startswith('/connectors/'):
             import re
             match=re.fullmatch(r'/connectors/([a-z][a-z0-9_]*)/web/([a-zA-Z0-9_.-]+)',path)
             if not match:raise ValueError('Recurso inválido.')

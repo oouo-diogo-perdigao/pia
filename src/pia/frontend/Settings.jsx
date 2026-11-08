@@ -47,12 +47,6 @@ function ServerProfilePanel() {
         >
           Abrir painel da PIA Server
         </Anchor>
-        <Group>
-          <Button variant="light" color="red" onClick={safe(async () => {
-            await api("/integrations/pia_server/logout", {});
-            location.reload();
-          })}>Sair neste computador</Button>
-        </Group>
         <Text size="sm">
           {revision === null
             ? "Consulte o perfil antes de sincronizar."
@@ -250,11 +244,6 @@ export default function SettingsPanel({ section = "general" }) {
             .filter(
               (field) =>
                 selected.id !== "general" || fieldGroup(field) === group,
-            )
-            .filter(
-              (field) =>
-                selected.id !== "Connectors/discord" ||
-                field.base !== "DISCORD_CHANNEL_ID",
             )
             .map((field) => (
               <Group

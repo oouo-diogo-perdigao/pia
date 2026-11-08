@@ -107,6 +107,9 @@ with tempfile.TemporaryDirectory() as directory:
     login_state={'authenticated':False,'server':'https://pia.example.invalid','email':'fixture@example.invalid','picture':None}
     def dispatch(method,path,data,query):
         if path=='/integrations/pia_server/account':return login_state
+        if path=='/integrations/pia_server/logout':
+            login_state['authenticated']=False
+            return {'ok':True}
         if path=='/integrations/pia_server/login-start':return {'id':'fixture','code':'123456','url':'https://pia.example.invalid/auth/device/fixture'}
         if path=='/integrations/pia_server/login-poll':
             login_state['authenticated']=True
@@ -237,10 +240,7 @@ with tempfile.TemporaryDirectory() as directory:
         wait(lambda:js(shell,"[...document.querySelectorAll('.sidebar button')].some(b=>b.textContent==='Conectores')"))
         js(shell,"[...document.querySelectorAll('.sidebar button')].find(b=>b.textContent==='Conectores').click()")
         wait(lambda:js(shell,"!!document.querySelector('.settings-tree-children')"))
-        js(shell,"[...document.querySelectorAll('.settings-tree-children button')].find(b=>b.textContent==='Google').click()")
-        wait(lambda:js(shell,"document.querySelector('.view-title')?.textContent==='Configurações / Conectores / Google'"))
-        wait(lambda:js(shell,"!!document.querySelector('a[href=\"https://pia.travelrpg.com/#connectors\"]')"))
-        assert not js(shell,"[...document.querySelectorAll('label')].some(label=>label.textContent==='Client ID')")
+        assert js(shell,"[...document.querySelectorAll('.settings-tree-children button')].map(b=>b.textContent).join(',')==='PIA Server,Agentes externos'")
         js(shell,"[...document.querySelectorAll('.settings-tree-children button')].find(b=>b.textContent==='Agentes externos').click()")
         wait(lambda:js(shell,"!!document.querySelector('[aria-label=\"Como instalar e configurar o agente\"]')"))
         js(shell,"document.querySelector('[aria-label=\"Como instalar e configurar o agente\"]').click()")
@@ -341,6 +341,10 @@ with tempfile.TemporaryDirectory() as directory:
         assert not js(shell,"document.querySelector('.sidebar').textContent.includes('Exportar / importar')")
         assert js(shell,"document.querySelector('.rail-bottom .mantine-Avatar-root')?.textContent.trim()==='F'")
         print('Manual credential transfer is absent from Settings: OK')
+        js(shell,"document.querySelector('[aria-label=\"Minha conta\"]').click()")
+        wait(lambda:js(shell,"[...document.querySelectorAll('[role=menuitem]')].some(b=>b.textContent==='Sair')"))
+        js(shell,"[...document.querySelectorAll('[role=menuitem]')].find(b=>b.textContent==='Sair').click()")
+        wait(lambda:js(shell,"document.body?.textContent.includes('Continuar com Google') && !document.querySelector('.activity-rail')"))
         shell.hide();shell.view.setUrl(__import__('PyQt6.QtCore',fromlist=['QUrl']).QUrl('about:blank'))
         server.shutdown();server.server_close()
         assert not [error for error in errors if 'Uncaught' in error],errors
