@@ -203,6 +203,23 @@ def finalizar_publicacao(item, drive, obj_storage, rss_updater, sessoes_processa
                          season=item.get('season'),number=item.get('episode'),players=item.get('jogadores',()))
 
 
+def metadados_da_sessao(pasta_extraida, nome, drive):
+    metadata = AudioManager.ler_metadados_da_gravacao(Path(pasta_extraida))
+    if not isinstance(metadata, dict) or not metadata:
+        return {}
+    for name, fields in ((nome, ("sessionTitle", "seasonEnd")), (metadata.get("previousRecordingName"), ("seasonEnd",))):
+        if not isinstance(name, str) or not name.lower().endswith(".zip"):
+            continue
+        companion = drive.recording_metadata(name)
+        if not companion or companion.get("channelId") != metadata.get("channelId"):
+            continue
+        for field in fields:
+            if field in companion:
+                destination = "startsSeason" if name != nome else field
+                metadata[destination] = companion[field]
+    return metadata
+
+
 def processar_sessao(
     item: dict,
     drive,
@@ -222,12 +239,19 @@ def processar_sessao(
     stage(1)
     item["pasta_extraida"] = extrair_zip(local_zip, item["name"])
 
+    metadata = metadados_da_sessao(item["pasta_extraida"], item["name"], drive)
+    from Plugins.Apps.podcast_automation.recording_queue import waiting_for_metadata
+    if waiting_for_metadata(metadata.get("metadataEditableUntil")):
+        print("A sessão ainda pode ser nomeada no Discord. O processamento aguardará o prazo.")
+        return
+
     audio = AudioManager(
         item["name"],
         item["pasta_extraida"],
         NomesReais,
         CampaignDetails,
         obj_storage,
+        **({"recording_metadata": metadata} if metadata else {}),
     )
 
     # ============================================================

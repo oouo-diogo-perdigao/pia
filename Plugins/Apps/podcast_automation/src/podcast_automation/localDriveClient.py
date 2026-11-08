@@ -1,5 +1,6 @@
 from .settings import get_download_dir
 import shutil
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -12,7 +13,7 @@ class LocalDriveClient:
         """Lista todos os arquivos ZIP localizados no diretório informado."""
         files: list[dict] = []
 
-        folder = Path(folder_path)
+        folder = self.folder = Path(folder_path)
         if folder.is_dir():
             for arquivo in folder.iterdir():
                 if arquivo.is_file() and arquivo.suffix.lower() == ".zip":
@@ -35,6 +36,16 @@ class LocalDriveClient:
 
         files.sort(key=lambda x: x["createdTime"])
         return files
+
+    def recording_metadata(self, zip_name):
+        if Path(zip_name).name != zip_name:
+            return {}
+        path = self.folder / (zip_name[:-4] + ".json")
+        if not path.is_file() or path.stat().st_size > 16384:
+            return {}
+        with path.open(encoding="utf-8") as stream:
+            value = json.load(stream)
+        return value if isinstance(value, dict) and value.get("source") == "pia-server-discord" else {}
 
     def download_file(self, file: dict) -> Path:
         """

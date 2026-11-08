@@ -25,6 +25,7 @@ class AudioManager:
         NomesReais: dict,
         PersonagensDoJogo: dict,
         object_storage_manager: ObjectStorageManager,
+        recording_metadata: dict | None = None,
     ):
         self.diretorio_dados = next(
             item.path
@@ -34,7 +35,7 @@ class AudioManager:
         self.object_storage_manager: ObjectStorageManager = object_storage_manager
         self.name = name
         self.pasta_extraida = pasta_extraida
-        self.recording_metadata = self.ler_metadados_da_gravacao(Path(pasta_extraida))
+        self.recording_metadata = recording_metadata if recording_metadata is not None else self.ler_metadados_da_gravacao(Path(pasta_extraida))
         self.track_usernames = self.ler_nomes_das_faixas(self.recording_metadata)
         self.NomesReais = NomesReais
         self.PersonagensDoJogo = PersonagensDoJogo
