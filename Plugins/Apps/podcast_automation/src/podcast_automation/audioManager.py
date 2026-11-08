@@ -34,7 +34,8 @@ class AudioManager:
         self.object_storage_manager: ObjectStorageManager = object_storage_manager
         self.name = name
         self.pasta_extraida = pasta_extraida
-        self.track_usernames = self.ler_nomes_das_faixas(Path(pasta_extraida))
+        self.recording_metadata = self.ler_metadados_da_gravacao(Path(pasta_extraida))
+        self.track_usernames = self.ler_nomes_das_faixas(self.recording_metadata)
         self.NomesReais = NomesReais
         self.PersonagensDoJogo = PersonagensDoJogo
         self.arquivos_participantes = self.listar_arquivos_participantes()
@@ -47,6 +48,8 @@ class AudioManager:
             self.rss,
         ) = self.deduzir_participantes()
         self.session, self.episode = self.obter_temporada_episodio()
+        if self.recording_metadata.get("startsSeason") is True and self.episode > 1:
+            self.session, self.episode = self.session + 1, 1
         self.ano, self.mes, self.dia = self.data_da_gravacao(self.name).split("-")
         self.dataJogo = f"{self.ano}-{self.mes}-{self.dia}"
         self.audio_mix_path = None
@@ -68,7 +71,7 @@ class AudioManager:
         return f"{ano}-{mes.zfill(2)}-{dia.zfill(2)}"
 
     @staticmethod
-    def ler_nomes_das_faixas(pasta: Path) -> dict[str, str]:
+    def ler_metadados_da_gravacao(pasta: Path) -> dict:
         arquivo = pasta / "pia-session.json"
         if not arquivo.is_file():
             return {}
@@ -76,6 +79,10 @@ class AudioManager:
             dados = json.load(entrada)
         if not isinstance(dados, dict) or dados.get("source") != "pia-server-discord":
             return {}
+        return dados
+
+    @staticmethod
+    def ler_nomes_das_faixas(dados: dict) -> dict[str, str]:
         faixas = dados.get("tracks")
         if not isinstance(faixas, list):
             return {}

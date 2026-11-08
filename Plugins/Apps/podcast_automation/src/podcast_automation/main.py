@@ -314,11 +314,15 @@ def processar_sessao(
         if formats['srt']:item['srt_path']=whisper.gravar_srt()
         if formats['vtt']:item['vtt_path']=whisper.gravar_vtt()
         if formats['txt'] or formats['resumo.json']:item['roteiro_path']=whisper.gravar_roteiro()
-    item['nome_sessao']=item.get('nome_sessao') or 'Sessão '+str(audio.session)+' · Episódio '+str(audio.episode)
+    titulo_gravacao = audio.recording_metadata.get('sessionTitle')
+    if not isinstance(titulo_gravacao, str):
+        titulo_gravacao = ''
+    item['nome_sessao'] = titulo_gravacao or item.get('nome_sessao') or f'Sessão {audio.session} · Episódio {audio.episode}'
     if formats['resumo.json']:
         stage(6)
         gerador=GeradorResumoSessao(campanha=item['campanha'],narrador=item['narrador'],personagens=item['personagens'],jogadores=item['jogadores'],ouvintes=item['ouvintes'],roteiro_path=item['roteiro_path'],obj_storage=obj_storage,rss_key=item['rss_key'])
-        item['nome_sessao'],item['resumo_rapido'],item['resumo_completo']=gerador.gerar_resumo()
+        titulo_gerado, item['resumo_rapido'], item['resumo_completo'] = gerador.gerar_resumo()
+        item['nome_sessao'] = titulo_gravacao or titulo_gerado
         if formats['txt']:gerador.incluir_resumo_no_roteiro(item)
     stage(7)
     caminhos_audio=audio.renomear_arquivos(item['nome_sessao'])
