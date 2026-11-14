@@ -89,7 +89,7 @@ def audio_response(handler, file):
 def route(handler):
     url = urlsplit(handler.path)
     path = url.path
-    if path != "/" and not path.startswith(
+    if path not in ("/", "/pia.svg") and not path.startswith(
         ("/pia/", "/mini/", "/api/pia/", "/apps/", "/bots/", "/connectors/")
     ):
         return False
@@ -213,7 +213,11 @@ def route(handler):
                 "/tts/voices",
                 "/tts/selection",
             }
-            is_allowed_get = subpath in allowed_get or subpath.startswith("/tts/jobs/")
+            is_allowed_get = (
+                subpath in allowed_get
+                or subpath.startswith("/tts/jobs/")
+                or (subpath.startswith("/speakers/") and subpath.endswith("/voice"))
+            )
             if (
                 handler.command == "GET"
                 and not path.startswith("/api/pia/events/")
@@ -292,9 +296,13 @@ def route(handler):
             return True
         if handler.command != "GET":
             raise ValueError("Método não permitido.")
-        if path in ("/pia/brand.svg", "/pia/google-signin.png"):
+        if path in ("/pia.svg", "/pia/brand.svg", "/pia/google-signin.png"):
             base = ROOT.parent / "images"
-            relative = "pia.svg" if path == "/pia/brand.svg" else "google-signin.png"
+            relative = (
+                "pia.svg"
+                if path in ("/pia.svg", "/pia/brand.svg")
+                else "google-signin.png"
+            )
         elif path.startswith("/connectors/"):
             import re
 

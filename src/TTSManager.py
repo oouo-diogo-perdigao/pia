@@ -342,6 +342,18 @@ class TTSManager:
         self.queue = queue.Queue()
         self.lock = threading.RLock()
         self.status = "idle"
+        self._speech_seq = 0
+        self._speech_state = {
+            "status": "idle",
+            "phase": "idle",
+            "seq": 0,
+            "epoch": 0,
+            "utterance_id": None,
+            "speaker_id": "pia",
+            "bot_name": None,
+            "avatar_url": "/pia.svg",
+            "avatar_colors": None,
+        }
         self.worker_thread = None
         self._stop_event = threading.Event()
 
@@ -443,6 +455,59 @@ class TTSManager:
 
         return voice
 
+    def get_speech_status(self):
+        with self.lock:
+            return {
+                **self._speech_state,
+                "status": self.status,
+                "model_loaded": self.is_loaded(),
+            }
+
+    def _set_speech_playing(self, speaker_context=None):
+        ctx = speaker_context or {}
+        try:
+            from src.voice_interrupt import epoch as current_epoch
+
+            ep = current_epoch()
+        except Exception:
+            ep = 0
+        with self.lock:
+            self._speech_seq += 1
+            self.status = "playing"
+            self._speech_state = {
+                "status": "playing",
+                "phase": "playing",
+                "seq": self._speech_seq,
+                "epoch": ep,
+                "utterance_id": ctx.get("utterance_id"),
+                "speaker_id": ctx.get("speaker_id") or "pia",
+                "bot_name": ctx.get("bot_name"),
+                "avatar_url": ctx.get("avatar_url") or "/pia.svg",
+                "avatar_colors": ctx.get("avatar_colors"),
+            }
+
+    def _set_speech_idle(self):
+        try:
+            from src.voice_interrupt import epoch as current_epoch
+
+            ep = current_epoch()
+        except Exception:
+            ep = 0
+        with self.lock:
+            self._speech_seq += 1
+            self.status = "idle"
+            self._speech_state = {
+                "status": "idle",
+                "phase": "idle",
+                "seq": self._speech_seq,
+                "epoch": ep,
+                "utterance_id": None,
+                "speaker_id": "pia",
+                "bot_name": None,
+                "avatar_url": "/pia.svg",
+                "avatar_colors": None,
+            }
+
     def add_tts_job(
         self,
         text,
@@ -456,6 +521,7 @@ class TTSManager:
         story_total=None,
         completion=None,
         cancelled=None,
+        speaker_context=None,
     ):
         backend = "qwen" if voice in self.qwen_voices() else "kokoro"
 
@@ -475,6 +541,7 @@ class TTSManager:
                     "story_total": story_total,
                     "completion": completion,
                     "cancelled": cancelled,
+                    "speaker_context": speaker_context,
                 }
             )
 
@@ -656,6 +723,7 @@ class TTSManager:
                         device=device,
                         completion=completion,
                         cancelled=cancelled,
+                        speaker_context=job.get("speaker_context"),
                     )
                     handed_to_player = True
 
@@ -934,7 +1002,13 @@ class TTSManager:
         )
 
     def add_audio_job(
-        self, jobName, wav_bytes, device=None, completion=None, cancelled=None
+        self,
+        jobName,
+        wav_bytes,
+        device=None,
+        completion=None,
+        cancelled=None,
+        speaker_context=None,
     ):
         with self.lock:
             self._stop_event.clear()
@@ -945,9 +1019,11 @@ class TTSManager:
                     "device": device,
                     "completion": completion,
                     "cancelled": cancelled,
+                    "speaker_context": speaker_context,
                 }
             )
-            self.status = "playing"
+            if self.status != "playing":
+                self._set_speech_playing(speaker_context)
             if self.worker_thread is None or not self.worker_thread.is_alive():
                 self.worker_thread = threading.Thread(
                     target=self._play_loop, daemon=True
@@ -972,7 +1048,7 @@ class TTSManager:
                 sd.stop()
             except Exception:
                 pass
-            self.status = "idle"
+            self._set_speech_idle()
 
     def _play_loop(self):
         import sounddevice as sd
@@ -1013,6 +1089,7 @@ class TTSManager:
                         )
                         from src.voice_interrupt import begin_playback
 
+                        self._set_speech_playing(item.get("speaker_context"))
                         begin_playback(samples, wf.getframerate())
                         sd.play(
                             samples,
@@ -1041,11 +1118,11 @@ class TTSManager:
                     self.queue.task_done()
                     with self.lock:
                         if self.queue.empty():
-                            self.status = "idle"
+                            self._set_speech_idle()
         finally:
             with self.lock:
                 if self.queue.empty():
-                    self.status = "idle"
+                    self._set_speech_idle()
 
     def _resolve_output_device(self, device_param):
         """

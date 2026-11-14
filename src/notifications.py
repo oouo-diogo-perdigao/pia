@@ -1,6 +1,7 @@
 """Persistent local app/bot notifications shared by every entry point."""
 
 from datetime import datetime, timezone
+import inspect
 import threading
 import uuid
 import re
@@ -79,9 +80,21 @@ class NotificationCenter:
             except Exception:
                 logging.exception("Notificação persistida, mas o aviso nativo falhou.")
             if state["settings"]["read_aloud"]:
+                spoken_text = item["title"] + ". " + item["text"]
+                kwargs = {}
+                try:
+                    sig = inspect.signature(self.speak)
+                    if "speaker_id" in sig.parameters or any(
+                        p.kind == inspect.Parameter.VAR_KEYWORD
+                        for p in sig.parameters.values()
+                    ):
+                        kwargs["speaker_id"] = source
+                except (TypeError, ValueError):
+                    pass
                 threading.Thread(
                     target=self.speak,
-                    args=(item["title"] + ". " + item["text"],),
+                    args=(spoken_text,),
+                    kwargs=kwargs,
                     daemon=True,
                 ).start()
         return item

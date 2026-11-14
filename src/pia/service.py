@@ -814,9 +814,38 @@ class WorkspaceService:
                 text=data.get("text"),
                 workspace_jobs=self.jobs,
             )
+        if path.startswith("/speakers/") and path.endswith("/voice"):
+            from urllib.parse import unquote
+            from src.tts_service import get_tts_service
+
+            speaker_id = unquote(
+                path.removeprefix("/speakers/").removesuffix("/voice").strip("/")
+            )
+            svc = get_tts_service()
+            if method in ("PUT", "POST"):
+                return svc.set_speaker_voice(
+                    speaker_id,
+                    mode=str(data.get("mode") or "inherit"),
+                    profile=data.get("profile"),
+                    revision=data.get("revision"),
+                )
+            return svc.get_speaker_voice(speaker_id)
         if path == "/bots/secretaria":
+            from src.tts_service import get_tts_service
+
+            svc = get_tts_service()
             if method == "POST":
-                self.backend.secretary.configure(data)
+                if isinstance(data.get("voice"), dict):
+                    v = data["voice"]
+                    svc.set_speaker_voice(
+                        "native:secretaria",
+                        mode=str(v.get("mode") or "inherit"),
+                        profile=v.get("profile"),
+                        revision=v.get("revision"),
+                    )
+                cfg_payload = {k: val for k, val in data.items() if k != "voice"}
+                if cfg_payload:
+                    self.backend.secretary.configure(cfg_payload)
             from Plugins.Bot.secretaria.bot import MAIL_FILTERS
 
             return {
@@ -825,6 +854,7 @@ class WorkspaceService:
                     for key, (label, _) in MAIL_FILTERS.items()
                 ],
                 "config": self.backend.secretary.config(),
+                "voice": svc.get_speaker_voice("native:secretaria"),
                 "accounts": self.backend.resources.accounts("google"),
                 "status": [
                     self.store.get("secretary:status:" + a["id"], {})

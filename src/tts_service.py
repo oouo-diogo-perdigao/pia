@@ -72,6 +72,29 @@ class TTSJobState:
         }
 
 
+def normalize_speaker_id(speaker_id: str | None) -> str:
+    raw = (speaker_id or "pia").strip()
+    if not raw or raw == "pia":
+        return "pia"
+    if raw in ("secretaria", "Bot/secretaria", "native:secretaria"):
+        return "native:secretaria"
+    if raw.startswith("Bot/"):
+        return "native:" + raw.removeprefix("Bot/")
+    if raw.startswith("OpenBot/"):
+        return "dynamic:" + raw.removeprefix("OpenBot/")
+    return raw
+
+
+def _public_speaker_id(norm_id: str) -> str:
+    if norm_id == "native:secretaria":
+        return "secretaria"
+    if norm_id.startswith("native:"):
+        return norm_id.removeprefix("native:")
+    if norm_id.startswith("dynamic:"):
+        return norm_id.removeprefix("dynamic:")
+    return norm_id or "pia"
+
+
 def _validate_speed(raw: Any, min_v: float = 0.25, max_v: float = 4.0) -> float:
     if isinstance(raw, bool):
         raise TTSServiceError(
@@ -686,6 +709,192 @@ class TTSService:
             )
         return entry[1]
 
+    def get_speaker_voice(self, speaker_id: str) -> dict[str, Any]:
+        from src import settings_store
+
+        norm_id = normalize_speaker_id(speaker_id)
+        doc = settings_store.document(f"tts/speakers/{norm_id}")
+        if not isinstance(doc, dict):
+            return {
+                "speaker_id": norm_id,
+                "schema_version": 1,
+                "revision": 1,
+                "mode": "inherit",
+                "profile": None,
+            }
+        return {
+            "speaker_id": norm_id,
+            "schema_version": 1,
+            "revision": int(doc.get("revision", 1)),
+            "mode": doc.get("mode", "inherit"),
+            "profile": doc.get("profile"),
+        }
+
+    def set_speaker_voice(
+        self,
+        speaker_id: str,
+        *,
+        mode: str = "inherit",
+        profile: dict[str, Any] | None = None,
+        revision: int | None = None,
+    ) -> dict[str, Any]:
+        from src import settings_store
+
+        norm_id = normalize_speaker_id(speaker_id)
+        if norm_id == "pia":
+            raise TTSServiceError(
+                "Use /tts/select para configurar a Voz Geral da PIA.",
+                status=400,
+                code="invalid_profile",
+                param="speaker_id",
+            )
+        if mode not in ("inherit", "custom"):
+            raise TTSServiceError(
+                "mode deve ser 'inherit' ou 'custom'.",
+                status=400,
+                code="invalid_profile",
+                param="mode",
+            )
+
+        validated_profile: dict[str, Any] | None = None
+        if mode == "custom":
+            if not isinstance(profile, dict) or not profile.get("provider"):
+                raise TTSServiceError(
+                    "profile é obrigatório quando mode='custom'.",
+                    status=400,
+                    code="invalid_profile",
+                    param="profile",
+                )
+            prov_id = str(profile["provider"]).strip()
+            prov = self.registry.get(prov_id)
+            if prov is None:
+                raise TTSServiceError(
+                    "Provider de TTS inválido.",
+                    status=400,
+                    code="invalid_profile",
+                    param="provider",
+                )
+            model_id = str(profile.get("model") or "").strip() or prov.default_model()
+            if model_id not in {m["id"] for m in prov.models()}:
+                raise TTSServiceError(
+                    "Modelo de TTS inválido.",
+                    status=400,
+                    code="invalid_profile",
+                    param="model",
+                )
+            voices_list = prov.list_voices(model_id)
+            valid_voices = {v["id"] for v in voices_list}
+            voice_id = str(profile.get("voice") or "").strip() or (
+                voices_list[0]["id"] if voices_list else ""
+            )
+            if valid_voices and voice_id not in valid_voices:
+                raise TTSServiceError(
+                    f"Voz '{voice_id}' não pertence ao modelo '{model_id}'.",
+                    status=400,
+                    code="invalid_profile",
+                    param="voice",
+                )
+            caps = prov.capabilities(model_id)
+            sc = caps.get("speed") or {}
+            speed = _validate_speed(
+                profile.get("speed", 1.0),
+                float(sc.get("min", 0.25)),
+                float(sc.get("max", 4.0)),
+            )
+            validated_profile = {
+                "provider": prov_id,
+                "model": model_id,
+                "voice": voice_id,
+                "speed": speed,
+            }
+
+        doc_key = f"tts/speakers/{norm_id}"
+        with self._lock:
+            store = settings_store.get_store()
+            with store.connection() as db:
+                row = db.execute(
+                    "SELECT value FROM documents WHERE name=?", (doc_key,)
+                ).fetchone()
+                db_rev = int(json.loads(row[0]).get("revision", 1)) if row else 1
+                if revision is not None and int(revision) != db_rev:
+                    raise TTSServiceError(
+                        "Conflito de revisão na voz do bot.",
+                        status=409,
+                        code="revision_conflict",
+                        details={"current_revision": db_rev},
+                    )
+                new_rev = db_rev + 1
+                payload = {
+                    "schema_version": 1,
+                    "revision": new_rev,
+                    "mode": mode,
+                    "profile": validated_profile,
+                }
+                db.execute(
+                    "INSERT OR REPLACE INTO documents VALUES(?,?)",
+                    (doc_key, json.dumps(payload)),
+                )
+        return {"speaker_id": norm_id, **payload}
+
+    def resolve_speaker_metadata(self, speaker_id: str | None) -> dict[str, Any]:
+        from src import settings_store
+
+        norm_id = normalize_speaker_id(speaker_id)
+        pub_id = _public_speaker_id(norm_id)
+        if norm_id == "pia":
+            return {
+                "speaker_id": "pia",
+                "bot_name": "PIA",
+                "avatar_url": "/pia.svg",
+                "avatar_colors": None,
+            }
+        if norm_id == "native:secretaria":
+            colors = {
+                "primary": str(
+                    settings_store.get(
+                        "avatar_primary", "#ad83ff", section="Bot/secretaria"
+                    )
+                    or "#ad83ff"
+                ),
+                "accent": str(
+                    settings_store.get(
+                        "avatar_accent", "#65d9ff", section="Bot/secretaria"
+                    )
+                    or "#65d9ff"
+                ),
+                "eyes": str(
+                    settings_store.get(
+                        "avatar_eyes", "#faf4ff", section="Bot/secretaria"
+                    )
+                    or "#faf4ff"
+                ),
+            }
+            return {
+                "speaker_id": "secretaria",
+                "bot_name": "Secretária",
+                "avatar_url": "/bots/secretaria/avatar.svg",
+                "avatar_colors": colors,
+            }
+        if norm_id.startswith("dynamic:"):
+            bot_doc = settings_store.document(f"openbot/bot/{pub_id}")
+            if isinstance(bot_doc, dict):
+                avatar_id = bot_doc.get("avatar_id")
+                avatar_url = (
+                    f"/api/pia/openbot/avatars/{avatar_id}" if avatar_id else "/pia.svg"
+                )
+                return {
+                    "speaker_id": pub_id,
+                    "bot_name": bot_doc.get("name", pub_id),
+                    "avatar_url": avatar_url,
+                    "avatar_colors": bot_doc.get("avatar_colors"),
+                }
+        return {
+            "speaker_id": pub_id,
+            "bot_name": pub_id,
+            "avatar_url": f"/bots/{pub_id}/avatar.svg",
+            "avatar_colors": None,
+        }
+
     def resolve_profile(
         self, speaker_id: str = "pia", override: dict[str, Any] | None = None
     ) -> dict[str, Any]:
@@ -694,7 +903,10 @@ class TTSService:
         if speaker_id and speaker_id != "pia":
             from src import settings_store
 
-            doc = settings_store.document(f"tts/speakers/{speaker_id}")
+            norm_id = normalize_speaker_id(speaker_id)
+            doc = settings_store.document(f"tts/speakers/{norm_id}")
+            if not isinstance(doc, dict) and norm_id != speaker_id:
+                doc = settings_store.document(f"tts/speakers/{speaker_id}")
             if isinstance(doc, dict) and doc.get("mode") == "custom":
                 prof = doc.get("profile")
                 if isinstance(prof, dict) and prof.get("provider"):
@@ -824,8 +1036,23 @@ class TTSService:
         prof = self.resolve_profile(speaker_id, override=override or None)
         tm = TTSManager()
 
+        meta = self.resolve_speaker_metadata(speaker_id)
+        if bot_name:
+            meta["bot_name"] = bot_name
+        if avatar_url:
+            meta["avatar_url"] = avatar_url
+        if avatar_colors is not None:
+            meta["avatar_colors"] = avatar_colors
+
         parts = [p.strip() for p in text.split("\n\n") if p.strip()]
         utterance_id = secrets.token_hex(8)
+        speaker_context = {
+            "utterance_id": utterance_id,
+            "speaker_id": meta["speaker_id"],
+            "bot_name": meta["bot_name"],
+            "avatar_url": meta["avatar_url"],
+            "avatar_colors": meta["avatar_colors"],
+        }
         for idx, part in enumerate(parts, start=1):
             if conversation_epoch is not None and conversation_epoch != epoch():
                 break
@@ -849,6 +1076,7 @@ class TTSService:
                     wav_bytes=res.audio,
                     device=device,
                     cancelled=part_cancel,
+                    speaker_context=speaker_context,
                 )
             else:
                 tm.add_tts_job(
@@ -859,8 +1087,8 @@ class TTSService:
                     device=device,
                     job_name=f" ({idx} de {len(parts)}) {part[:30]}",
                     cancelled=part_cancel,
+                    speaker_context=speaker_context,
                 )
-        _ = utterance_id, bot_name, avatar_url, avatar_colors
 
 
 _tts_service: TTSService | None = None

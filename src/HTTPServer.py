@@ -465,6 +465,18 @@ class HTTPServer(BaseHTTPRequestHandler):
     def do_OPTIONS(self) -> None:
         self._send(204, b"", "text/plain; charset=utf-8")
 
+    def _route_workspace_mutation(self) -> None:
+        from src.pia.http import route as workspace_route
+
+        if not workspace_route(self):
+            self.send_json(405, {"ok": False, "error": "Método não permitido."})
+
+    def do_PUT(self) -> None:
+        self._route_workspace_mutation()
+
+    def do_PATCH(self) -> None:
+        self._route_workspace_mutation()
+
     def do_GET(self) -> None:
         from src.interop import route as interop_route
 
@@ -697,15 +709,7 @@ class HTTPServer(BaseHTTPRequestHandler):
 
         if path == "/tts/status":
             logging.info("[GET /tts/status] Verificando status do Worker TTS...")
-            with TTS_MANAGER.lock:
-                status = TTS_MANAGER.status
-            self.send_json(
-                200,
-                {
-                    "status": status,
-                    "model_loaded": TTS_MANAGER.is_loaded(),
-                },
-            )
+            self.send_json(200, TTS_MANAGER.get_speech_status())
             return
 
         if path == "/tts/status/stream":
@@ -723,19 +727,22 @@ class HTTPServer(BaseHTTPRequestHandler):
             )
             self.end_headers()
 
-            last_status = None
+            last_key = None
             try:
                 while True:
-                    with TTS_MANAGER.lock:
-                        current_status = TTS_MANAGER.status
-
-                    if current_status != last_status:
-                        payload = json.dumps({"status": current_status})
+                    snap = TTS_MANAGER.get_speech_status()
+                    cur_key = (
+                        snap.get("seq"),
+                        snap.get("status"),
+                        snap.get("speaker_id"),
+                    )
+                    if cur_key != last_key:
+                        payload = json.dumps(snap, ensure_ascii=False)
                         self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
                         self.wfile.flush()
-                        last_status = current_status
+                        last_key = cur_key
 
-                    time.sleep(0.1)
+                    time.sleep(0.05)
             except Exception:
                 pass
             return
@@ -1984,6 +1991,10 @@ class HTTPServer(BaseHTTPRequestHandler):
             self.send_json(500, {"ok": False, "error": str(exc)})
 
     def do_DELETE(self):
+        from src.pia.http import route as workspace_route
+
+        if workspace_route(self):
+            return
         try:
             path = self._path()
 
