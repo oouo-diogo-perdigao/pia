@@ -204,17 +204,27 @@ class WorkspaceService:
             identity = meta.get("app_id", "")
             if not re.fullmatch("[a-z][a-z0-9_]*", identity):
                 continue
+            from src.tts_service import get_tts_service
+
             records.append(
                 {
                     "id": identity,
+                    "kind": "native",
                     "name": meta["nome"],
                     "avatar": f"/bots/{identity}/avatar.svg"
                     if (file.parent / "avatar.svg").is_file()
                     else None,
                     "description": meta.get("info", ""),
                     "url": f"/bots/{identity}/web/" + meta.get("home", "index.html"),
+                    "voice": get_tts_service().get_speaker_voice(f"native:{identity}"),
                 }
             )
+        try:
+            from Plugins.OpenBot.service import get_openbot_service
+
+            records.extend(get_openbot_service().workspace_bot_records())
+        except Exception:
+            pass
         return records
 
     def publish_notification(self, source, title, text, links=None):

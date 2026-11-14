@@ -1,5 +1,17 @@
 # PIA Changelog
 
+## [TTS Unificado, Voz por Bot e Bots Dinâmicos (OpenBot)] - 2026-11-14
+
+### Added
+- Serviço central `TTSService` (`src/tts_service.py`) unificando catálogo, seleção, instalação/desinstalação por modelo local (`kokoro`, `qwen`, `supertonic3`, `piper`), preview com TTL e síntese em `/v1/tts/*`, `/api/pia/tts/*`, `/v1/audio/speech` e `/tts/speak`.
+- Voz própria por speaker/bot (`GET/PUT /api/pia/speakers/{speaker_id}/voice`), propagação de `speaker_id` em `NotificationCenter.publish` e contexto de reprodução (`utterance_id`, `speaker_id`, `avatar_url`, `phase`) em `/tts/status` e `/tts/status/stream`.
+- Avatar da Secretária (`Plugins/Bot/secretaria/avatar.svg`) atualizado com classes `.enable-mouth` e `.animation-talking`.
+- Extensão `Plugins/OpenBot` para Bots Dinâmicos: CRUD (`/api/pia/openbot/bots`), upload e sanitização estrita de avatares SVG (`/api/pia/openbot/avatars`), execução e cancelamento (`/api/pia/openbot/bots/{id}/runs`, `/api/pia/openbot/runs/{id}/cancel`) e ferramenta `delegate_to_bot` com limites de profundidade, ciclos e timeout.
+
+### Security
+- Sanitização XML estrita de SVG rejeitando `<script>`, `foreignObject`, DTD/entidades, atributos `on*` e referências externas.
+- Bloqueio de desinstalação de modelos TTS em uso (`409 model_in_use`) e conflitos de revisão (`409 revision_conflict`).
+
 ## [Lint e formatação] - 2026-11-14
 
 ### Added

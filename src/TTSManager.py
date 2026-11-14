@@ -457,8 +457,23 @@ class TTSManager:
 
     def get_speech_status(self):
         with self.lock:
+            base = getattr(
+                self,
+                "_speech_state",
+                {
+                    "status": self.status,
+                    "phase": self.status,
+                    "seq": getattr(self, "_speech_seq", 0),
+                    "epoch": 0,
+                    "utterance_id": None,
+                    "speaker_id": "pia",
+                    "bot_name": None,
+                    "avatar_url": "/pia.svg",
+                    "avatar_colors": None,
+                },
+            )
             return {
-                **self._speech_state,
+                **base,
                 "status": self.status,
                 "model_loaded": self.is_loaded(),
             }
@@ -472,7 +487,7 @@ class TTSManager:
         except Exception:
             ep = 0
         with self.lock:
-            self._speech_seq += 1
+            self._speech_seq = getattr(self, "_speech_seq", 0) + 1
             self.status = "playing"
             self._speech_state = {
                 "status": "playing",
@@ -494,7 +509,7 @@ class TTSManager:
         except Exception:
             ep = 0
         with self.lock:
-            self._speech_seq += 1
+            self._speech_seq = getattr(self, "_speech_seq", 0) + 1
             self.status = "idle"
             self._speech_state = {
                 "status": "idle",

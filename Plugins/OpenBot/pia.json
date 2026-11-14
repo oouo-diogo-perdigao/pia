@@ -1,0 +1,7 @@
+{
+  "nome": "Bots Dinâmicos (OpenBot)",
+  "app_id": "openbot",
+  "info": "Crie e execute bots dinâmicos com instruções, avatar e voz própria.",
+  "type": "openbot",
+  "lang": "lang/pt-BR.json"
+}

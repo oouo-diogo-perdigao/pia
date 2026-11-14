@@ -64,6 +64,15 @@ TOOLS = [
         },
         ("provider", "prompt"),
     ),
+    spec(
+        "delegate_to_bot",
+        "Delegar uma tarefa para um Bot Dinâmico (OpenBot) habilitado.",
+        {
+            "bot_id": {"type": "string"},
+            "task": {"type": "string"},
+        },
+        ("bot_id", "task"),
+    ),
 ]
 
 
@@ -97,6 +106,13 @@ def call(name, arguments, resources=None):
         from .chat_tools import ChatTools
 
         return {"markdown": ChatTools().generate_image(arguments["prompt"])}
+    if name == "delegate_to_bot":
+        from Plugins.OpenBot.runtime import get_openbot_runtime
+
+        return get_openbot_runtime().delegate_to_bot(
+            target_bot_id=arguments["bot_id"],
+            task=arguments["task"],
+        )
     if name == "pia_music":
         from Plugins.Apps.music.service import generate
 

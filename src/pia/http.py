@@ -173,6 +173,27 @@ def route(handler):
                     )
                 return True
             subpath = path.removeprefix("/api/pia")
+            if handler.command == "GET" and subpath.startswith("/openbot/avatars/"):
+                from Plugins.OpenBot.models import OpenBotError
+                from Plugins.OpenBot.service import get_openbot_service
+
+                avatar_id = subpath.removeprefix("/openbot/avatars/").strip("/")
+                try:
+                    svg_bytes = get_openbot_service().get_avatar_bytes(avatar_id)
+                    respond(
+                        handler,
+                        200,
+                        svg_bytes,
+                        "image/svg+xml; charset=utf-8",
+                        headers={
+                            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"
+                        },
+                    )
+                except OpenBotError as exc:
+                    respond(
+                        handler, exc.status, {"error": exc.message, "code": exc.code}
+                    )
+                return True
             if (
                 handler.command == "GET"
                 and subpath.startswith("/tts/previews/")
@@ -217,6 +238,8 @@ def route(handler):
                 subpath in allowed_get
                 or subpath.startswith("/tts/jobs/")
                 or (subpath.startswith("/speakers/") and subpath.endswith("/voice"))
+                or subpath.startswith("/openbot/bots")
+                or subpath.startswith("/openbot/runs/")
             )
             if (
                 handler.command == "GET"
@@ -262,6 +285,32 @@ def route(handler):
                 data = json.loads(handler.rfile.read(length) or b"{}")
                 if not isinstance(data, dict):
                     raise ValueError("Esperado objeto JSON.")
+            if subpath.startswith("/openbot/"):
+                from Plugins.OpenBot.models import OpenBotError
+                from Plugins.OpenBot.web_api import dispatch_openbot
+
+                try:
+                    status_code, value = dispatch_openbot(
+                        handler.command,
+                        subpath,
+                        data,
+                        parse_qs(url.query),
+                        headers=dict(handler.headers.items()),
+                        workspace_jobs=service.jobs,
+                    )
+                    if status_code == 204:
+                        handler.send_response(204)
+                        handler.send_header("Cache-Control", "no-store")
+                        handler.end_headers()
+                    else:
+                        respond(handler, status_code, value)
+                except OpenBotError as exc:
+                    respond(
+                        handler,
+                        exc.status,
+                        {"error": exc.message, "code": exc.code, **exc.details},
+                    )
+                return True
             try:
                 value = service.dispatch(
                     handler.command,
