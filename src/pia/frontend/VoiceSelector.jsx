@@ -1,109 +1,556 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
   Select,
   Loader,
   Text,
   Badge,
   Group,
-  Paper,
   Stack,
+  Slider,
+  NumberInput,
+  Button,
+  Radio,
+  Alert,
+  Paper,
 } from "@mantine/core";
-import { api } from "./api";
-import { report, safe } from "./api";
+import { Volume2, RefreshCw } from "lucide-react";
+import { api, watchJob, report, safe } from "./api";
+import { notify } from "./toasts";
+import {
+  encodeModelKey,
+  decodeModelKey,
+  findProviderAndModel,
+  speedBounds,
+  clampSpeed,
+  resolveDraftForModel,
+  buildVoiceSelectGroups,
+} from "./tts-helpers";
 
-function encode(provider, voice) {
-  return `${provider}::${voice}`;
-}
-function decode(value) {
-  const idx = value.indexOf("::");
-  if (idx < 0) return { provider: value, voice: "" };
-  return { provider: value.slice(0, idx), voice: value.slice(idx + 2) };
+export const TTS_UPDATED_EVENT = "pia:tts-updated";
+
+export function notifyTtsUpdated() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(TTS_UPDATED_EVENT));
+  }
 }
 
-export default function VoiceSelector({ value, onChange }) {
-  const [loading, setLoading] = useState(true);
+export function useTtsCatalog() {
   const [providers, setProviders] = useState([]);
-  const [selected, setSelected] = useState(value || "");
+  const [selection, setSelection] = useState(null);
+  const [revision, setRevision] = useState(1);
+  const [warnings, setWarnings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setError(null);
+      const res = await api("/tts/providers");
+      setProviders(res.providers || []);
+      const sel = res.selection?.profile || res.selected || null;
+      setSelection(sel);
+      setRevision(res.revision || res.selection?.revision || 1);
+      setWarnings(res.warnings || []);
+      return res;
+    } catch (err) {
+      setError(err?.message || "Falha ao carregar catálogo de voz.");
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
-    fetch("/v1/tts/providers")
-      .then((r) => r.json())
-      .then((result) => {
+    setLoading(true);
+    api("/tts/providers")
+      .then((res) => {
         if (!active) return;
-        setProviders(result.providers || []);
+        setProviders(res.providers || []);
+        setSelection(res.selection?.profile || res.selected || null);
+        setRevision(res.revision || res.selection?.revision || 1);
+        setWarnings(res.warnings || []);
       })
-      .catch(report)
-      .finally(() => active && setLoading(false));
+      .catch((err) => {
+        if (!active) return;
+        setError(err?.message || "Falha ao carregar catálogo de voz.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    const onUpdated = () => {
+      if (active) refresh().catch(() => {});
+    };
+    window.addEventListener(TTS_UPDATED_EVENT, onUpdated);
     return () => {
       active = false;
+      window.removeEventListener(TTS_UPDATED_EVENT, onUpdated);
+    };
+  }, [refresh]);
+
+  return {
+    providers,
+    selection,
+    revision,
+    warnings,
+    loading,
+    error,
+    refresh,
+  };
+}
+
+export function useTtsPreview() {
+  const [previewing, setPreviewing] = useState(false);
+  const audioRef = useRef(null);
+  const sourceRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      sourceRef.current?.close();
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
     };
   }, []);
 
-  // Sync external value
-  useEffect(() => {
-    if (value !== undefined) setSelected(value);
-  }, [value]);
-
-  const data = providers.map((p) => ({
-    group: p.kind === "local" ? "Local" : "Remoto",
-    items: (p.voices || []).map((v) => ({
-      value: encode(p.id, v.id),
-      label: `${p.name} — ${v.name}${p.available ? "" : " (indisponível)"}`,
-      disabled: !p.available,
-    })),
-  }));
-
-  // Flatten providers with no voices (still show status)
-  const flat = providers.filter((p) => !(p.voices || []).length);
-
-  async function handleChange(val) {
-    setSelected(val);
-    const { provider, voice } = decode(val);
-    try {
-      await fetch("/v1/tts/select", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider, voice }),
-      });
-      onChange?.(val);
-    } catch (e) {
-      report(e);
+  const preview = useCallback(async (profile, text) => {
+    if (!profile?.provider || !profile?.voice) {
+      notify("Selecione um modelo e uma voz antes de testar.", "error");
+      return;
     }
-  }
+    setPreviewing(true);
+    try {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      sourceRef.current?.close();
+      const started = await api("/tts/preview", {
+        profile,
+        ...(text ? { text } : {}),
+      });
+      const jobId = started.job_id;
+      await new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (err) => {
+          if (settled) return;
+          settled = true;
+          clearInterval(poll);
+          sourceRef.current?.close();
+          if (err) reject(err);
+          else resolve();
+        };
+
+        const playUrl = (audioUrl) => {
+          const audio = new Audio(audioUrl);
+          audioRef.current = audio;
+          audio.onended = () => finish();
+          audio.onerror = () => finish(Error("Falha ao reproduzir prévia."));
+          audio.play().catch(finish);
+        };
+
+        sourceRef.current = watchJob(jobId, (ev) => {
+          if (ev.type === "done" && ev.result?.audio_url) {
+            playUrl(ev.result.audio_url);
+          } else if (ev.type === "error") {
+            finish(Error(ev.error || "Erro ao sintetizar prévia."));
+          }
+        });
+
+        const poll = setInterval(async () => {
+          try {
+            const snap = await api(`/tts/jobs/${jobId}`);
+            if (snap.state === "done" && snap.result?.audio_url) {
+              playUrl(snap.result.audio_url);
+            } else if (snap.state === "error") {
+              finish(
+                Error(snap.error?.message || "Erro ao sintetizar prévia."),
+              );
+            }
+          } catch {}
+        }, 700);
+      });
+    } catch (err) {
+      report(err);
+    } finally {
+      setPreviewing(false);
+    }
+  }, []);
+
+  return { preview, previewing };
+}
+
+export default function VoiceSelector({
+  value = null,
+  onChange,
+  onPreview,
+  previewing = false,
+  catalog = [],
+  disabled = false,
+  label = "Modelo e voz",
+}) {
+  const safeVal = value && typeof value === "object" ? value : null;
+  const { provider, model } = findProviderAndModel(
+    catalog,
+    safeVal?.provider,
+    safeVal?.model,
+  );
+  const voices = model?.voices || provider?.voices || [];
+  const bounds = speedBounds(model, provider);
+  const modelKey = provider
+    ? encodeModelKey(provider.id, model?.id || safeVal?.model)
+    : null;
+  const selectedVoice = voices.some((v) => v.id === safeVal?.voice)
+    ? safeVal?.voice
+    : null;
+  const speed = clampSpeed(safeVal?.speed, bounds);
+  const groups = buildVoiceSelectGroups(catalog);
+
+  const unavailableReason =
+    provider && !model?.available
+      ? provider.kind === "remote"
+        ? "Chave de API não configurada no Cofre."
+        : "Modelo local não instalado."
+      : null;
+
+  return (
+    <Stack gap="sm">
+      <Select
+        label={label}
+        placeholder="Selecione um modelo de voz"
+        data={groups}
+        value={modelKey}
+        disabled={disabled || !catalog.length}
+        searchable
+        nothingFoundMessage="Nenhum modelo disponível"
+        onChange={(nextKey) => {
+          if (!nextKey) return;
+          const { provider: pid, model: mid } = decodeModelKey(nextKey);
+          onChange?.(resolveDraftForModel(catalog, pid, mid, safeVal));
+        }}
+      />
+      {unavailableReason && (
+        <Text size="xs" c="yellow">
+          {unavailableReason}
+        </Text>
+      )}
+      <Group align="flex-end" wrap="wrap" gap="sm">
+        <Select
+          style={{ flex: 1, minWidth: 200 }}
+          label="Voz"
+          placeholder={
+            voices.length
+              ? "Escolha a voz"
+              : "Nenhuma voz disponível para este modelo"
+          }
+          data={voices.map((v) => ({
+            value: v.id,
+            label: `${v.name}${v.lang ? ` · ${v.lang}` : ""}`,
+          }))}
+          value={selectedVoice}
+          disabled={disabled || !voices.length}
+          searchable
+          nothingFoundMessage="Nenhuma voz encontrada"
+          onChange={(nextVoice) => {
+            if (!nextVoice) return;
+            onChange?.({
+              provider: provider?.id || safeVal?.provider || "",
+              model: model?.id || safeVal?.model || "",
+              voice: nextVoice,
+              speed,
+            });
+          }}
+        />
+        {onPreview && (
+          <Button
+            variant="light"
+            leftSection={
+              previewing ? <Loader size={14} /> : <Volume2 size={16} />
+            }
+            disabled={
+              disabled ||
+              previewing ||
+              !provider?.id ||
+              !selectedVoice ||
+              !model?.available
+            }
+            onClick={() =>
+              onPreview({
+                provider: provider?.id || safeVal?.provider,
+                model: model?.id || safeVal?.model,
+                voice: selectedVoice,
+                speed,
+              })
+            }
+          >
+            Testar voz
+          </Button>
+        )}
+      </Group>
+      <Stack gap={4}>
+        <Group justify="space-between">
+          <Text size="sm" fw={500}>
+            Velocidade da fala
+          </Text>
+          <Badge variant="light" color="violet">
+            {speed.toFixed(2)}×
+          </Badge>
+        </Group>
+        <Group gap="md" align="center" wrap="nowrap">
+          <Slider
+            style={{ flex: 1 }}
+            aria-label="Velocidade da fala"
+            min={bounds.min}
+            max={bounds.max}
+            step={bounds.step}
+            value={speed}
+            disabled={disabled}
+            marks={[
+              { value: bounds.min, label: `${bounds.min}×` },
+              { value: 1.0, label: "1.0×" },
+              { value: bounds.max, label: `${bounds.max}×` },
+            ]}
+            onChange={(nextSpeed) =>
+              onChange?.({
+                provider: provider?.id || safeVal?.provider || "",
+                model: model?.id || safeVal?.model || "",
+                voice: selectedVoice || "",
+                speed: clampSpeed(nextSpeed, bounds),
+              })
+            }
+          />
+          <NumberInput
+            aria-label="Velocidade numérica"
+            w={90}
+            size="xs"
+            min={bounds.min}
+            max={bounds.max}
+            step={bounds.step}
+            decimalScale={2}
+            value={speed}
+            disabled={disabled}
+            onChange={(val) => {
+              if (val === "" || val === null || val === undefined) return;
+              onChange?.({
+                provider: provider?.id || safeVal?.provider || "",
+                model: model?.id || safeVal?.model || "",
+                voice: selectedVoice || "",
+                speed: clampSpeed(val, bounds),
+              });
+            }}
+          />
+        </Group>
+      </Stack>
+    </Stack>
+  );
+}
+
+export function SpeakerVoicePanel({
+  speakerId,
+  value,
+  onChange,
+  catalog: externalCatalog,
+  title = "Voz do bot",
+  previewText,
+  standalone = false,
+}) {
+  const internalCatalog = useTtsCatalog();
+  const catalog = externalCatalog || internalCatalog.providers;
+  const generalSelection = internalCatalog.selection;
+  const { preview, previewing } = useTtsPreview();
+
+  const isControlled = value !== undefined && onChange !== undefined;
+  const [doc, setDoc] = useState({
+    mode: "inherit",
+    profile: null,
+    revision: 1,
+  });
+  const [savedDoc, setSavedDoc] = useState(null);
+  const [loading, setLoading] = useState(!isControlled);
+  const [saving, setSaving] = useState(false);
+  const [conflict, setConflict] = useState(false);
+
+  const loadSpeaker = useCallback(async () => {
+    if (!speakerId) return;
+    setLoading(true);
+    setConflict(false);
+    try {
+      const res = await api(`/speakers/${encodeURIComponent(speakerId)}/voice`);
+      setDoc(res);
+      setSavedDoc(res);
+    } catch (err) {
+      report(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [speakerId]);
+
+  useEffect(() => {
+    if (!isControlled && speakerId) {
+      loadSpeaker();
+    }
+  }, [isControlled, speakerId, loadSpeaker]);
+
+  const current = isControlled
+    ? value || { mode: "inherit", profile: null, revision: 1 }
+    : doc;
+  const mode = current.mode === "custom" ? "custom" : "inherit";
+
+  const emit = (next) => {
+    if (isControlled) onChange(next);
+    else setDoc(next);
+  };
+
+  const defaultCustomProfile = () => {
+    if (current.profile?.provider) return current.profile;
+    if (generalSelection?.provider) return { ...generalSelection };
+    const firstAvail =
+      catalog.find((p) => (p.models || []).some((m) => m.available)) ||
+      catalog[0];
+    return resolveDraftForModel(
+      catalog,
+      firstAvail?.id || "kokoro",
+      firstAvail?.models?.[0]?.id || "kokoro-v1.0",
+      null,
+    );
+  };
 
   if (loading) return <Loader size="sm" />;
 
+  const dirty =
+    !isControlled &&
+    savedDoc &&
+    JSON.stringify({ mode: doc.mode, profile: doc.profile }) !==
+      JSON.stringify({ mode: savedDoc.mode, profile: savedDoc.profile });
+
   return (
-    <Stack gap="xs">
-      <Group gap="xs">
-        <Text size="sm" fw={600}>
-          Voz / TTS
-        </Text>
-        {providers.map((p) => (
+    <Paper withBorder p="md" radius="md">
+      <Stack gap="sm">
+        <Group justify="space-between">
+          <Text fw={600} size="sm">
+            {title}
+          </Text>
           <Badge
-            key={p.id}
-            color={p.available ? "green" : "gray"}
             variant="light"
-            size="xs"
+            color={mode === "custom" ? "violet" : "gray"}
+            size="sm"
           >
-            {p.name}: {p.available ? "disponível" : "sem chave"}
+            {mode === "custom" ? "Voz própria" : "Herdando Voz Geral da PIA"}
           </Badge>
-        ))}
-      </Group>
-      <Select
-        placeholder="Selecione a voz"
-        data={data}
-        value={selected || null}
-        onChange={safe(handleChange)}
-        searchable
-        nothingFoundMessage="Nenhuma voz disponível"
-      />
-      {flat.length > 0 && (
-        <Text size="xs" c="dimmed">
-          Providers sem vozes listadas: {flat.map((p) => p.name).join(", ")}
-        </Text>
-      )}
-    </Stack>
+        </Group>
+
+        <Radio.Group
+          value={mode}
+          onChange={(nextMode) => {
+            if (nextMode === "inherit") {
+              emit({ ...current, mode: "inherit" });
+            } else {
+              emit({
+                ...current,
+                mode: "custom",
+                profile: defaultCustomProfile(),
+              });
+            }
+          }}
+        >
+          <Stack gap="xs">
+            <Radio
+              value="inherit"
+              label={
+                generalSelection
+                  ? `Usar Voz Geral da PIA (${generalSelection.provider} · ${generalSelection.voice})`
+                  : "Usar Voz Geral da PIA"
+              }
+            />
+            <Radio value="custom" label="Usar voz própria exclusiva" />
+          </Stack>
+        </Radio.Group>
+
+        {mode === "custom" && (
+          <VoiceSelector
+            label="Modelo e voz exclusiva"
+            catalog={catalog}
+            value={current.profile || defaultCustomProfile()}
+            onChange={(nextProfile) =>
+              emit({ ...current, mode: "custom", profile: nextProfile })
+            }
+            previewing={previewing}
+            onPreview={(prof) => preview(prof, previewText)}
+          />
+        )}
+
+        {mode === "inherit" && generalSelection && (
+          <Group>
+            <Button
+              size="xs"
+              variant="subtle"
+              leftSection={
+                previewing ? <Loader size={12} /> : <Volume2 size={14} />
+              }
+              disabled={previewing}
+              onClick={() => preview(generalSelection, previewText)}
+            >
+              Ouvir Voz Geral atual
+            </Button>
+          </Group>
+        )}
+
+        {conflict && (
+          <Alert color="yellow" title="Conflito de revisão">
+            <Group justify="space-between">
+              <Text size="xs">
+                A voz foi alterada em outro lugar. Recarregue antes de salvar.
+              </Text>
+              <Button
+                size="xs"
+                variant="light"
+                leftSection={<RefreshCw size={12} />}
+                onClick={safe(loadSpeaker)}
+              >
+                Recarregar
+              </Button>
+            </Group>
+          </Alert>
+        )}
+
+        {standalone && !isControlled && (
+          <Group>
+            <Button
+              size="xs"
+              loading={saving}
+              disabled={!dirty}
+              onClick={safe(async () => {
+                setSaving(true);
+                try {
+                  const res = await api(
+                    `/speakers/${encodeURIComponent(speakerId)}/voice`,
+                    {
+                      mode: doc.mode,
+                      profile: doc.mode === "custom" ? doc.profile : null,
+                      revision: doc.revision,
+                    },
+                    { method: "PUT" },
+                  );
+                  setDoc(res);
+                  setSavedDoc(res);
+                  setConflict(false);
+                  notify("Voz do bot salva com sucesso.");
+                  notifyTtsUpdated();
+                } catch (err) {
+                  if (err?.status === 409) setConflict(true);
+                  throw err;
+                } finally {
+                  setSaving(false);
+                }
+              })}
+            >
+              Salvar voz do bot
+            </Button>
+          </Group>
+        )}
+      </Stack>
+    </Paper>
   );
 }

@@ -1,4 +1,5 @@
 import { fieldGroup } from "./settings-groups";
+import { isTtsField, splitTtsFields } from "./tts-helpers";
 import { DocumentSettings, VaultSettings } from "./ProfileSettings";
 import LogsPanel from "./LogsPanel";
 import { fingerprint } from "./forms";
@@ -19,7 +20,7 @@ import {
 import { ExternalLink, Folder, Upload } from "lucide-react";
 import { api, report, safe, session } from "./api";
 import { Icon, Nav, usePia } from "./shared";
-import VoiceSelector from "./VoiceSelector";
+import TTSSettingsPanel from "./TTSSettingsPanel";
 
 function ServerProfilePanel() {
   const [profile, setProfile] = useState({ state: "pending" });
@@ -91,8 +92,12 @@ export default function SettingsPanel({ section = "general" }) {
           if (!active) return;
           setSections(result);
           const selected = result.find((s) => s.id === section) || result[0];
+          const managedFields =
+            selected.id === "general"
+              ? selected.fields.filter((field) => !isTtsField(field))
+              : selected.fields;
           const initial = Object.fromEntries(
-            selected.fields.map((field) => [field.name, field.value]),
+            managedFields.map((field) => [field.name, field.value]),
           );
           setValues(initial);
           setSavedValues(fingerprint(initial));
@@ -108,6 +113,11 @@ export default function SettingsPanel({ section = "general" }) {
   if (section === "credentials") return <VaultSettings />;
   const selected = sections.find((s) => s.id === section) || sections[0];
   if (!selected) return <Text>{t("Carregando…")}</Text>;
+  const { ttsFields, otherFields } =
+    selected.id === "general"
+      ? splitTtsFields(selected.fields)
+      : { ttsFields: [], otherFields: selected.fields };
+  const isCustomTtsTab = selected.id === "general" && group === "TTS";
   async function save() {
     const result = await api("/settings/save", {
       section: selected.id,
@@ -188,8 +198,7 @@ export default function SettingsPanel({ section = "general" }) {
                 setLanguage(value);
               })}
             />
-          )}{" "}
-          {selected.id === "general" && <VoiceSelector />}{" "}
+          )}
           {selected.id === "general" && (
             <Group gap="xs">
               {[
@@ -210,128 +219,137 @@ export default function SettingsPanel({ section = "general" }) {
               ))}
             </Group>
           )}
-          {selected.fields
-            .filter(
-              (field) =>
-                selected.id !== "general" || fieldGroup(field) === group,
-            )
-            .map((field) => (
-              <Group
-                key={field.name}
-                className="env-row"
-                wrap="nowrap"
-                align="center"
-                gap="xs"
-              >
-                <Text
-                  component="label"
-                  htmlFor={"env-" + field.name}
-                  size="xs"
-                  className="env-name"
-                >
-                  {field.label || field.name}
-                </Text>
-                <div className="grow">
-                  {field.type === "bool" ? (
-                    <Select
-                      id={"env-" + field.name}
-                      aria-label={field.name}
-                      data={[
-                        { value: "", label: '""' },
-                        { value: "true", label: "true" },
-                        { value: "false", label: "false" },
-                      ]}
-                      value={values[field.name] || ""}
-                      onChange={(value) =>
-                        setValues({ ...values, [field.name]: value || "" })
-                      }
-                    />
-                  ) : field.sensitive ? (
-                    <PasswordInput
-                      id={"env-" + field.name}
-                      aria-label={field.name}
-                      value={values[field.name] || ""}
-                      onChange={(event) =>
-                        setValues({
-                          ...values,
-                          [field.name]: event.target.value,
-                        })
-                      }
-                    />
-                  ) : (
-                    <TextInput
-                      id={"env-" + field.name}
-                      aria-label={field.name}
-                      type={
-                        ["int", "float"].includes(field.type)
-                          ? "number"
-                          : "text"
-                      }
-                      step={field.type === "int" ? "1" : "any"}
-                      value={values[field.name] || ""}
-                      onChange={(event) =>
-                        setValues({
-                          ...values,
-                          [field.name]: event.target.value,
-                        })
-                      }
-                    />
-                  )}
-                </div>
-                {["path", "file"].includes(field.type) && (
-                  <Icon
-                    icon={Folder}
-                    label={t("Selecionar pasta")}
-                    onClick={async () => {
-                      const result = await api("/native", {
-                        action: "choose-path",
-                        payload: {
-                          mode: field.type === "file" ? "file" : "directory",
-                        },
-                      });
-                      if (result.path)
-                        setValues({ ...values, [field.name]: result.path });
-                    }}
-                  />
-                )}
-                {field.type === "file" && (
-                  <>
-                    <FileButton onChange={safe((file) => upload(field, file))}>
-                      {(props) => (
-                        <span {...props}>
-                          <Icon icon={Upload} label="Carregar arquivo" />
-                        </span>
+          {isCustomTtsTab ? (
+            <TTSSettingsPanel ttsFields={ttsFields} />
+          ) : (
+            <>
+              {otherFields
+                .filter(
+                  (field) =>
+                    selected.id !== "general" || fieldGroup(field) === group,
+                )
+                .map((field) => (
+                  <Group
+                    key={field.name}
+                    className="env-row"
+                    wrap="nowrap"
+                    align="center"
+                    gap="xs"
+                  >
+                    <Text
+                      component="label"
+                      htmlFor={"env-" + field.name}
+                      size="xs"
+                      className="env-name"
+                    >
+                      {field.label || field.name}
+                    </Text>
+                    <div className="grow">
+                      {field.type === "bool" ? (
+                        <Select
+                          id={"env-" + field.name}
+                          aria-label={field.name}
+                          data={[
+                            { value: "", label: '""' },
+                            { value: "true", label: "true" },
+                            { value: "false", label: "false" },
+                          ]}
+                          value={values[field.name] || ""}
+                          onChange={(value) =>
+                            setValues({ ...values, [field.name]: value || "" })
+                          }
+                        />
+                      ) : field.sensitive ? (
+                        <PasswordInput
+                          id={"env-" + field.name}
+                          aria-label={field.name}
+                          value={values[field.name] || ""}
+                          onChange={(event) =>
+                            setValues({
+                              ...values,
+                              [field.name]: event.target.value,
+                            })
+                          }
+                        />
+                      ) : (
+                        <TextInput
+                          id={"env-" + field.name}
+                          aria-label={field.name}
+                          type={
+                            ["int", "float"].includes(field.type)
+                              ? "number"
+                              : "text"
+                          }
+                          step={field.type === "int" ? "1" : "any"}
+                          value={values[field.name] || ""}
+                          onChange={(event) =>
+                            setValues({
+                              ...values,
+                              [field.name]: event.target.value,
+                            })
+                          }
+                        />
                       )}
-                    </FileButton>
+                    </div>
+                    {["path", "file"].includes(field.type) && (
+                      <Icon
+                        icon={Folder}
+                        label={t("Selecionar pasta")}
+                        onClick={async () => {
+                          const result = await api("/native", {
+                            action: "choose-path",
+                            payload: {
+                              mode:
+                                field.type === "file" ? "file" : "directory",
+                            },
+                          });
+                          if (result.path)
+                            setValues({ ...values, [field.name]: result.path });
+                        }}
+                      />
+                    )}
+                    {field.type === "file" && (
+                      <>
+                        <FileButton
+                          onChange={safe((file) => upload(field, file))}
+                        >
+                          {(props) => (
+                            <span {...props}>
+                              <Icon icon={Upload} label="Carregar arquivo" />
+                            </span>
+                          )}
+                        </FileButton>
+                        <Icon
+                          icon={Folder}
+                          label="Abrir pasta do arquivo"
+                          onClick={() =>
+                            api("/native", {
+                              action: "reveal-file",
+                              payload: { path: values[field.name] },
+                            })
+                          }
+                        />
+                      </>
+                    )}
                     <Icon
-                      icon={Folder}
-                      label="Abrir pasta do arquivo"
-                      onClick={() =>
-                        api("/native", {
-                          action: "reveal-file",
-                          payload: { path: values[field.name] },
-                        })
-                      }
+                      icon={ExternalLink}
+                      label={t("Configurar ↗")}
+                      component="a"
+                      href={field.link}
+                      target="_blank"
+                      rel="noreferrer"
                     />
-                  </>
-                )}
-                <Icon
-                  icon={ExternalLink}
-                  label={t("Configurar ↗")}
-                  component="a"
-                  href={field.link}
-                  target="_blank"
-                  rel="noreferrer"
-                />
-              </Group>
-            ))}
-          <Button
-            disabled={fingerprint(values) === savedValues}
-            onClick={safe(save)}
-          >
-            {t("Salvar configurações")}
-          </Button>
-          {notice && <Text size="sm">{notice}</Text>}
+                  </Group>
+                ))}
+              <Button
+                disabled={fingerprint(values) === savedValues}
+                onClick={safe(save)}
+              >
+                {t("Salvar configurações")}
+              </Button>
+              {notice && <Text size="sm">{notice}</Text>}
+            </>
+          )}
         </Stack>
       </Paper>
       {selected.id === "Connectors/pia_server" && <ServerProfilePanel />}
