@@ -14,22 +14,36 @@ import {
   Checkbox,
   SimpleGrid,
 } from "@mantine/core";
+import {
+  SpeakerVoicePanel,
+  notifyTtsUpdated,
+} from "../../../../src/pia/frontend/VoiceSelector";
 import { api, report, safe } from "../../../../src/pia/frontend/api";
 import { usePia } from "../../../../src/pia/frontend/shared";
+import { notify } from "../../../../src/pia/frontend/toasts";
 export default function Secretary() {
   const { navigate } = usePia(),
     [data, setData] = useState(null),
     [saved, setSaved] = useState("");
+  const snapshot = (value) =>
+    fingerprint({
+      config: value?.config || {},
+      voice: {
+        mode: value?.voice?.mode || "inherit",
+        profile: value?.voice?.mode === "custom" ? value?.voice?.profile : null,
+      },
+    });
   useEffect(() => {
     api("/bots/secretaria")
       .then((value) => {
         setData(value);
-        setSaved(fingerprint(value.config));
+        setSaved(snapshot(value));
       })
       .catch(report);
   }, []);
   if (!data) return <Text>Carregando secretária…</Text>;
   const config = data.config,
+    voice = data.voice || { mode: "inherit", profile: null, revision: 1 },
     patch = (key, value) =>
       setData({ ...data, config: { ...config, [key]: value } });
   return (
@@ -101,6 +115,13 @@ export default function Secretary() {
             />
           ))}
         </SimpleGrid>
+        <SpeakerVoicePanel
+          speakerId="native:secretaria"
+          title="Voz da Secretária"
+          value={voice}
+          onChange={(nextVoice) => setData({ ...data, voice: nextVoice })}
+          previewText="Olá! Sou a Secretária da PIA e este é um teste da minha voz."
+        />
         <Text fw={600}>Contas Google autorizadas</Text>
         {data.accounts.map((account) => (
           <Checkbox
@@ -129,11 +150,20 @@ export default function Secretary() {
         )}
         <Group>
           <Button
-            disabled={fingerprint(config) === saved}
+            disabled={snapshot(data) === saved}
             onClick={safe(async () => {
-              const result = await api("/bots/secretaria", config);
+              const result = await api("/bots/secretaria", {
+                ...config,
+                voice: {
+                  mode: voice.mode || "inherit",
+                  profile: voice.mode === "custom" ? voice.profile : null,
+                  revision: voice.revision,
+                },
+              });
               setData(result);
-              setSaved(fingerprint(result.config));
+              setSaved(snapshot(result));
+              notifyTtsUpdated();
+              notify("Preferências da secretária salvas.");
             })}
           >
             Salvar preferências
