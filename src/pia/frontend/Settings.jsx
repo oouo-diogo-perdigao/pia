@@ -7,6 +7,7 @@ import { Button, Group, Paper, Text, Title, TextInput, PasswordInput, Select, St
 import { ExternalLink, Folder, Upload } from "lucide-react";
 import { api, report, safe, session } from "./api";
 import { Icon, Nav, usePia } from "./shared";
+import VoiceSelector from "./VoiceSelector";
 
 function ServerProfilePanel() {
   const [profile, setProfile] = useState({ state: "pending" });
@@ -173,6 +174,7 @@ export default function SettingsPanel({ section = "general" }) {
               })}
             />
           )}{" "}
+          {selected.id === "general" && <VoiceSelector />}{" "}
           {selected.id === "general" && (
             <Group gap="xs">
               {[

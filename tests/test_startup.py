@@ -103,10 +103,41 @@ class ShellStartupTests(unittest.TestCase):
             root = Path(directory)
             shutil.copyfile(ROOT / 'start.sh', root / 'start.sh')
             self.script(root / '.venv/bin/python', 'printf "python:%s\\n" "$*"; pwd')
-            result = subprocess.run([self.bash, str(root / 'start.sh'), '--dry-run'], env=dict(os.environ, OSTYPE='linux-gnu'), capture_output=True, text=True, timeout=10)
+            result = subprocess.run([self.bash, str(root / 'start.sh'), '--foreground'], env=dict(os.environ, OSTYPE='linux-gnu'), capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn('python:-m src.launcher --dry-run', result.stdout)
+            self.assertIn('python:-m src.launcher --foreground', result.stdout)
             self.assertIn(root.name, result.stdout)
+            dry_run = subprocess.run([self.bash, str(root / 'start.sh'), '--dry-run', '--foreground'], env=dict(os.environ, OSTYPE='linux-gnu'), capture_output=True, text=True, timeout=10)
+            self.assertEqual(dry_run.returncode, 0, dry_run.stderr)
+            self.assertIn('PIA · iniciando para linux em', dry_run.stdout)
+            self.assertIn('-m src.launcher --foreground', dry_run.stdout)
+
+    def test_wsl_windows_drive_handoff_and_missing_git_bash_guard(self):
+        for script_name, expected in (('install.sh', 'PIA · instalando para windows'), ('start.sh', 'PIA · iniciando para windows')):
+            result = subprocess.run(
+                [self.bash, str(ROOT / script_name), '--dry-run'],
+                cwd=str(ROOT),
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(expected, result.stdout)
+            self.assertNotIn('apt-get', result.stdout)
+        with tempfile.TemporaryDirectory(prefix='pia wsl guard ') as directory:
+            root = Path(directory)
+            for name in ('install.sh', 'start.sh'):
+                text = (ROOT / name).read_text(encoding='utf-8')
+                patched = text.replace('if [[ "$ROOT" =~ ^/mnt/[a-zA-Z]/ ]]', 'if true', 1).replace(
+                    'for candidate in "/mnt/c/Program Files/Git/bin/bash.exe" "/mnt/c/Program Files (x86)/Git/bin/bash.exe"; do',
+                    'for candidate in "/nonexistent/git/bash.exe"; do',
+                    1,
+                ).replace('if [[ -z "$GIT_BASH" ]] && command -v powershell.exe >/dev/null 2>&1; then', 'if false; then', 1)
+                (root / name).write_text(patched, encoding='utf-8', newline='\n')
+                res = subprocess.run([self.bash, str(root / name), '--dry-run'], env=dict(os.environ, OSTYPE='linux-gnu', WSL_DISTRO_NAME='Ubuntu'), capture_output=True, text=True, timeout=10)
+                self.assertEqual(res.returncode, 1)
+                self.assertIn('Instale o Git for Windows', res.stderr)
+                self.assertNotIn('apt-get', res.stdout + res.stderr)
 
     def test_shell_syntax(self):
         for name in ('start.sh', 'install.sh'):

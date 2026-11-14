@@ -3,11 +3,8 @@
 		{
 			"path": ".."
 		},
-		{
-			"path": "../../Open-LLM-VTuber"
-		},
-		{
-			"path": "../../SillyTavern"
+				{
+			"path": "../../pia-server"
 		}
 	],
 	"settings": {

@@ -3,6 +3,36 @@
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
+
+# A Windows drive opened by PowerShell's bash.exe is still a native Windows
+# installation. Hand off before selecting Python or installing dependencies.
+if [[ "$ROOT" =~ ^/mnt/[a-zA-Z]/ ]] && {
+  [[ -n "${WSL_DISTRO_NAME:-}" || -n "${WSL_INTEROP:-}" || -e /proc/sys/fs/binfmt_misc/WSLInterop ]] ||
+    grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null ||
+    command -v powershell.exe >/dev/null 2>&1
+}; then
+  GIT_BASH=""
+  for candidate in "/mnt/c/Program Files/Git/bin/bash.exe" "/mnt/c/Program Files (x86)/Git/bin/bash.exe"; do
+    if [[ -x "$candidate" ]]; then GIT_BASH="$candidate"; break; fi
+  done
+  if [[ -z "$GIT_BASH" ]] && command -v powershell.exe >/dev/null 2>&1; then
+    git_bash_win="$(powershell.exe -NoProfile -Command '
+      $git = Get-Command git.exe -ErrorAction SilentlyContinue
+      if ($git) {
+        $base = Split-Path (Split-Path $git.Source)
+        $candidate = Join-Path $base "bin\bash.exe"
+        if (Test-Path -LiteralPath $candidate) { $candidate }
+      }
+    ' | tr -d '\r' || true)"
+    if [[ -n "$git_bash_win" ]]; then GIT_BASH="$(wslpath -u "$git_bash_win")"; fi
+  fi
+  if [[ -z "$GIT_BASH" || ! -x "$GIT_BASH" ]]; then
+    printf 'PIA: diretório Windows acessado pelo WSL. Instale o Git for Windows e execute novamente; nenhuma dependência Linux foi instalada.\n' >&2
+    exit 1
+  fi
+  WIN_ROOT="$(wslpath -w "$ROOT")"
+  exec "$GIT_BASH" -c 'cd -- "$1" && shift && exec bash "./$1" "${@:2}"' pia-windows "$WIN_ROOT" "${BASH_SOURCE[0]##*/}" "$@"
+fi
 SYSTEM=1; AUTOSTART=1; PODCAST=1; DRY_RUN=0; START=1
 for arg in "$@"; do
   case "$arg" in
@@ -28,7 +58,7 @@ if [[ "$PLATFORM" == windows ]]; then
     run powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \
       'Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression'
     if command -v cygpath >/dev/null 2>&1; then
-      WIN_HOME="$(powershell.exe -NoProfile -Command '[Environment]::GetFolderPath("UserProfile")' | tr -d '\r')"
+      WIN_HOME="$(powershell.exe -NoProfile -Command '[Environment]::GetFolderPath("UserProfile")' | tr -d '\r' || true)"
       export PATH="$(cygpath -u "$WIN_HOME")/.local/bin:$PATH"
     fi
   fi
@@ -85,7 +115,7 @@ printf '\nInstalação concluída. Para reabrir a PIA: bash start.sh\n'
 printf 'Configurações: config/ · Plugins: Plugins/ · Ajuda: docs/DESKTOP.md\n'
 if [[ "$PLATFORM" == windows ]] && (( ! DRY_RUN )); then
   # winget can update the registry PATH without updating the current Git Bash.
-  WIN_PATH="$(powershell.exe -NoProfile -Command '[Environment]::GetEnvironmentVariable("Path","Machine")+";"+[Environment]::GetEnvironmentVariable("Path","User")' | tr -d '\r')"
+  WIN_PATH="$(powershell.exe -NoProfile -Command '[Environment]::GetEnvironmentVariable("Path","Machine")+";"+[Environment]::GetEnvironmentVariable("Path","User")' | tr -d '\r' || true)"
   export PATH="$(cygpath -u -p "$WIN_PATH"):$PATH"
 fi
 if (( START )); then
