@@ -1399,21 +1399,21 @@
       "name": "01 · OpenAI",
       "item": [
         {
-          "name": "GET /v1/audio/voices",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{base_url}}/v1/audio/voices",
-            "description": "Rota extraída do código atual. Consulte os contratos e limites no repositório."
-          },
-          "response": []
-        },
-        {
           "name": "GET /v1/models",
           "request": {
             "method": "GET",
             "header": [],
             "url": "{{base_url}}/v1/models",
+            "description": "Rota extraída do código atual. Consulte os contratos e limites no repositório."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /v1/tts/providers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/v1/tts/providers",
             "description": "Rota extraída do código atual. Consulte os contratos e limites no repositório."
           },
           "response": []
@@ -1794,6 +1794,30 @@
                   "type": "text"
                 }
               ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /v1/tts/select",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/v1/tts/select",
+            "description": "Rota extraída do código atual. Consulte os contratos e limites no repositório.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           },
           "response": []
