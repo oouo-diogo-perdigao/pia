@@ -7,6 +7,12 @@
 - Voz própria por speaker/bot (`GET/PUT /api/pia/speakers/{speaker_id}/voice`), propagação de `speaker_id` em `NotificationCenter.publish` e contexto de reprodução (`utterance_id`, `speaker_id`, `avatar_url`, `phase`) em `/tts/status` e `/tts/status/stream`.
 - Avatar da Secretária (`Plugins/Bot/secretaria/avatar.svg`) atualizado com classes `.enable-mouth` e `.animation-talking`.
 - Extensão `Plugins/OpenBot` para Bots Dinâmicos: CRUD (`/api/pia/openbot/bots`), upload e sanitização estrita de avatares SVG (`/api/pia/openbot/avatars`), execução e cancelamento (`/api/pia/openbot/bots/{id}/runs`, `/api/pia/openbot/runs/{id}/cancel`) e ferramenta `delegate_to_bot` com limites de profundidade, ciclos e timeout.
+- Painel visual unificado de TTS (`TTSSettingsPanel.jsx` e `VoiceSelector.jsx`) substituindo os campos textuais brutos em `Configurações -> Geral -> TTS`, com instalação/remoção individual de modelos locais, progresso ao vivo, validação de conflitos (`409`) e controle reutilizável `SpeakerVoicePanel`.
+- Seleção de voz própria ou herdada para a Secretária (`Plugins/Bot/secretaria/web/Panel.jsx`) e troca dinâmica de avatar SVG + animação de fala no `PIA Mini` (`src/piamini/mini.js`, `index.html`, `mini.css`).
+- Interface completa de Bots Dinâmicos (`Plugins/OpenBot/web/*`, `Bots.jsx` e `Workspace.jsx`): catálogo separado (Nativos vs Dinâmicos), criação/edição com editor `AGENTS.md`, presets/upload de SVG com 3 cores personalizáveis, voz dedicada e execução em streaming via SSE.
+
+### Changed
+- Removidos inputs textuais brutos `TTS_*` da sub-aba `TTS` em `Settings.jsx`, preservando parâmetros avançados (`TTS_DEVICE`, timeouts, `TTS_LLM_MODEL`) em seção dobrável dedicada.
 
 ### Security
 - Sanitização XML estrita de SVG rejeitando `<script>`, `foreignObject`, DTD/entidades, atributos `on*` e referências externas.

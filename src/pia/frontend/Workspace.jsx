@@ -63,6 +63,10 @@ import Podcast from "../../../Plugins/Apps/podcast_automation/web/Panel.jsx";
 import Screenshots from "../../../Plugins/Apps/screenshots/web/Panel.jsx";
 import Storage from "../../../Plugins/Apps/object_storage/web/Panel.jsx";
 import Secretary from "../../../Plugins/Bot/secretaria/web/Panel.jsx";
+import {
+  BotRunPanel,
+  SafeSvgAvatar,
+} from "../../../Plugins/OpenBot/web/Panel.jsx";
 const appIcons = {
   podcast_automation: AudioLines,
   music: Music2,
@@ -499,6 +503,8 @@ export default function Workspace({ standalone = null }) {
         <Bots />
       ) : route.bot === "secretaria" ? (
         <Secretary />
+      ) : currentBot?.kind === "dynamic" ? (
+        <BotRunPanel botId={currentBot.id} />
       ) : (
         <iframe title={currentBot?.name || "Bot"} src={currentBot?.url} />
       )
@@ -773,6 +779,18 @@ export default function Workspace({ standalone = null }) {
                         onClick={() => newChat()}
                       />
                     )}
+                    {route.view === "bots" && (
+                      <Icon
+                        icon={Plus}
+                        label="Criar Bot Dinâmico"
+                        variant="filled"
+                        radius="xl"
+                        color="violet"
+                        onClick={() =>
+                          navigate({ view: "bots", create: Date.now() })
+                        }
+                      />
+                    )}
                     <Icon
                       icon={PanelLeftClose}
                       label={t("Recolher lista")}
@@ -1017,6 +1035,13 @@ export default function Workspace({ standalone = null }) {
                           >
                             {bot.id === "secretaria" ? (
                               <Avatar />
+                            ) : bot.kind === "dynamic" ? (
+                              <SafeSvgAvatar
+                                src={bot.avatar_url || bot.avatar}
+                                colors={bot.avatar_colors}
+                                size={18}
+                                alt={bot.name}
+                              />
                             ) : (
                               <Bot size={18} />
                             )}{" "}
@@ -1086,6 +1111,14 @@ export default function Workspace({ standalone = null }) {
                 <Text className="view-title" fw={600}>
                   {route.view === "bots" && route.bot === "secretaria" && (
                     <Avatar />
+                  )}
+                  {route.view === "bots" && currentBot?.kind === "dynamic" && (
+                    <SafeSvgAvatar
+                      src={currentBot.avatar_url || currentBot.avatar}
+                      colors={currentBot.avatar_colors}
+                      size={24}
+                      alt={currentBot.name}
+                    />
                   )}
                   {title}
                 </Text>
