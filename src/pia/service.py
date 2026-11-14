@@ -343,6 +343,27 @@ class WorkspaceService:
         allowed = {item["name"] for item in selected["fields"]} if selected else set()
         if not isinstance(values, dict) or set(values) - allowed:
             raise ValueError("Configuração desconhecida.")
+        if section == "general":
+            # Sincroniza validação de TTS caso algum campo TTS venha no save genérico
+            tts_keys = {
+                "TTS_PROVIDER",
+                "TTS_MODEL",
+                "TTS_DEFAULT_VOICE",
+                "TTS_DEFAULT_SPEED",
+            }
+            if any(k in values for k in tts_keys):
+                from src.tts_service import get_tts_service
+
+                get_tts_service().select(
+                    provider=values.get("TTS_PROVIDER"),
+                    model=values.get("TTS_MODEL"),
+                    voice=values.get("TTS_DEFAULT_VOICE"),
+                    speed=values.get("TTS_DEFAULT_SPEED"),
+                )
+                remaining = {k: v for k, v in values.items() if k not in tts_keys}
+                if remaining:
+                    get_store().save(section, remaining)
+                return {"ok": True, "restart_required": True}
         get_store().save(section, values)
         return {"ok": True, "restart_required": True}
 
@@ -730,6 +751,69 @@ class WorkspaceService:
             }
         if path == "/bots":
             return self.bot_records()
+        if path == "/tts/providers":
+            from src.tts_service import get_tts_service
+
+            return get_tts_service().catalog()
+        if path == "/tts/voices":
+            from src.tts_service import get_tts_service
+
+            provider_id = (query.get("provider") or [""])[0].strip()
+            model_id = (query.get("model") or [None])[0]
+            refresh = (query.get("refresh") or [""])[0].lower() in ("1", "true", "yes")
+            return get_tts_service().voices(
+                provider_id, model_id=model_id, refresh=refresh
+            )
+        if path == "/tts/selection":
+            from src.tts_service import get_tts_service
+
+            return get_tts_service().selection()
+        if path == "/tts/select" and method == "POST":
+            from src.tts_service import get_tts_service
+
+            return get_tts_service().select(
+                provider=data.get("provider"),
+                model=data.get("model"),
+                voice=data.get("voice"),
+                speed=data.get("speed"),
+                revision=data.get("revision"),
+            )
+        if path == "/tts/install" and method == "POST":
+            from src.tts_service import get_tts_service
+
+            return get_tts_service().install(
+                str(data.get("provider") or ""),
+                data.get("model"),
+                request_id=data.get("request_id"),
+                workspace_jobs=self.jobs,
+            )
+        if path == "/tts/uninstall" and method == "POST":
+            from src.tts_service import get_tts_service
+
+            return get_tts_service().uninstall(
+                str(data.get("provider") or ""),
+                data.get("model"),
+                request_id=data.get("request_id"),
+                workspace_jobs=self.jobs,
+            )
+        if path.startswith("/tts/jobs/"):
+            from src.tts_service import get_tts_service
+
+            if path.endswith("/cancel") and method == "POST":
+                job_id = (
+                    path.removeprefix("/tts/jobs/").removesuffix("/cancel").strip("/")
+                )
+                return get_tts_service().cancel_job(job_id)
+            job_id = path.removeprefix("/tts/jobs/").strip("/")
+            return get_tts_service().get_job(job_id)
+        if path == "/tts/preview" and method == "POST":
+            from src.tts_service import get_tts_service
+
+            return get_tts_service().preview(
+                profile=data.get("profile"),
+                text=data.get("text"),
+                workspace_jobs=self.jobs,
+            )
         if path == "/bots/secretaria":
             if method == "POST":
                 self.backend.secretary.configure(data)

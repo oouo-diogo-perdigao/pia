@@ -127,10 +127,25 @@ class DesktopBackend:
             self.store.append(chat, "assistant", result)
             return result
 
-    def speak(self, text, conversation_epoch=None):
+    def speak(
+        self,
+        text,
+        conversation_epoch=None,
+        speaker_id="pia",
+        bot_name=None,
+        avatar_url=None,
+        avatar_colors=None,
+    ):
         from .utils import speak_tts
 
-        speak_tts(text, conversation_epoch=conversation_epoch)
+        speak_tts(
+            text,
+            conversation_epoch=conversation_epoch,
+            speaker_id=speaker_id,
+            bot_name=bot_name,
+            avatar_url=avatar_url,
+            avatar_colors=avatar_colors,
+        )
 
     def toggle_voice(self, deliver, *, dictation=False, on_end=None):
         """The desktop owns a stream subscriber; it never consumes another client's queue."""

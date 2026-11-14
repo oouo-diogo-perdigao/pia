@@ -103,7 +103,10 @@ def route(handler):
             {"error": "A interface PIA é acessível somente pelo localhost."},
         )
         return True
-    if handler.command == "POST" and handler.headers.get("Origin") != "http://" + host:
+    if (
+        handler.command in ("POST", "PUT", "PATCH", "DELETE")
+        and handler.headers.get("Origin") != "http://" + host
+    ):
         respond(handler, 403, {"error": "Origem inválida."})
         return True
     try:
@@ -169,27 +172,52 @@ def route(handler):
                         mimetypes.guess_type(file.name)[0],
                     )
                 return True
+            subpath = path.removeprefix("/api/pia")
+            if (
+                handler.command == "GET"
+                and subpath.startswith("/tts/previews/")
+                and subpath.endswith("/audio")
+            ):
+                from src.tts_service import TTSServiceError, get_tts_service
+
+                job_id = (
+                    subpath.removeprefix("/tts/previews/")
+                    .removesuffix("/audio")
+                    .strip("/")
+                )
+                try:
+                    res = get_tts_service().get_preview_audio(job_id)
+                    respond(handler, 200, res.audio, res.mime)
+                except TTSServiceError as exc:
+                    respond(
+                        handler, exc.status, {"error": exc.message, "code": exc.code}
+                    )
+                return True
+            allowed_get = {
+                "/state",
+                "/chat/messages",
+                "/settings",
+                "/accounts",
+                "/bots",
+                "/bots/secretaria",
+                "/logs",
+                "/preferences",
+                "/notifications",
+                "/notifications/counts",
+                "/settings/documents",
+                "/settings/credentials",
+                "/settings/storage",
+                "/integrations/pia_server/account",
+                "/integrations/pia_server/profile-status",
+                "/tts/providers",
+                "/tts/voices",
+                "/tts/selection",
+            }
+            is_allowed_get = subpath in allowed_get or subpath.startswith("/tts/jobs/")
             if (
                 handler.command == "GET"
                 and not path.startswith("/api/pia/events/")
-                and path.removeprefix("/api/pia")
-                not in {
-                    "/state",
-                    "/chat/messages",
-                    "/settings",
-                    "/accounts",
-                    "/bots",
-                    "/bots/secretaria",
-                    "/logs",
-                    "/preferences",
-                    "/notifications",
-                    "/notifications/counts",
-                    "/settings/documents",
-                    "/settings/credentials",
-                    "/settings/storage",
-                    "/integrations/pia_server/account",
-                    "/integrations/pia_server/profile-status",
-                }
+                and not is_allowed_get
             ):
                 respond(handler, 405, {"error": "Use POST para esta operação."})
                 return True
@@ -223,20 +251,44 @@ def route(handler):
                         break
                 return True
             data = {}
-            if handler.command == "POST":
+            if handler.command in ("POST", "PUT", "PATCH"):
                 length = int(handler.headers.get("Content-Length", "0"))
                 if length < 0 or length > 40 * 1024 * 1024:
                     raise ValueError("Corpo da solicitação excede 40 MiB.")
                 data = json.loads(handler.rfile.read(length) or b"{}")
                 if not isinstance(data, dict):
                     raise ValueError("Esperado objeto JSON.")
-            value = service.dispatch(
-                handler.command,
-                path.removeprefix("/api/pia"),
-                data,
-                parse_qs(url.query),
-            )
-            respond(handler, 202 if path == "/api/pia/chat/send" else 200, value)
+            try:
+                value = service.dispatch(
+                    handler.command,
+                    path.removeprefix("/api/pia"),
+                    data,
+                    parse_qs(url.query),
+                )
+            except Exception as exc:
+                from src.tts_service import TTSServiceError
+
+                if isinstance(exc, TTSServiceError):
+                    respond(
+                        handler,
+                        exc.status,
+                        {"error": exc.message, "code": exc.code, **exc.details},
+                    )
+                    return True
+                raise
+            status_code = 200
+            if (
+                path == "/api/pia/chat/send"
+                or path
+                in (
+                    "/api/pia/tts/install",
+                    "/api/pia/tts/uninstall",
+                    "/api/pia/tts/preview",
+                )
+                or (path.startswith("/api/pia/tts/jobs/") and path.endswith("/cancel"))
+            ):
+                status_code = 202
+            respond(handler, status_code, value)
             return True
         if handler.command != "GET":
             raise ValueError("Método não permitido.")

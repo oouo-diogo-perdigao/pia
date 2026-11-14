@@ -12,7 +12,7 @@ import re
 from email.parser import BytesParser
 from email.policy import default as email_policy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from .TTSManager import TTSManager
 from .STTManager import STTManager
@@ -531,14 +531,68 @@ class HTTPServer(BaseHTTPRequestHandler):
             if path == "/v1/tts/providers":
                 if not self._authorize_openai_request():
                     return
-                from src.tts_providers.registry import TTSProviderRegistry
+                from src.tts_service import get_tts_service
 
-                reg = TTSProviderRegistry()
-                self.send_json(200, {"providers": reg.available()})
+                self.send_json(200, get_tts_service().catalog())
                 return
 
-                voices = TTS_MANAGER.get_voices()
-                self.send_json(200, voices)
+            if path == "/v1/tts/voices":
+                if not self._authorize_openai_request():
+                    return
+                from src.tts_service import TTSServiceError, get_tts_service
+
+                qs = parse_qs(urlsplit(self.path).query)
+                provider_id = (qs.get("provider") or [""])[0].strip()
+                model_id = (qs.get("model") or [None])[0]
+                refresh = (qs.get("refresh") or [""])[0].lower() in ("1", "true", "yes")
+                try:
+                    self.send_json(
+                        200,
+                        get_tts_service().voices(
+                            provider_id, model_id=model_id, refresh=refresh
+                        ),
+                    )
+                except TTSServiceError as exc:
+                    self.send_openai_error(
+                        exc.status, exc.message, param=exc.param, error_code=exc.code
+                    )
+                return
+
+            if path == "/v1/tts/selection":
+                if not self._authorize_openai_request():
+                    return
+                from src.tts_service import get_tts_service
+
+                self.send_json(200, get_tts_service().selection())
+                return
+
+            if path.startswith("/v1/tts/jobs/"):
+                if not self._authorize_openai_request():
+                    return
+                from src.tts_service import TTSServiceError, get_tts_service
+
+                job_id = path.removeprefix("/v1/tts/jobs/").strip("/")
+                try:
+                    self.send_json(200, get_tts_service().get_job(job_id))
+                except TTSServiceError as exc:
+                    self.send_openai_error(exc.status, exc.message, error_code=exc.code)
+                return
+
+            if path.startswith("/v1/tts/previews/") and path.endswith("/audio"):
+                if not self._authorize_openai_request():
+                    return
+                from src.tts_service import TTSServiceError, get_tts_service
+
+                job_id = (
+                    path.removeprefix("/v1/tts/previews/")
+                    .removesuffix("/audio")
+                    .strip("/")
+                )
+                try:
+                    res = get_tts_service().get_preview_audio(job_id)
+                    self._send(200, res.audio, res.mime)
+                except TTSServiceError as exc:
+                    self.send_openai_error(exc.status, exc.message, error_code=exc.code)
                 return
 
             if path.startswith("/v1/images/files/"):
@@ -1019,44 +1073,115 @@ class HTTPServer(BaseHTTPRequestHandler):
                 if path == "/v1/tts/select":
                     if not self._authorize_openai_request():
                         return
-                    provider = body.get("provider")
-                    voice = body.get("voice")
-                    speed = body.get("speed")
-                    from src.tts_providers.registry import TTSProviderRegistry
+                    from src.tts_service import TTSServiceError, get_tts_service
 
-                    reg = TTSProviderRegistry()
-                    if provider is not None and provider not in reg.keys():
-                        self.send_openai_error(
-                            400, "Provider de TTS inválido.", param="provider"
+                    try:
+                        res = get_tts_service().select(
+                            provider=body.get("provider"),
+                            model=body.get("model"),
+                            voice=body.get("voice"),
+                            speed=body.get("speed"),
+                            revision=body.get("revision"),
                         )
-                        return
-                    if speed is not None:
-                        try:
-                            speed = float(speed)
-                        except (TypeError, ValueError):
-                            self.send_openai_error(
-                                400, "speed inválido.", param="speed"
-                            )
-                            return
-                        if not 0.25 <= speed <= 4.0:
-                            self.send_openai_error(
-                                400, "speed deve estar entre 0.25 e 4.0.", param="speed"
-                            )
-                            return
-                    from src import settings_store
+                        self.send_json(200, res)
+                    except TTSServiceError as exc:
+                        self.send_openai_error(
+                            exc.status,
+                            exc.message,
+                            param=exc.param,
+                            error_code=exc.code,
+                        )
+                    return
 
-                    vals = {}
-                    if provider is not None:
-                        vals["TTS_PROVIDER"] = str(provider)
-                    if voice is not None:
-                        vals["TTS_DEFAULT_VOICE"] = str(voice)
-                    if speed is not None:
-                        vals["TTS_DEFAULT_SPEED"] = str(speed)
-                    if vals:
-                        settings_store.get_store().save("general", vals)
-                    self.send_json(
-                        200, {"ok": True, "provider": provider, "voice": voice}
+                if path == "/v1/tts/install":
+                    if not self._authorize_openai_request():
+                        return
+                    from src.tts_service import TTSServiceError, get_tts_service
+
+                    try:
+                        res = get_tts_service().install(
+                            str(body.get("provider") or ""),
+                            body.get("model"),
+                            request_id=body.get("request_id"),
+                        )
+                        self.send_json(202, res)
+                    except TTSServiceError as exc:
+                        self.send_openai_error(
+                            exc.status,
+                            exc.message,
+                            param=exc.param,
+                            error_code=exc.code,
+                        )
+                    return
+
+                if path == "/v1/tts/uninstall":
+                    if not self._authorize_openai_request():
+                        return
+                    from src.tts_service import TTSServiceError, get_tts_service
+
+                    try:
+                        res = get_tts_service().uninstall(
+                            str(body.get("provider") or ""),
+                            body.get("model"),
+                            request_id=body.get("request_id"),
+                        )
+                        self.send_json(202, res)
+                    except TTSServiceError as exc:
+                        if exc.status == 409:
+                            self.send_json(
+                                409,
+                                {
+                                    "error": {
+                                        "message": exc.message,
+                                        "type": "conflict_error",
+                                        "param": exc.param,
+                                        "code": exc.code,
+                                        **exc.details,
+                                    }
+                                },
+                            )
+                        else:
+                            self.send_openai_error(
+                                exc.status, exc.message, param=exc.param, code=exc.code
+                            )
+                    return
+
+                if path.startswith("/v1/tts/jobs/") and path.endswith("/cancel"):
+                    if not self._authorize_openai_request():
+                        return
+                    from src.tts_service import TTSServiceError, get_tts_service
+
+                    job_id = (
+                        path.removeprefix("/v1/tts/jobs/")
+                        .removesuffix("/cancel")
+                        .strip("/")
                     )
+                    try:
+                        self.send_json(202, get_tts_service().cancel_job(job_id))
+                    except TTSServiceError as exc:
+                        self.send_openai_error(
+                            exc.status, exc.message, error_code=exc.code
+                        )
+                    return
+
+                if path == "/v1/tts/preview":
+                    if not self._authorize_openai_request():
+                        return
+                    from src.tts_service import TTSServiceError, get_tts_service
+
+                    try:
+                        res = get_tts_service().preview(
+                            profile=body.get("profile"),
+                            text=body.get("text"),
+                        )
+                        self.send_json(202, res)
+                    except TTSServiceError as exc:
+                        self.send_openai_error(
+                            exc.status,
+                            exc.message,
+                            param=exc.param,
+                            error_code=exc.code,
+                        )
                     return
 
                 if path == "/v1/audio/speech":
@@ -1168,46 +1293,43 @@ class HTTPServer(BaseHTTPRequestHandler):
                         bool(style),
                     )
 
-                    selected_provider = None
+                    from src.tts_service import TTSServiceError, get_tts_service
+
+                    svc = get_tts_service()
+                    base_profile = svc.resolve_profile("pia")
+                    override_profile = dict(base_profile)
+                    if body.get("voice") is not None:
+                        override_profile["voice"] = str(voice)
+                    if "speed" in body and body.get("speed") is not None:
+                        override_profile["speed"] = float(speed)
+                    if (
+                        body.get("model")
+                        and body.get("model")
+                        not in ("tts-1", "tts-1-hd", "gpt-4o-mini-tts")
+                        and body.get("model") in svc.registry.keys()
+                    ):
+                        override_profile["provider"] = str(body.get("model"))
+                        override_profile["model"] = svc.registry.get(
+                            override_profile["provider"]
+                        ).default_model()
+
                     try:
-                        from src import settings_store
-
-                        selected_provider = settings_store.get(
-                            "TTS_PROVIDER", section="general"
+                        res = svc.synthesize(
+                            text,
+                            profile=override_profile,
+                            response_format=response_format,
+                            style=style,
                         )
-                    except Exception:
-                        selected_provider = None
-                    if not selected_provider:
-                        selected_provider = "supertonic3"
-
-                    from src.tts_providers.registry import TTSProviderRegistry
-
-                    reg = TTSProviderRegistry()
-                    provider = reg.get(selected_provider)
-                    if provider is None or not provider.is_available():
-                        provider = reg.get("supertonic3")
-
-                    try:
-                        audio_data = provider.synthesize(
-                            text, voice, speed, response_format
+                    except TTSServiceError as exc:
+                        self.send_openai_error(
+                            exc.status, exc.message, error_code=exc.code
                         )
-                    except Exception:
-                        fallback = reg.get("supertonic3")
-                        audio_data = fallback.synthesize(
-                            text, voice, speed, response_format
-                        )
+                        return
 
-                    mime = None
-                    try:
-                        mime = TTS_MANAGER.formats()[response_format]
-                    except Exception:
-                        mime = "audio/wav"
-                    if mime is None:
-                        mime = TTS_MANAGER.formats().get(response_format, "audio/wav")
                     extra = {
-                        "Content-Disposition": f'inline; filename="speech.{response_format}"'
+                        "Content-Disposition": f'inline; filename="speech.{res.format}"'
                     }
-                    self._send(200, audio_data, mime, extra_headers=extra)
+                    self._send(200, res.audio, res.mime, extra_headers=extra)
 
                     return
 
@@ -1536,21 +1658,14 @@ class HTTPServer(BaseHTTPRequestHandler):
             # ======================================================================
             if path == "/tts/speak":
                 text = body.get("text", "")
-                speed = float(body.get("speed", TTS_DEFAULT_SPEED))
+                raw_speed = body.get("speed")
                 device = body.get("device", None)
                 style = body.get("style", None)
-
-                # region (collapsed) voice
-                voice = body.get("voice")
-                voice = TTS_MANAGER.resolve_voice(voice, style)
-                # endregion
+                raw_voice = body.get("voice")
+                speaker_id = str(body.get("speaker_id") or "pia").strip() or "pia"
 
                 # Remove o bloco de metadados <t>...</t> quando estiver
                 # no início do texto, com ou sem ** de Markdown.
-                # Exemplos removidos:
-                # <t>Hora: 10:11 | Data: Jun 17</t>
-                # **<t>Hora: 10:11 | Data: Jun 17</t>**
-                # Espaços e quebras de linha anteriores também são ignorados.
                 text = re.sub(
                     r"^\s*(?:\*\*\s*)?<t>.*?</t>\s*(?:\*\*)?\s*",
                     "",
@@ -1564,34 +1679,34 @@ class HTTPServer(BaseHTTPRequestHandler):
                     return
 
                 text = clean_text(text)
-                textCuteName = text[:30] + "..." if len(text) > 30 else text
-                parts = [p.strip() for p in text.split("\n\n") if p.strip()]
+                if not text.strip():
+                    self.send_json(400, {"ok": False, "error": "Texto vazio."})
+                    return
 
-                for i, part in enumerate(parts, start=1):
-                    from src.voice_interrupt import epoch, EpochCancellation
+                from src.tts_service import TTSServiceError, get_tts_service
 
-                    if (
-                        body.get("conversation_epoch") is not None
-                        and body["conversation_epoch"] != epoch()
-                    ):
-                        break
-                    logger_tts.info(part)
-                    TTS_MANAGER.add_tts_job(
-                        text=part.strip(),
-                        voice=voice,
-                        speed=speed,
+                try:
+                    get_tts_service().speak(
+                        text,
+                        speaker_id=speaker_id,
+                        conversation_epoch=body.get("conversation_epoch"),
+                        speed=raw_speed,
+                        voice=raw_voice if isinstance(raw_voice, str) else None,
                         style=style,
                         device=device,
-                        job_name=f" ({i} de {len(parts)}) {textCuteName}",
-                        cancelled=(
-                            EpochCancellation(body["conversation_epoch"])
-                            if body.get("conversation_epoch") is not None
-                            else None
-                        ),
+                        bot_name=body.get("bot_name"),
+                        avatar_url=body.get("avatar_url"),
+                        avatar_colors=body.get("avatar_colors"),
                     )
+                except TTSServiceError as exc:
+                    self.send_json(
+                        exc.status,
+                        {"ok": False, "error": exc.message, "code": exc.code},
+                    )
+                    return
 
                 logging.info(
-                    "[SPEAK] %d parte(s) enfileirada(s) para o TTSManager.", len(parts)
+                    "[SPEAK] Fala enfileirada via TTSService (speaker=%s).", speaker_id
                 )
                 self.send_json(200, {"ok": True, "status": "queued"})
                 return

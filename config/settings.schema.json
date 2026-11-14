@@ -175,6 +175,20 @@
     "link": "https://console.groq.com/keys"
   },
   {
+    "name": "TTS_PROVIDER",
+    "type": "string",
+    "default": "kokoro",
+    "label": "Tts Provider",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "TTS_MODEL",
+    "type": "string",
+    "default": "kokoro-v1.0",
+    "label": "Tts Model",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
     "name": "TTS_DEFAULT_VOICE",
     "type": "string",
     "default": "pm_santa",

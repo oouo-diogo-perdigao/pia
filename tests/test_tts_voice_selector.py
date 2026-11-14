@@ -1,4 +1,6 @@
-"""Tests for the PIA voice selector (TTS providers)."""
+"""Tests for the PIA voice selector, TTS catalog, selection, and workspace routes."""
+
+from __future__ import annotations
 
 import http.client
 import json
@@ -9,7 +11,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from src import config
+from src import config, settings_store
+from src.tts_providers.base import AudioResult
 
 _desktop = ModuleType("src.LocalActions")
 _desktop.LocalActions = Mock()
@@ -18,7 +21,25 @@ with patch.dict("sys.modules", {"src.LocalActions": _desktop}):
 
 
 @pytest.fixture
-def api(monkeypatch):
+def isolated_store(tmp_path, monkeypatch):
+    db_path = tmp_path / "settings.sqlite3"
+    store = settings_store.SettingsStore(path=db_path)
+    monkeypatch.setattr(settings_store, "_store", store)
+    monkeypatch.setattr(
+        "src.user_paths.user_path", lambda *parts: tmp_path.joinpath(*parts)
+    )
+    monkeypatch.setattr(
+        "src.tts_providers.local_catalog.user_path",
+        lambda *parts: tmp_path.joinpath(*parts),
+    )
+    import src.tts_service as ts_mod
+
+    monkeypatch.setattr(ts_mod, "_tts_service", ts_mod.TTSService())
+    return store
+
+
+@pytest.fixture
+def api(monkeypatch, isolated_store):
     monkeypatch.setattr(config, "AGE_GEMINI_API_KEY", "test-credential", raising=False)
     monkeypatch.setattr(http_module, "OPENAI_COMPAT_API_KEY", "", raising=False)
     server = http_module.STTThreadingHTTPServer(
@@ -27,62 +48,214 @@ def api(monkeypatch):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
 
-    def request(payload=None, path="/", method="GET"):
+    def request(payload=None, path="/", method="GET", headers=None):
         connection = http.client.HTTPConnection(*server.server_address, timeout=5)
         try:
             body = json.dumps(payload) if payload is not None else None
-            headers = {"Content-Type": "application/json"} if body else {}
-            connection.request(method, path, body=body, headers=headers)
+            req_headers = dict(headers or {})
+            if body is not None:
+                req_headers.setdefault("Content-Type", "application/json")
+            connection.request(method, path, body=body, headers=req_headers)
             response = connection.getresponse()
-            raw = response.read().decode()
+            raw = response.read()
             try:
-                data = json.loads(raw)
+                data = json.loads(raw.decode())
             except Exception:
                 data = raw
-            return response.status, data
+            return response.status, data, dict(response.getheaders())
         finally:
             connection.close()
 
-    yield request
+    yield request, server.server_address[1]
     server.shutdown()
     server.server_close()
     thread.join(timeout=5)
 
 
 def test_contract_tts_providers(api):
-    status, data = api(path="/v1/tts/providers", method="GET")
+    request, _ = api
+    status, data, _ = request(path="/v1/tts/providers", method="GET")
     assert status == 200
     assert "providers" in data
     assert isinstance(data["providers"], list)
+    ids = {p["id"] for p in data["providers"]}
+    assert {"kokoro", "qwen", "supertonic3", "piper", "openai", "elevenlabs"} <= ids
     for p in data["providers"]:
-        assert {"id", "name", "kind", "available", "voices"} <= set(p.keys())
+        assert {
+            "id",
+            "name",
+            "kind",
+            "available",
+            "voices",
+            "models",
+            "credential_state",
+            "capabilities",
+        } <= set(p.keys())
         assert p["kind"] in ("local", "remote")
-        if p["available"]:
-            assert isinstance(p["voices"], list)
+        assert isinstance(p["models"], list) and len(p["models"]) >= 1
 
 
-def test_contract_tts_select(api):
-    status, data = api(
-        payload={"provider": "supertonic3", "voice": "pm_santa", "speed": 1.0},
+def test_contract_tts_voices_and_selection(api):
+    request, _ = api
+    status, data, _ = request(
+        path="/v1/tts/voices?provider=kokoro&model=kokoro-v1.0", method="GET"
+    )
+    assert status == 200
+    assert data["provider"] == "kokoro"
+    assert any(v["id"] == "pf_dora" for v in data["voices"])
+
+    status, sel, _ = request(path="/v1/tts/selection", method="GET")
+    assert status == 200
+    rev = sel["revision"]
+
+    status, upd, _ = request(
+        payload={
+            "provider": "kokoro",
+            "model": "kokoro-v1.0",
+            "voice": "pf_dora",
+            "speed": 1.15,
+            "revision": rev,
+        },
         path="/v1/tts/select",
         method="POST",
     )
     assert status == 200
-    assert data.get("ok") is True
-    assert data.get("provider") == "supertonic3"
-    assert data.get("voice") == "pm_santa"
+    assert upd["ok"] is True
+    assert upd["profile"]["voice"] == "pf_dora"
+    assert upd["profile"]["speed"] == 1.15
+    assert upd["revision"] == rev + 1
+
+    # Stale revision returns 409 conflict
+    status_conflict, _, _ = request(
+        payload={"provider": "kokoro", "voice": "pm_santa", "revision": rev},
+        path="/v1/tts/select",
+        method="POST",
+    )
+    assert status_conflict == 409
 
 
-def test_smoke_synthesis_local():
+def test_tts_select_rejects_invalid_speed_and_voice(api):
+    request, _ = api
+    status, _, _ = request(
+        payload={"provider": "kokoro", "voice": "pf_dora", "speed": True},
+        path="/v1/tts/select",
+        method="POST",
+    )
+    assert status == 400
+
+    status, _, _ = request(
+        payload={"provider": "kokoro", "voice": "nonexistent_voice", "speed": 1.0},
+        path="/v1/tts/select",
+        method="POST",
+    )
+    assert status == 400
+
+
+def test_tts_uninstall_blocked_when_in_use(api):
+    request, _ = api
+    request(
+        payload={"provider": "kokoro", "model": "kokoro-v1.0", "voice": "pm_santa"},
+        path="/v1/tts/select",
+        method="POST",
+    )
+    status, data, _ = request(
+        payload={"provider": "kokoro", "model": "kokoro-v1.0"},
+        path="/v1/tts/uninstall",
+        method="POST",
+    )
+    assert status == 409
+    assert data["error"]["code"] == "model_in_use"
+    assert "pia:general" in data["error"]["references"]
+
+
+def test_workspace_tts_routes_require_session_and_work(api):
+    request, port = api
+    status_unauth, _, _ = request(path="/api/pia/tts/providers", method="GET")
+    assert status_unauth == 401
+
+    origin = f"http://127.0.0.1:{port}"
+    status_sess, _, headers = request(
+        payload={},
+        path="/api/pia/session",
+        method="POST",
+        headers={"Origin": origin},
+    )
+    assert status_sess == 200
+    cookie = headers.get("Set-Cookie") or headers.get("set-cookie")
+    session_cookie = cookie.split(";", 1)[0]
+
+    status_cat, cat, _ = request(
+        path="/api/pia/tts/providers",
+        method="GET",
+        headers={"Cookie": session_cookie},
+    )
+    assert status_cat == 200
+    assert "providers" in cat and "selection" in cat
+
+    status_sel, sel_res, _ = request(
+        payload={
+            "provider": "kokoro",
+            "model": "kokoro-v1.0",
+            "voice": "pm_alex",
+            "speed": 1.25,
+        },
+        path="/api/pia/tts/select",
+        method="POST",
+        headers={"Cookie": session_cookie, "Origin": origin},
+    )
+    assert status_sel == 200
+    assert sel_res["profile"]["voice"] == "pm_alex"
+    assert sel_res["profile"]["speed"] == 1.25
+
+
+def test_audio_speech_and_speak_use_tts_service(api, monkeypatch):
+    request, _ = api
+    from src.tts_service import get_tts_service
+
+    calls = []
+
+    def fake_synth(
+        text,
+        *,
+        profile=None,
+        response_format="wav",
+        speaker_id="pia",
+        style=None,
+        device=None,
+    ):
+        calls.append((text, profile, response_format))
+        return AudioResult(audio=b"RIFF....", mime="audio/wav", format="wav")
+
+    monkeypatch.setattr(get_tts_service(), "synthesize", fake_synth)
+
+    request(
+        payload={"provider": "kokoro", "voice": "pf_dora", "speed": 1.1},
+        path="/v1/tts/select",
+        method="POST",
+    )
+    status, body, headers = request(
+        payload={"input": "Olá teste", "response_format": "wav"},
+        path="/v1/audio/speech",
+        method="POST",
+    )
+    assert status == 200
+    assert body == b"RIFF...."
+    assert headers.get("Content-Type", "").startswith("audio/wav")
+    assert calls[-1][1]["voice"] == "pf_dora"
+
+
+def test_smoke_synthesis_local(monkeypatch):
     from src.tts_providers import supertonic3 as mod
 
-    mod.Supertonic3Provider()
-    # monkeypatch synthesize
-    mod.Supertonic3Provider.synthesize = lambda self, *a, **k: b"RIFF...."
-    assert (
-        mod.Supertonic3Provider().synthesize("oi", "pm_santa", 1.0, "mp3")
-        == b"RIFF...."
+    monkeypatch.setattr(
+        mod.Supertonic3Provider,
+        "synthesize",
+        lambda self, *a, **k: AudioResult(
+            audio=b"RIFF....", mime="audio/wav", format="wav"
+        ),
     )
+    res = mod.Supertonic3Provider().synthesize("oi", "M1", 1.0, "wav")
+    assert res.audio == b"RIFF...."
 
 
 def test_keys_not_in_logs(caplog):
@@ -90,11 +263,9 @@ def test_keys_not_in_logs(caplog):
 
     caplog.set_level(logging.DEBUG)
     p = openai_tts.OpenAITTSProvider()
-    # simulate a key present via settings_store monkeypatch not needed; just ensure no key leak in repr
     assert "sk-" not in repr(p)
     e = elevenlabs.ElevenLabsProvider()
     assert "xi-api-key" not in repr(e)
-    # synthesize without key raises without echoing key
     try:
         p.synthesize("hi", "alloy", 1.0, "mp3")
     except Exception as ex:
