@@ -25,7 +25,7 @@ class RssTranscriptionUpdater:
     def __init__(self, obj_storage: ObjectStorageManager):
         self.obj_storage = obj_storage
 
-        self.owner_email = option("OWNER_EMAIL","")
+        self.owner_email = option("OWNER_EMAIL", "")
         self.owner_name = get_config()["publication"]["brand"]
 
         self.transcripts_file = option(
@@ -33,8 +33,12 @@ class RssTranscriptionUpdater:
             "transcripts.html",
         )
         self.language = get_config()["publication"]["language"]
-        identity=getattr(obj_storage,'identity',None)
-        self.cache=FeedCache(identity if isinstance(identity,dict) else {'adapter':type(obj_storage).__name__})
+        identity = getattr(obj_storage, "identity", None)
+        self.cache = FeedCache(
+            identity
+            if isinstance(identity, dict)
+            else {"adapter": type(obj_storage).__name__}
+        )
 
     # ============================================================
     # API PÚBLICA
@@ -74,10 +78,7 @@ class RssTranscriptionUpdater:
                     print(f"Campanha não configurada. Pulando: {pasta}")
                     continue
 
-                if (
-                    details.get("closed") is True
-                    and env_bool("SKIP_CLOSED", True)
-                ):
+                if details.get("closed") is True and env_bool("SKIP_CLOSED", True):
                     print(f"Podcast fechado. Pulando: {pasta}")
                     continue
 
@@ -91,7 +92,7 @@ class RssTranscriptionUpdater:
                 )
 
             except Exception as erro:
-                print(f"Erro ao processar {pasta}: " f"{type(erro).__name__}: {erro}")
+                print(f"Erro ao processar {pasta}: {type(erro).__name__}: {erro}")
 
                 erros.append(
                     {
@@ -107,7 +108,7 @@ class RssTranscriptionUpdater:
             "errors": erros,
         }
 
-        print(f"\nAtualização concluída. " f"Campanhas processadas: {len(processados)}")
+        print(f"\nAtualização concluída. Campanhas processadas: {len(processados)}")
 
         return resultado
 
@@ -147,25 +148,32 @@ class RssTranscriptionUpdater:
         # Mantém a proteção mesmo quando o método é chamado diretamente.
         folder = folder.rstrip("/")
         details = self.configured_podcasts().get(folder)
-        if details is None or (details.get("closed", False) and env_bool("SKIP_CLOSED", True)):
+        if details is None or (
+            details.get("closed", False) and env_bool("SKIP_CLOSED", True)
+        ):
             return {"rss_updated": False, "transcripts_updated": False}
         print(f"Verificando RSS e transcrições: {folder}")
         self._duration_failed = False
         objects = self.folder_objects(folder)
-        config_signature = signature({
-            'reader_version': 2,
-            'campaigns': self.configured_podcasts(),
-            "details": details,
-            "publication": get_config()["publication"],
-            "owner_email": self.owner_email,
-            "owner_name": self.owner_name,
-            "language": self.language,
-            "transcripts_file": self.transcripts_file,
-        })
+        config_signature = signature(
+            {
+                "reader_version": 2,
+                "campaigns": self.configured_podcasts(),
+                "details": details,
+                "publication": get_config()["publication"],
+                "owner_email": self.owner_email,
+                "owner_name": self.owner_name,
+                "language": self.language,
+                "transcripts_file": self.transcripts_file,
+            }
+        )
         remote_signature = manifest(objects)
         previous = self.cache.data["folders"].get(folder)
-        if (not env_bool("FEED_FORCE_REBUILD") and remote_signature is not None
-                and previous == {"config": config_signature, "remote": remote_signature}):
+        if (
+            not env_bool("FEED_FORCE_REBUILD")
+            and remote_signature is not None
+            and previous == {"config": config_signature, "remote": remote_signature}
+        ):
             print(f"Sem alterações na configuração ou no bucket. Pulando: {folder}")
             return {"rss_updated": False, "transcripts_updated": False}
 
@@ -222,9 +230,9 @@ class RssTranscriptionUpdater:
                 rss_updated = True
 
                 print(f"RSS atualizado: {rss_key}")
-                print("RSS público: " f"{self.obj_storage.public_url(rss_key)}")
+                print(f"RSS público: {self.obj_storage.public_url(rss_key)}")
             else:
-                print("RSS gerado é idêntico; " "upload dispensado.")
+                print("RSS gerado é idêntico; upload dispensado.")
 
         else:
             print("Nenhum arquivo de áudio encontrado.")
@@ -243,9 +251,7 @@ class RssTranscriptionUpdater:
         )
 
         if roteiro_files:
-            episodes = [
-                self.build_transcription(arquivo) for arquivo in roteiro_files
-            ]
+            episodes = [self.build_transcription(arquivo) for arquivo in roteiro_files]
 
             pagina = self.build_feed_html(
                 episodes,
@@ -268,15 +274,12 @@ class RssTranscriptionUpdater:
 
                 transcripts_updated = True
 
-                print("Página de transcrições atualizada: " f"{transcripts_key}")
+                print(f"Página de transcrições atualizada: {transcripts_key}")
 
-                print(
-                    "URL pública: "
-                    f"{self.obj_storage.public_url(transcripts_key)}"
-                )
+                print(f"URL pública: {self.obj_storage.public_url(transcripts_key)}")
 
             else:
-                print("Página de transcrições idêntica; " "upload dispensado.")
+                print("Página de transcrições idêntica; upload dispensado.")
 
         else:
             print("Nenhum arquivo de roteiro encontrado.")
@@ -292,10 +295,16 @@ class RssTranscriptionUpdater:
         expected = ({f"{folder}/rss.xml"} if audio_files else set()) | (
             {f"{folder}/{self.transcripts_file}"} if roteiro_files else set()
         )
-        if (not self._duration_failed and before_inputs is not None and before_inputs == after_inputs
-                and after_signature is not None and expected <= output_keys):
+        if (
+            not self._duration_failed
+            and before_inputs is not None
+            and before_inputs == after_inputs
+            and after_signature is not None
+            and expected <= output_keys
+        ):
             self.cache.data["folders"][folder] = {
-                "config": config_signature, "remote": after_signature,
+                "config": config_signature,
+                "remote": after_signature,
             }
         else:
             self.cache.data["folders"].pop(folder, None)
@@ -308,7 +317,8 @@ class RssTranscriptionUpdater:
 
     def folder_objects(self, folder):
         return [
-            obj for obj in self.obj_storage.list_objects(f"{folder}/")
+            obj
+            for obj in self.obj_storage.list_objects(f"{folder}/")
             if self.extract_folder(obj.get("Key", "")) == folder
         ]
 
@@ -316,12 +326,22 @@ class RssTranscriptionUpdater:
         version = object_signature(file)
         key = signature([url, version])
         cached = self.cache.data["durations"].get(key)
-        if version is not None and isinstance(cached, int) and not isinstance(cached, bool) and cached >= 0:
+        if (
+            version is not None
+            and isinstance(cached, int)
+            and not isinstance(cached, bool)
+            and cached >= 0
+        ):
             return cached
         duration = self.get_audio_duration(url)
         if duration is None:
             self._duration_failed = True
-        if version is not None and isinstance(duration, int) and not isinstance(duration, bool) and duration >= 0:
+        if (
+            version is not None
+            and isinstance(duration, int)
+            and not isinstance(duration, bool)
+            and duration >= 0
+        ):
             self.cache.data["durations"][key] = duration
         return duration
 
@@ -487,7 +507,7 @@ class RssTranscriptionUpdater:
             else:
                 personagens_str = str(personagens)
 
-            summary_lines.append(f"🎭 Personagens: " f"{personagens_str}")
+            summary_lines.append(f"🎭 Personagens: {personagens_str}")
 
         summary_lines.append(f"🌟 Podcast: {podcast_link}")
 
@@ -517,13 +537,11 @@ class RssTranscriptionUpdater:
                 f"{html.escape(personagens_str)}</p>"
             )
 
-        content_html += f"🌟 Podcast: " f"{html.escape(podcast_link)}<br/>"
+        content_html += f"🌟 Podcast: {html.escape(podcast_link)}<br/>"
 
         if resumo_rapido:
             content_html += (
-                "<p><strong>📝 Resumo:</strong> "
-                f"{html.escape(str(resumo_rapido))}"
-                "</p>"
+                f"<p><strong>📝 Resumo:</strong> {html.escape(str(resumo_rapido))}</p>"
             )
 
         content_html += html.escape("Generated By: TravelRPG")
@@ -671,9 +689,7 @@ class RssTranscriptionUpdater:
         for ep in episodes:
             xml += "\t\t<item>\n"
 
-            xml += (
-                f"\t\t\t<title><![CDATA[" f"{self.cdata(ep['title'])}" f"]]></title>\n"
-            )
+            xml += f"\t\t\t<title><![CDATA[{self.cdata(ep['title'])}]]></title>\n"
 
             xml += (
                 f"\t\t\t<description><![CDATA["
@@ -681,17 +697,11 @@ class RssTranscriptionUpdater:
                 f"]]></description>\n"
             )
 
-            xml += (
-                f'\t\t\t<guid isPermaLink="false">'
-                f"{self.xml(ep['guid'])}"
-                "</guid>\n"
-            )
+            xml += f'\t\t\t<guid isPermaLink="false">{self.xml(ep["guid"])}</guid>\n'
 
             xml += f"\t\t\t<link>{self.xml(get_config()['publication']['website'])}</link>\n"
 
-            xml += (
-                f"\t\t\t<pubDate>" f"{self.format_rfc2822(ep['date'])}" "</pubDate>\n"
-            )
+            xml += f"\t\t\t<pubDate>{self.format_rfc2822(ep['date'])}</pubDate>\n"
 
             enclosure = ep["enclosure"]
 
@@ -713,22 +723,14 @@ class RssTranscriptionUpdater:
 
             if itunes.get("title"):
                 xml += (
-                    "\t\t\t<itunes:title>"
-                    f"{self.xml(itunes['title'])}"
-                    "</itunes:title>\n"
+                    f"\t\t\t<itunes:title>{self.xml(itunes['title'])}</itunes:title>\n"
                 )
 
             if itunes.get("episode") is not None:
-                xml += (
-                    "\t\t\t<itunes:episode>"
-                    f"{itunes['episode']}"
-                    "</itunes:episode>\n"
-                )
+                xml += f"\t\t\t<itunes:episode>{itunes['episode']}</itunes:episode>\n"
 
             if itunes.get("season") is not None:
-                xml += (
-                    "\t\t\t<itunes:season>" f"{itunes['season']}" "</itunes:season>\n"
-                )
+                xml += f"\t\t\t<itunes:season>{itunes['season']}</itunes:season>\n"
 
             if itunes.get("author"):
                 xml += (
@@ -759,9 +761,7 @@ class RssTranscriptionUpdater:
                 )
 
             if itunes.get("image"):
-                xml += (
-                    '\t\t\t<itunes:image href="' f"{self.xml(itunes['image'])}" '"/>\n'
-                )
+                xml += f'\t\t\t<itunes:image href="{self.xml(itunes["image"])}"/>\n'
 
             if itunes.get("duration"):
                 xml += (
@@ -794,10 +794,18 @@ class RssTranscriptionUpdater:
         details: dict,
     ) -> str:
         from podcast_automation.transcripts_page import render
-        campaigns=[{'title':item.get('title') or item['Campanha'],'rss_key':item['rss_key'],
-                    'url':self.obj_storage.public_url(folder+'/'+self.transcripts_file)}
-                   for folder,item in self.configured_podcasts().items()]
-        return render(episodes,cover,details,campaigns)
+
+        campaigns = [
+            {
+                "title": item.get("title") or item["Campanha"],
+                "rss_key": item["rss_key"],
+                "url": self.obj_storage.public_url(
+                    folder + "/" + self.transcripts_file
+                ),
+            }
+            for folder, item in self.configured_podcasts().items()
+        ]
+        return render(episodes, cover, details, campaigns)
 
     # ============================================================
     # UTILITÁRIOS

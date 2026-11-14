@@ -42,3 +42,9 @@ Use a branch solicitada pelo usuário; para uma nova branch sem nome especificad
 Documente o comportamento final, não o histórico da conversa. Regras gerais pertencem ao AGENTS.md; operação e contratos aos docs/READMEs; decisões aos ADRs; pedidos pendentes a issues ou TODOs claramente identificados. Antes de citar um comando, confira que existe no repositório.
 
 Configuração e dados usam o [perfil SQLite/cofre](PROFILE_MIGRATION.md).
+
+## Lint e pre-commit
+
+O instalador prepara o grupo dev (Ruff), dependências npm e instala o hook versionado em scripts/pre-commit. Node.js/npm e Git devem estar disponíveis. Em checkout existente, instale ruff==0.14.5 no .venv, execute npm --prefix src/pia/frontend ci e bash scripts/install-hooks.sh.
+
+Execute .venv/Scripts/python.exe scripts/lint.py --fix para formatar ou sem --fix para verificar. Em Linux, use .venv/bin/python. Ruff verifica Python próprio versionado, incluindo plugins e testes, sem dependências/cache; frontend usa ESLint recomendado e Prettier. Imports após bootstrap, imports de compatibilidade/com efeitos de inicialização e callbacks lambda são permitidos; ESLint aceita catch vazio e não impõe unused-vars em JSX. O hook verifica todo esse escopo, sem downloads nem correções automáticas, e exige que alterações de código/configuração estejam staged para validar o conteúdo que será commitado. Um hook anterior diferente é preservado e sua integração deve ser feita explicitamente.

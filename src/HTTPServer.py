@@ -2,6 +2,7 @@ from src.settings_store import get as setting
 from .transcription import timed_result, render_subtitles
 import hmac
 import base64
+import binascii
 import json
 import os
 import sys
@@ -118,6 +119,7 @@ class HTTPServer(BaseHTTPRequestHandler):
         use any non-empty placeholder key it requires in its settings UI.
         """
         from src.app_access import authorized
+
         if authorized(self):
             return True
         if not OPENAI_COMPAT_API_KEY:
@@ -152,7 +154,7 @@ class HTTPServer(BaseHTTPRequestHandler):
         # The stdlib email parser understands MIME multipart boundaries well and,
         # unlike the deprecated cgi module, remains available on modern Python.
         mime_message = BytesParser(policy=email_policy).parsebytes(
-            (f"Content-Type: {content_type}\r\n" "MIME-Version: 1.0\r\n" "\r\n").encode(
+            (f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n").encode(
                 "utf-8"
             )
             + body
@@ -465,8 +467,11 @@ class HTTPServer(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         from src.interop import route as interop_route
-        if interop_route(self):return
+
+        if interop_route(self):
+            return
         from src.pia.http import route as web_route
+
         if web_route(self):
             return
         path = self._path()
@@ -479,18 +484,32 @@ class HTTPServer(BaseHTTPRequestHandler):
             if not self._authorize_openai_request():
                 return
             # endregion
-            if path.startswith('/v1/audio/transcriptions/progress/'):
+            if path.startswith("/v1/audio/transcriptions/progress/"):
                 import hashlib
                 from src.transcription_jobs import get
-                owner=hashlib.sha256((self.headers.get('Authorization','')+'|'+self.headers.get('X-PIA-App-Token','')).encode()).hexdigest()
-                record=get(path.rsplit('/',1)[-1],owner)
-                self.send_json(200 if record else 404, record or {'error':'Transcrição não encontrada para este cliente.'})
+
+                owner = hashlib.sha256(
+                    (
+                        self.headers.get("Authorization", "")
+                        + "|"
+                        + self.headers.get("X-PIA-App-Token", "")
+                    ).encode()
+                ).hexdigest()
+                record = get(path.rsplit("/", 1)[-1], owner)
+                self.send_json(
+                    200 if record else 404,
+                    record
+                    or {"error": "Transcrição não encontrada para este cliente."},
+                )
                 return
             if path == "/v1/models":
                 logging.info("[IMAGE] Requisição de listagem de modelos recebida.")
                 models = (
-                    TTS_MANAGER.models() + STT_MANAGER.models() + ICE_MANAGER.models()
-                    + tuple(TIERS) + tuple(dict.fromkeys(m.model for m in catalog()))
+                    TTS_MANAGER.models()
+                    + STT_MANAGER.models()
+                    + ICE_MANAGER.models()
+                    + tuple(TIERS)
+                    + tuple(dict.fromkeys(m.model for m in catalog()))
                 )
                 self.send_json(
                     200,
@@ -513,6 +532,7 @@ class HTTPServer(BaseHTTPRequestHandler):
                 if not self._authorize_openai_request():
                     return
                 from src.tts_providers.registry import TTSProviderRegistry
+
                 reg = TTSProviderRegistry()
                 self.send_json(200, {"providers": reg.available()})
                 return
@@ -561,9 +581,13 @@ class HTTPServer(BaseHTTPRequestHandler):
             if path == "/action/screen-all":
                 png = LOCAL_ACTIONS.screenshot_all()
                 try:
-                    LOCAL_ACTIONS.play_audio(path=os.path.join(os.path.dirname(__file__), 'sounds', 'print.mp3'))
+                    LOCAL_ACTIONS.play_audio(
+                        path=os.path.join(
+                            os.path.dirname(__file__), "sounds", "print.mp3"
+                        )
+                    )
                 except Exception:
-                    logging.exception('Não foi possível tocar o som da captura.')
+                    logging.exception("Não foi possível tocar o som da captura.")
                 self._send(200, png, "image/png")
                 return
 
@@ -665,6 +689,7 @@ class HTTPServer(BaseHTTPRequestHandler):
         if path == "/tts/help":
             logging.info("[GET /tts/help] Exibindo página de ajuda do TTS...")
             from .config_paths import UI_DIR
+
             help_file_path = str(UI_DIR / "help.html")
 
             if os.path.exists(help_file_path):
@@ -706,24 +731,48 @@ class HTTPServer(BaseHTTPRequestHandler):
             if not isinstance(data, dict):
                 raise ValueError("O corpo JSON deve ser um objeto.")
             messages = data.get("messages")
-            if not isinstance(messages, list) or not messages or any(
-                not isinstance(message, dict) or not isinstance(message.get("role"), str)
-                for message in messages
+            if (
+                not isinstance(messages, list)
+                or not messages
+                or any(
+                    not isinstance(message, dict)
+                    or not isinstance(message.get("role"), str)
+                    for message in messages
+                )
             ):
-                raise ValueError("messages deve ser uma lista não vazia de mensagens com role.")
+                raise ValueError(
+                    "messages deve ser uma lista não vazia de mensagens com role."
+                )
             model = data.get("model")
             if model is not None and not isinstance(model, str):
                 raise ValueError("model deve ser texto.")
             if not select_models(model):
-                raise ValueError("O seletor LLM não selecionou nenhum modelo configurado.")
+                raise ValueError(
+                    "O seletor LLM não selecionou nenhum modelo configurado."
+                )
             stream = data.get("stream", False)
             if not isinstance(stream, bool):
                 raise ValueError("stream deve ser booleano.")
             # Routing and credentials are owned by PIA, never request parameters.
-            allowed = ("temperature", "top_p", "max_tokens", "max_completion_tokens",
-                       "stop", "presence_penalty", "frequency_penalty", "seed", "n",
-                       "tools", "tool_choice", "parallel_tool_calls", "response_format",
-                       "stream_options", "user", "logprobs", "top_logprobs")
+            allowed = (
+                "temperature",
+                "top_p",
+                "max_tokens",
+                "max_completion_tokens",
+                "stop",
+                "presence_penalty",
+                "frequency_penalty",
+                "seed",
+                "n",
+                "tools",
+                "tool_choice",
+                "parallel_tool_calls",
+                "response_format",
+                "stream_options",
+                "user",
+                "logprobs",
+                "top_logprobs",
+            )
             options = {key: data[key] for key in allowed if key in data}
         except (UnicodeDecodeError, ValueError, TypeError) as exc:
             self.send_openai_error(400, str(exc))
@@ -736,7 +785,11 @@ class HTTPServer(BaseHTTPRequestHandler):
                 self.send_json(200, response.model_dump(exclude_none=True))
             except Exception:
                 logging.exception("[LLM] Todos os candidatos falharam.")
-                self.send_openai_error(503, "Nenhum modelo LLM selecionado está disponível.", error_type="server_error")
+                self.send_openai_error(
+                    503,
+                    "Nenhum modelo LLM selecionado está disponível.",
+                    error_type="server_error",
+                )
             return
 
         iterator = manager.complete_stream(messages, model=model, **options)
@@ -751,10 +804,14 @@ class HTTPServer(BaseHTTPRequestHandler):
             self.end_headers()
             self.close_connection = True
             started = True
+
             def send_chunk(chunk):
-                payload = json.dumps(chunk.model_dump(exclude_none=True), ensure_ascii=False)
+                payload = json.dumps(
+                    chunk.model_dump(exclude_none=True), ensure_ascii=False
+                )
                 self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
                 self.wfile.flush()
+
             send_chunk(first)
             for chunk in iterator:
                 send_chunk(chunk)
@@ -765,18 +822,32 @@ class HTTPServer(BaseHTTPRequestHandler):
         except Exception:
             logging.exception("[LLM] Falha no stream.")
             if started:
-                error = {"error": {"message": "Falha no modelo durante o stream.", "type": "server_error"}}
-                self.wfile.write(f"data: {json.dumps(error)}\n\ndata: [DONE]\n\n".encode("utf-8"))
+                error = {
+                    "error": {
+                        "message": "Falha no modelo durante o stream.",
+                        "type": "server_error",
+                    }
+                }
+                self.wfile.write(
+                    f"data: {json.dumps(error)}\n\ndata: [DONE]\n\n".encode("utf-8")
+                )
                 self.wfile.flush()
             else:
-                self.send_openai_error(503, "Nenhum modelo LLM selecionado está disponível.", error_type="server_error")
+                self.send_openai_error(
+                    503,
+                    "Nenhum modelo LLM selecionado está disponível.",
+                    error_type="server_error",
+                )
         finally:
             iterator.close()
 
     def do_POST(self) -> None:
         from src.interop import route as interop_route
-        if interop_route(self):return
+
+        if interop_route(self):
+            return
         from src.pia.http import route as web_route
+
         if web_route(self):
             return
         try:
@@ -856,7 +927,9 @@ class HTTPServer(BaseHTTPRequestHandler):
                     audio_path = None
 
                     if content_type.startswith("application/json"):
-                        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+                        payload = (
+                            json.loads(raw_body.decode("utf-8")) if raw_body else {}
+                        )
                         if not isinstance(payload, dict):
                             raise ValueError("O corpo JSON deve ser um objeto.")
                         audio_path = payload.get("path")
@@ -923,7 +996,9 @@ class HTTPServer(BaseHTTPRequestHandler):
 
             raw_audio_upload = (
                 path == "/v1/audio/transcriptions"
-                and not self.headers.get("Content-Type", "").lower().startswith("application/json")
+                and not self.headers.get("Content-Type", "")
+                .lower()
+                .startswith("application/json")
             )
             body = self._read_body(raw=raw_audio_upload)
             if body is None:
@@ -948,20 +1023,28 @@ class HTTPServer(BaseHTTPRequestHandler):
                     voice = body.get("voice")
                     speed = body.get("speed")
                     from src.tts_providers.registry import TTSProviderRegistry
+
                     reg = TTSProviderRegistry()
                     if provider is not None and provider not in reg.keys():
-                        self.send_openai_error(400, "Provider de TTS inválido.", param="provider")
+                        self.send_openai_error(
+                            400, "Provider de TTS inválido.", param="provider"
+                        )
                         return
                     if speed is not None:
                         try:
                             speed = float(speed)
                         except (TypeError, ValueError):
-                            self.send_openai_error(400, "speed inválido.", param="speed")
+                            self.send_openai_error(
+                                400, "speed inválido.", param="speed"
+                            )
                             return
                         if not 0.25 <= speed <= 4.0:
-                            self.send_openai_error(400, "speed deve estar entre 0.25 e 4.0.", param="speed")
+                            self.send_openai_error(
+                                400, "speed deve estar entre 0.25 e 4.0.", param="speed"
+                            )
                             return
                     from src import settings_store
+
                     vals = {}
                     if provider is not None:
                         vals["TTS_PROVIDER"] = str(provider)
@@ -971,7 +1054,9 @@ class HTTPServer(BaseHTTPRequestHandler):
                         vals["TTS_DEFAULT_SPEED"] = str(speed)
                     if vals:
                         settings_store.get_store().save("general", vals)
-                    self.send_json(200, {"ok": True, "provider": provider, "voice": voice})
+                    self.send_json(
+                        200, {"ok": True, "provider": provider, "voice": voice}
+                    )
                     return
 
                 if path == "/v1/audio/speech":
@@ -1086,23 +1171,31 @@ class HTTPServer(BaseHTTPRequestHandler):
                     selected_provider = None
                     try:
                         from src import settings_store
-                        selected_provider = settings_store.get("TTS_PROVIDER", section="general")
+
+                        selected_provider = settings_store.get(
+                            "TTS_PROVIDER", section="general"
+                        )
                     except Exception:
                         selected_provider = None
                     if not selected_provider:
                         selected_provider = "supertonic3"
 
                     from src.tts_providers.registry import TTSProviderRegistry
+
                     reg = TTSProviderRegistry()
                     provider = reg.get(selected_provider)
                     if provider is None or not provider.is_available():
                         provider = reg.get("supertonic3")
 
                     try:
-                        audio_data = provider.synthesize(text, voice, speed, response_format)
+                        audio_data = provider.synthesize(
+                            text, voice, speed, response_format
+                        )
                     except Exception:
                         fallback = reg.get("supertonic3")
-                        audio_data = fallback.synthesize(text, voice, speed, response_format)
+                        audio_data = fallback.synthesize(
+                            text, voice, speed, response_format
+                        )
 
                     mime = None
                     try:
@@ -1210,7 +1303,13 @@ class HTTPServer(BaseHTTPRequestHandler):
                             )
                             return
 
-                    if response_format not in {"json", "text", "verbose_json", "srt", "vtt"}:
+                    if response_format not in {
+                        "json",
+                        "text",
+                        "verbose_json",
+                        "srt",
+                        "vtt",
+                    }:
                         self.send_openai_error(
                             400,
                             "Supported response_format values: json, text, verbose_json, srt, vtt.",
@@ -1228,25 +1327,47 @@ class HTTPServer(BaseHTTPRequestHandler):
                     )
 
                     requires_timing = response_format in {"verbose_json", "srt", "vtt"}
-                    local_model=None
-                    if requested_model.startswith('local/'):
-                        local_model=requested_model.split('/',1)[1]
-                        if local_model not in {'tiny','base','small','medium','large-v2','large-v3','large-v3-turbo'}:
-                            self.send_openai_error(400,'Modelo local não suportado.',param='model')
+                    local_model = None
+                    if requested_model.startswith("local/"):
+                        local_model = requested_model.split("/", 1)[1]
+                        if local_model not in {
+                            "tiny",
+                            "base",
+                            "small",
+                            "medium",
+                            "large-v2",
+                            "large-v3",
+                            "large-v3-turbo",
+                        }:
+                            self.send_openai_error(
+                                400, "Modelo local não suportado.", param="model"
+                            )
                             return
                     import hashlib
-                    from src.transcription_jobs import create,update
-                    progress_id=self.headers.get('X-PIA-Transcription-ID','')
+                    from src.transcription_jobs import create, update
+
+                    progress_id = self.headers.get("X-PIA-Transcription-ID", "")
                     if progress_id:
-                        owner=hashlib.sha256((self.headers.get('Authorization','')+'|'+self.headers.get('X-PIA-App-Token','')).encode()).hexdigest()
-                        try:create(progress_id,owner)
+                        owner = hashlib.sha256(
+                            (
+                                self.headers.get("Authorization", "")
+                                + "|"
+                                + self.headers.get("X-PIA-App-Token", "")
+                            ).encode()
+                        ).hexdigest()
+                        try:
+                            create(progress_id, owner)
                         except ValueError as exc:
-                            self.send_openai_error(400,str(exc))
+                            self.send_openai_error(400, str(exc))
                             return
-                    options={}
-                    if local_model:options['local_model']=local_model
-                    if progress_id:options['progress']=lambda event:update(progress_id,**event)
-                    options['request_timeout']=int(setting('STT_FILE_TIMEOUT_SECONDS') or '86400')
+                    options = {}
+                    if local_model:
+                        options["local_model"] = local_model
+                    if progress_id:
+                        options["progress"] = lambda event: update(progress_id, **event)
+                    options["request_timeout"] = int(
+                        setting("STT_FILE_TIMEOUT_SECONDS") or "86400"
+                    )
                     result = STT_MANAGER.transcribe_request(
                         audio_bytes,
                         language=language,
@@ -1262,7 +1383,7 @@ class HTTPServer(BaseHTTPRequestHandler):
                             result = {"ok": False, "error": str(exc)}
 
                     if not result.get("ok"):
-                        update(progress_id,state='error',error=result.get('error'))
+                        update(progress_id, state="error", error=result.get("error"))
                         logging.error("[OPENAI STT] Falha: %s", result.get("error"))
                         self.send_openai_error(
                             500,
@@ -1272,12 +1393,23 @@ class HTTPServer(BaseHTTPRequestHandler):
                         return
 
                     text = result.get("text") or ""
-                    update(progress_id,state='completed',percent=100,provider=result.get('provider'))
+                    update(
+                        progress_id,
+                        state="completed",
+                        percent=100,
+                        provider=result.get("provider"),
+                    )
 
                     if response_format in {"srt", "vtt"}:
-                        self._send(200, render_subtitles(result["segments"], response_format).encode("utf-8"),
-                                   "text/vtt; charset=utf-8" if response_format == "vtt"
-                                   else "application/x-subrip; charset=utf-8")
+                        self._send(
+                            200,
+                            render_subtitles(
+                                result["segments"], response_format
+                            ).encode("utf-8"),
+                            "text/vtt; charset=utf-8"
+                            if response_format == "vtt"
+                            else "application/x-subrip; charset=utf-8",
+                        )
                         return
 
                     if response_format == "text":
@@ -1291,11 +1423,21 @@ class HTTPServer(BaseHTTPRequestHandler):
                             200,
                             {
                                 "task": "transcribe",
-                                "language": result.get("language") or language or "auto",
+                                "language": result.get("language")
+                                or language
+                                or "auto",
                                 "duration": result["duration"],
                                 "text": text,
                                 "segments": result["segments"],
-                                **({'timestamp_adjustments':result['timestamp_adjustments']} if result.get('timestamp_adjustments') else {}),
+                                **(
+                                    {
+                                        "timestamp_adjustments": result[
+                                            "timestamp_adjustments"
+                                        ]
+                                    }
+                                    if result.get("timestamp_adjustments")
+                                    else {}
+                                ),
                             },
                         )
                         return
@@ -1426,8 +1568,13 @@ class HTTPServer(BaseHTTPRequestHandler):
                 parts = [p.strip() for p in text.split("\n\n") if p.strip()]
 
                 for i, part in enumerate(parts, start=1):
-                    from src.voice_interrupt import epoch,EpochCancellation
-                    if body.get('conversation_epoch') is not None and body['conversation_epoch']!=epoch():break
+                    from src.voice_interrupt import epoch, EpochCancellation
+
+                    if (
+                        body.get("conversation_epoch") is not None
+                        and body["conversation_epoch"] != epoch()
+                    ):
+                        break
                     logger_tts.info(part)
                     TTS_MANAGER.add_tts_job(
                         text=part.strip(),
@@ -1436,7 +1583,11 @@ class HTTPServer(BaseHTTPRequestHandler):
                         style=style,
                         device=device,
                         job_name=f" ({i} de {len(parts)}) {textCuteName}",
-                        cancelled=(EpochCancellation(body['conversation_epoch']) if body.get('conversation_epoch') is not None else None),
+                        cancelled=(
+                            EpochCancellation(body["conversation_epoch"])
+                            if body.get("conversation_epoch") is not None
+                            else None
+                        ),
                     )
 
                 logging.info(
@@ -1692,7 +1843,7 @@ class HTTPServer(BaseHTTPRequestHandler):
                     return
 
                 if path == "/ove/blink":
-                    state_machine.trigger_blink()
+                    get_state_machine().trigger_blink()
                     self.send_json(200, {"ok": True, "state": path})
                     return
 

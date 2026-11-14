@@ -1,5 +1,12 @@
 # PIA Changelog
 
+## [Lint e formatação] - 2026-11-14
+
+### Added
+- Ruff básico e formatação Python em todos os arquivos próprios versionados; ESLint recomendado e Prettier no frontend.
+- Hook pre-commit versionado, instalado por install.sh, verifica todo o código e bloqueia código fora do padrão ou alterações de código não adicionadas ao índice.
+- scripts/lint.py --fix aplica a formatação. Corrigidos import ausente de binascii e referência à máquina de estados no endpoint blink encontrados pelo lint.
+
 ## [Windows/WSL] - 2026-11-14
 
 ### Fixed

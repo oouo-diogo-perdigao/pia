@@ -70,13 +70,19 @@ const appIcons = {
   object_storage: HardDrive,
 };
 function normalizeRoute(route) {
-  if (route.view === "connectors" || (route.view === "settings" &&
-      (["accounts", "connectors"].includes(route.section) || route.section?.startsWith("Connectors/")))) {
+  if (
+    route.view === "connectors" ||
+    (route.view === "settings" &&
+      (["accounts", "connectors"].includes(route.section) ||
+        route.section?.startsWith("Connectors/")))
+  ) {
     const connector = route.connector || route.section?.split("/")[1];
     return {
       view: "settings",
       section: "connectors",
-      connector: connectors.some((item) => item.id === connector) ? connector : "pia_server",
+      connector: connectors.some((item) => item.id === connector)
+        ? connector
+        : "pia_server",
     };
   }
   return route;
@@ -232,7 +238,9 @@ export default function Workspace({ standalone = null }) {
           .then((value) => {
             if (
               active &&
-              ((value.profile_revision && value.profile_revision !== latestState.current.notifications?.profile_revision) ||
+              ((value.profile_revision &&
+                value.profile_revision !==
+                  latestState.current.notifications?.profile_revision) ||
                 Object.keys(value.chat_counts || {}).some(
                   (id) =>
                     !latestState.current.chats.some((chat) => chat.id === id),
@@ -505,7 +513,8 @@ export default function Workspace({ standalone = null }) {
     ) : (
       <iframe title={currentApp?.name || "Aplicativo"} src={currentApp?.url} />
     );
-  if (account && !account.authenticated) return <ServerLogin server={account.server} />;
+  if (account && !account.authenticated)
+    return <ServerLogin server={account.server} />;
   if (!ready)
     return (
       <>
@@ -694,21 +703,39 @@ export default function Workspace({ standalone = null }) {
                 {!standalone && account?.authenticated && (
                   <Menu position="right-end" shadow="md">
                     <Menu.Target>
-                      <ActionIcon variant="subtle" size={38} aria-label="Minha conta" title={account.email || "Minha conta"}>
+                      <ActionIcon
+                        variant="subtle"
+                        size={38}
+                        aria-label="Minha conta"
+                        title={account.email || "Minha conta"}
+                      >
                         {account.email ? (
-                          <AccountAvatar size={30} color="violet" src={account.picture || null}
-                            alt="" imageProps={{ referrerPolicy: "no-referrer" }}>
+                          <AccountAvatar
+                            size={30}
+                            color="violet"
+                            src={account.picture || null}
+                            alt=""
+                            imageProps={{ referrerPolicy: "no-referrer" }}
+                          >
                             {account.email[0].toUpperCase()}
                           </AccountAvatar>
-                        ) : <UserRound size={19} />}
+                        ) : (
+                          <UserRound size={19} />
+                        )}
                       </ActionIcon>
                     </Menu.Target>
                     <Menu.Dropdown>
                       <Menu.Label>{account.email || "Minha conta"}</Menu.Label>
-                      <Menu.Item color="red" leftSection={<LogOut size={16} />} onClick={safe(async () => {
-                        await api("/integrations/pia_server/logout", {});
-                        location.reload();
-                      })}>Sair</Menu.Item>
+                      <Menu.Item
+                        color="red"
+                        leftSection={<LogOut size={16} />}
+                        onClick={safe(async () => {
+                          await api("/integrations/pia_server/logout", {});
+                          location.reload();
+                        })}
+                      >
+                        Sair
+                      </Menu.Item>
                     </Menu.Dropdown>
                   </Menu>
                 )}
@@ -1069,7 +1096,8 @@ export default function Workspace({ standalone = null }) {
                     ? currentApp?.info
                     : route.view === "connectors"
                       ? connectors.find(
-                          (item) => item.id === (route.connector || "pia_server"),
+                          (item) =>
+                            item.id === (route.connector || "pia_server"),
                         )?.info
                       : route.view === "chat"
                         ? t("Converse com a PIA ou dê um comando.")

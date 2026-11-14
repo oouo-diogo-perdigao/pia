@@ -1,4 +1,5 @@
 """Tests for the PIA voice selector (TTS providers)."""
+
 import http.client
 import json
 import logging
@@ -9,6 +10,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from src import config
+
 _desktop = ModuleType("src.LocalActions")
 _desktop.LocalActions = Mock()
 with patch.dict("sys.modules", {"src.LocalActions": _desktop}):
@@ -19,7 +21,9 @@ with patch.dict("sys.modules", {"src.LocalActions": _desktop}):
 def api(monkeypatch):
     monkeypatch.setattr(config, "AGE_GEMINI_API_KEY", "test-credential", raising=False)
     monkeypatch.setattr(http_module, "OPENAI_COMPAT_API_KEY", "", raising=False)
-    server = http_module.STTThreadingHTTPServer(("127.0.0.1", 0), http_module.HTTPServer)
+    server = http_module.STTThreadingHTTPServer(
+        ("127.0.0.1", 0), http_module.HTTPServer
+    )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
 
@@ -58,7 +62,11 @@ def test_contract_tts_providers(api):
 
 
 def test_contract_tts_select(api):
-    status, data = api(payload={"provider": "supertonic3", "voice": "pm_santa", "speed": 1.0}, path="/v1/tts/select", method="POST")
+    status, data = api(
+        payload={"provider": "supertonic3", "voice": "pm_santa", "speed": 1.0},
+        path="/v1/tts/select",
+        method="POST",
+    )
     assert status == 200
     assert data.get("ok") is True
     assert data.get("provider") == "supertonic3"
@@ -67,15 +75,19 @@ def test_contract_tts_select(api):
 
 def test_smoke_synthesis_local():
     from src.tts_providers import supertonic3 as mod
-    p = mod.Supertonic3Provider()
+
+    mod.Supertonic3Provider()
     # monkeypatch synthesize
     mod.Supertonic3Provider.synthesize = lambda self, *a, **k: b"RIFF...."
-    assert mod.Supertonic3Provider().synthesize("oi", "pm_santa", 1.0, "mp3") == b"RIFF...."
+    assert (
+        mod.Supertonic3Provider().synthesize("oi", "pm_santa", 1.0, "mp3")
+        == b"RIFF...."
+    )
 
 
 def test_keys_not_in_logs(caplog):
-    import logging
     from src.tts_providers import openai_tts, elevenlabs
+
     caplog.set_level(logging.DEBUG)
     p = openai_tts.OpenAITTSProvider()
     # simulate a key present via settings_store monkeypatch not needed; just ensure no key leak in repr

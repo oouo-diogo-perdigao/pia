@@ -1,4 +1,5 @@
 """Registry que descobre providers disponíveis com base no cofre."""
+
 import importlib
 import logging
 from .base import TTSProvider
@@ -34,13 +35,15 @@ class TTSProviderRegistry:
                 avail = bool(prov.is_available())
             except Exception:
                 avail = False
-            result.append({
-                "id": key,
-                "name": getattr(prov, "name", key),
-                "kind": getattr(prov, "kind", "remote"),
-                "available": avail,
-                "voices": prov.list_voices() if avail else [],
-            })
+            result.append(
+                {
+                    "id": key,
+                    "name": getattr(prov, "name", key),
+                    "kind": getattr(prov, "kind", "remote"),
+                    "available": avail,
+                    "voices": prov.list_voices() if avail else [],
+                }
+            )
         return result
 
     def get(self, key: str):

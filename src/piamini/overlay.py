@@ -48,33 +48,48 @@ class PiaOverlay(QWidget):
 
     @pyqtSlot(str, bool)
     def apply_skill_action(self, action, enabled):
-        if action == 'close':
+        if action == "close":
             self._is_thinking = False
             self._is_speaking = False
-        elif action == 'blink':
+        elif action == "blink":
             self.blink()
-        elif action == 'thinking':
+        elif action == "thinking":
             self.set_inner_orbit_fast(enabled)
-        elif action == 'processing':
+        elif action == "processing":
             self.set_outer_orbit_fast(enabled)
-        elif action == 'look':
+        elif action == "look":
             self.set_eyes_moving(enabled)
-        elif action in ('look_left', 'look_right', 'center'):
-            offset = (-8 if action == 'look_left' else 8) if enabled and action != 'center' else 0
+        elif action in ("look_left", "look_right", "center"):
+            offset = (
+                (-8 if action == "look_left" else 8)
+                if enabled and action != "center"
+                else 0
+            )
             self.view.page().runJavaScript(
-                "document.querySelectorAll('.animation-looking-eyes').forEach(e => {e.style.animationPlayState='paused'; e.style.transform='translateX(" + str(offset) + "px)';});")
-        elif action == 'pulse':
-            val = 'running' if enabled else 'paused'
-            self.view.page().runJavaScript("document.querySelectorAll('.animation-pulse').forEach(e => e.style.animationPlayState='" + val + "');")
-        elif action == 'music':
-            self.view.page().runJavaScript("""(()=>{
+                "document.querySelectorAll('.animation-looking-eyes').forEach(e => {e.style.animationPlayState='paused'; e.style.transform='translateX("
+                + str(offset)
+                + "px)';});"
+            )
+        elif action == "pulse":
+            val = "running" if enabled else "paused"
+            self.view.page().runJavaScript(
+                "document.querySelectorAll('.animation-pulse').forEach(e => e.style.animationPlayState='"
+                + val
+                + "');"
+            )
+        elif action == "music":
+            self.view.page().runJavaScript(
+                """(()=>{
               let notes=document.getElementById('pia-music-notes');
               if(!notes){
                 const style=document.createElement('style');style.textContent='@keyframes pia-note{0%,100%{opacity:0;transform:translate(0,8px) scale(.6)}30%,60%{opacity:1}90%{opacity:0;transform:translate(12px,-16px) scale(1.1)}}#pia-music-notes{position:fixed;right:8%;top:34%;pointer-events:none;color:#bfa0ff;font-size:20px;z-index:999}#pia-music-notes span{position:absolute;animation:pia-note 2s infinite}#pia-music-notes span:nth-child(2){right:15px;top:-10px;animation-delay:.65s;color:#65d9ff}#pia-music-notes span:nth-child(3){right:28px;top:10px;animation-delay:1.3s}';document.head.append(style);
                 notes=document.createElement('div');notes.id='pia-music-notes';notes.innerHTML='<span>♪</span><span>♫</span><span>♪</span>';document.body.append(notes);
               }
-              notes.style.display="""+ ('"block"' if enabled else '"none"')+""";
-            })()""")
+              notes.style.display="""
+                + ('"block"' if enabled else '"none"')
+                + """;
+            })()"""
+            )
 
     def __init__(self, svg_content: str):
         super().__init__()
@@ -88,7 +103,7 @@ class PiaOverlay(QWidget):
         # No Windows o cursor global funciona com a janela transparente a cliques.
         # No Wayland esse cursor não acompanha o mouse, então a janela precisa
         # receber enter/leave para o menu de auxílio aparecer.
-        if sys.platform == 'win32':
+        if sys.platform == "win32":
             flags |= Qt.WindowType.WindowTransparentForInput
         self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -101,9 +116,17 @@ class PiaOverlay(QWidget):
         self.view = QWebEngineView(self)
         self.view.resize(WINDOW_SIZE, WINDOW_SIZE)
         self.view.page().setBackgroundColor(Qt.GlobalColor.transparent)
-        self.view.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
-        self.view.setHtml(svg_content, QUrl.fromLocalFile(str(Path(__file__).parent) + '/'))
-        self.view.loadFinished.connect(lambda _: self.view.page().runJavaScript("window.startStreaming&&startStreaming();"))
+        self.view.settings().setAttribute(
+            QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True
+        )
+        self.view.setHtml(
+            svg_content, QUrl.fromLocalFile(str(Path(__file__).parent) + "/")
+        )
+        self.view.loadFinished.connect(
+            lambda _: self.view.page().runJavaScript(
+                "window.startStreaming&&startStreaming();"
+            )
+        )
         self.view.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         # Faz o QWebEngineView ignorar os cliques do mouse para que o overlay principal receba
@@ -159,11 +182,11 @@ class PiaOverlay(QWidget):
         self._has_pending_tasks = pending
 
     def should_stay_visible(self) -> bool:
-        return not self.user_hidden and not getattr(self, 'capture_hidden', False)
+        return not self.user_hidden and not getattr(self, "capture_hidden", False)
 
     def set_inner_orbit_fast(self, fast: bool):
         if QThread.currentThread() != self.thread():
-            self.skill_action_requested.emit('thinking', fast)
+            self.skill_action_requested.emit("thinking", fast)
             return
         # print log to indicate the inner orbit movement state change
         print(f"[PIA] Inner orbit fast: {fast}")
@@ -174,7 +197,7 @@ class PiaOverlay(QWidget):
 
     def set_outer_orbit_fast(self, fast: bool):
         if QThread.currentThread() != self.thread():
-            self.skill_action_requested.emit('processing', fast)
+            self.skill_action_requested.emit("processing", fast)
             return
         # print log to indicate the outer orbit movement state change
         print(f"[PIA] Outer orbit fast: {fast}")
@@ -185,7 +208,7 @@ class PiaOverlay(QWidget):
 
     def set_eyes_moving(self, moving: bool):
         if QThread.currentThread() != self.thread():
-            self.skill_action_requested.emit('look', moving)
+            self.skill_action_requested.emit("look", moving)
             return
         # print log to indicate the eyes movement state change
         print(f"[PIA] Eyes moving: {moving}")
@@ -196,7 +219,7 @@ class PiaOverlay(QWidget):
 
     def blink(self):
         if QThread.currentThread() != self.thread():
-            self.skill_action_requested.emit('blink', True)
+            self.skill_action_requested.emit("blink", True)
             return
         # print log to indicate the blink action
         print("[PIA] Triggering blink animation")
@@ -263,30 +286,37 @@ def run_overlay_app():
     global _GLOBAL_OVERLAY
     qInstallMessageHandler(quiet_qt_messages)
     from src.config_paths import IMAGES_DIR
-    template = Path(__file__).with_name('index.html').read_text(encoding='utf-8')
-    svg = (IMAGES_DIR / 'pia.svg').read_text(encoding='utf-8')
-    html = template.replace('__SVG__', svg).replace('__BASE__', PUBLIC_BASE_URL)
+
+    template = Path(__file__).with_name("index.html").read_text(encoding="utf-8")
+    svg = (IMAGES_DIR / "pia.svg").read_text(encoding="utf-8")
+    html = template.replace("__SVG__", svg).replace("__BASE__", PUBLIC_BASE_URL)
     app = QApplication.instance() or QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     overlay = PiaOverlay(html)
     _GLOBAL_OVERLAY = overlay
     from src.desktop_ui import DesktopUI
+
     overlay.desktop = DesktopUI(overlay)
     overlay.show()
     timer = QTimer(overlay)
+
     def update():
         from src import state
+
         with state.LOCK:
             listening = state.SESSION_ACTIVE
         from src.HTTPServer import STT_MANAGER
-        listening = listening or STT_MANAGER.status.name == 'RECORDING'
-        if getattr(overlay, '_last_listening', None) != listening:
+
+        listening = listening or STT_MANAGER.status.name == "RECORDING"
+        if getattr(overlay, "_last_listening", None) != listening:
             overlay._last_listening = listening
-            overlay.skill_action_requested.emit('pulse', listening)
+            overlay.skill_action_requested.emit("pulse", listening)
         if overlay.should_stay_visible() and not overlay.isVisible():
             overlay.show()
+
     timer.timeout.connect(update)
     timer.start(150)
     import signal
+
     signal.signal(signal.SIGINT, lambda *_: app.quit())
     sys.exit(app.exec())

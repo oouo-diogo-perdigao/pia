@@ -3,7 +3,19 @@ import { DocumentSettings, VaultSettings } from "./ProfileSettings";
 import LogsPanel from "./LogsPanel";
 import { fingerprint } from "./forms";
 import React, { useState, useEffect, useRef } from "react";
-import { Button, Group, Paper, Text, Title, TextInput, PasswordInput, Select, Stack, FileButton, Anchor } from "@mantine/core";
+import {
+  Button,
+  Group,
+  Paper,
+  Text,
+  Title,
+  TextInput,
+  PasswordInput,
+  Select,
+  Stack,
+  FileButton,
+  Anchor,
+} from "@mantine/core";
 import { ExternalLink, Folder, Upload } from "lucide-react";
 import { api, report, safe, session } from "./api";
 import { Icon, Nav, usePia } from "./shared";
@@ -35,7 +47,8 @@ function ServerProfilePanel() {
     synced: "Perfil sincronizado.",
     retrying: "Não foi possível sincronizar. A PIA tentará novamente.",
     disconnected: "Entre na PIA Server para sincronizar.",
-    "different-account": "Este perfil pertence a outra conta. Entre com a conta original para sincronizar.",
+    "different-account":
+      "Este perfil pertence a outra conta. Entre com a conta original para sincronizar.",
   };
 
   return (
@@ -47,8 +60,14 @@ function ServerProfilePanel() {
           dos conectores são gerenciadas no servidor. Caminhos e preferências
           deste computador são mantidos localmente.
         </Text>
-        <Text size="sm" role="status">{messages[profile.state]}</Text>
-        <Anchor href="https://pia.travelrpg.com" target="_blank" rel="noreferrer">
+        <Text size="sm" role="status">
+          {messages[profile.state]}
+        </Text>
+        <Anchor
+          href="https://pia.travelrpg.com"
+          target="_blank"
+          rel="noreferrer"
+        >
           Abrir painel da PIA Server
         </Anchor>
       </Stack>
@@ -66,11 +85,7 @@ export default function SettingsPanel({ section = "general" }) {
     [group, setGroup] = useState("Geral");
   useEffect(() => {
     let active = true;
-    if (
-      !["logs", "documents", "credentials"].includes(
-        section,
-      )
-    ) {
+    if (!["logs", "documents", "credentials"].includes(section)) {
       api("/settings")
         .then((result) => {
           if (!active) return;

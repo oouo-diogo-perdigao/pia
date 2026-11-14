@@ -164,7 +164,7 @@ class STTManager:
                     "language": language or None,
                     "prompt": prompt or None,
                     "temperature": temperature,
-                      "model": local_model,
+                    "model": local_model,
                 }
             )
 
@@ -178,17 +178,24 @@ class STTManager:
                     }
 
                 try:
-                    result = result_queue.get(timeout=min(1,remaining))
+                    result = result_queue.get(timeout=min(1, remaining))
                 except queue.Empty:
-                    if self.worker_process is not None and not self.worker_process.is_alive():
-                        return {'ok':False,'error':'O processo de transcrição encerrou inesperadamente. Consulte logs/_main.log.'}
+                    if (
+                        self.worker_process is not None
+                        and not self.worker_process.is_alive()
+                    ):
+                        return {
+                            "ok": False,
+                            "error": "O processo de transcrição encerrou inesperadamente. Consulte logs/_main.log.",
+                        }
                     continue
                 except Exception as exc:
                     return {"ok": False, "error": str(exc)}
 
                 if result.get("request_id") == request_id:
-                    if result.get('kind')=='progress':
-                        if progress:progress(result['event'])
+                    if result.get("kind") == "progress":
+                        if progress:
+                            progress(result["event"])
                         continue
                     return result
 
@@ -423,7 +430,7 @@ def stt_worker_process(
                 logging.info(
                     "[WORKER STT] Inatividade de %ds atingida. Finalizando processo e liberando memória...",
                     STT_WHISPER_TIMEOUT,
-    STT_MODEL,
+                    STT_MODEL,
                 )
                 break
             continue
@@ -453,15 +460,26 @@ def stt_worker_process(
         last_used = time.monotonic()
 
         try:
-            requested_model=task.get('model') or STT_MODEL
-            if agent is None or agent_model!=requested_model:
-                agent=None
+            requested_model = task.get("model") or STT_MODEL
+            if agent is None or agent_model != requested_model:
+                agent = None
                 import gc
+
                 gc.collect()
-                agent=VoiceAgent(models_dir,model_name=requested_model)
-                agent_model=requested_model
-                logging.info("[WORKER STT] Modelo %s pronto para transcrição.",requested_model)
-            progress_kwargs={'progress':lambda event:api_result_queue.put({'kind':'progress','request_id':request_id,'event':event})} if kind=='api' else {}
+                agent = VoiceAgent(models_dir, model_name=requested_model)
+                agent_model = requested_model
+                logging.info(
+                    "[WORKER STT] Modelo %s pronto para transcrição.", requested_model
+                )
+            progress_kwargs = (
+                {
+                    "progress": lambda event: api_result_queue.put(
+                        {"kind": "progress", "request_id": request_id, "event": event}
+                    )
+                }
+                if kind == "api"
+                else {}
+            )
             transcription = agent.transcribe_chunk(
                 chunk,
                 language=language,
@@ -470,7 +488,11 @@ def stt_worker_process(
                 return_metadata=(kind == "api"),
                 **progress_kwargs,
             )
-            metadata = transcription if isinstance(transcription, dict) else {"text": transcription or None}
+            metadata = (
+                transcription
+                if isinstance(transcription, dict)
+                else {"text": transcription or None}
+            )
             target_queue.put(
                 {
                     "ok": True,

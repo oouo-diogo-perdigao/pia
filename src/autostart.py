@@ -28,22 +28,29 @@ def linux_desktop_file() -> Path:
 
 def windows_startup_dir() -> Path:
     appdata = os.environ.get("APPDATA", "")
-    return Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+    return (
+        Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+    )
 
 
 def git_bash() -> Path:
     candidates = []
-    git = shutil.which('git')
+    git = shutil.which("git")
     if git:
-        candidates.append(Path(git).resolve().parents[1] / 'bin' / 'bash.exe')
-    for name in ('ProgramFiles', 'ProgramFiles(x86)', 'LOCALAPPDATA'):
+        candidates.append(Path(git).resolve().parents[1] / "bin" / "bash.exe")
+    for name in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
         base = os.getenv(name)
         if base:
-            candidates.extend((Path(base) / 'Git/bin/bash.exe', Path(base) / 'Programs/Git/bin/bash.exe'))
+            candidates.extend(
+                (
+                    Path(base) / "Git/bin/bash.exe",
+                    Path(base) / "Programs/Git/bin/bash.exe",
+                )
+            )
     for candidate in candidates:
         if candidate.is_file():
             return candidate
-    raise RuntimeError('Git Bash não encontrado. Execute install.sh pelo Git Bash.')
+    raise RuntimeError("Git Bash não encontrado. Execute install.sh pelo Git Bash.")
 
 
 def desktop_contents(project: Path, *, enabled: bool) -> str:
@@ -106,7 +113,7 @@ def _set_windows(enabled: bool) -> bool:
         return True
 
     exe = git_bash()
-    arguments = '--noprofile --norc "' + (project_dir() / 'start.sh').as_posix() + '"'
+    arguments = '--noprofile --norc "' + (project_dir() / "start.sh").as_posix() + '"'
 
     command = (
         "$shell = New-Object -ComObject WScript.Shell; "

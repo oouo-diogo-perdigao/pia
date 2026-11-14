@@ -23,7 +23,7 @@ def _xauthority_for_python_xlib(source: Path) -> str:
     entries: list[tuple[int, bytes, bytes, bytes, bytes]] = []
     offset = 0
     while offset + 2 <= len(raw):
-        family, = struct.unpack(">H", raw[offset:offset + 2])
+        (family,) = struct.unpack(">H", raw[offset : offset + 2])
         offset += 2
         parts: list[bytes] = []
         complete = True
@@ -31,12 +31,12 @@ def _xauthority_for_python_xlib(source: Path) -> str:
             if offset + 2 > len(raw):
                 complete = False
                 break
-            length, = struct.unpack(">H", raw[offset:offset + 2])
+            (length,) = struct.unpack(">H", raw[offset : offset + 2])
             offset += 2
             if offset + length > len(raw):
                 complete = False
                 break
-            parts.append(raw[offset:offset + length])
+            parts.append(raw[offset : offset + length])
             offset += length
         if not complete:
             break
@@ -51,7 +51,11 @@ def _xauthority_for_python_xlib(source: Path) -> str:
         return str(source)
 
     cookie = next(
-        (data for _family, _addr, _num, name, data in entries if name == b"MIT-MAGIC-COOKIE-1"),
+        (
+            data
+            for _family, _addr, _num, name, data in entries
+            if name == b"MIT-MAGIC-COOKIE-1"
+        ),
         None,
     )
     if cookie is None:
@@ -60,7 +64,13 @@ def _xauthority_for_python_xlib(source: Path) -> str:
     def field(value: bytes) -> bytes:
         return struct.pack(">H", len(value)) + value
 
-    blob = struct.pack(">H", 256) + field(host) + field(b"0") + field(b"MIT-MAGIC-COOKIE-1") + field(cookie)
+    blob = (
+        struct.pack(">H", 256)
+        + field(host)
+        + field(b"0")
+        + field(b"MIT-MAGIC-COOKIE-1")
+        + field(cookie)
+    )
     runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
     if not runtime.is_dir():
         return str(source)
@@ -103,12 +113,17 @@ def _keep_api_up_without_x_display() -> None:
     _ensure_xauthority()
     try:
         import pyautogui  # noqa: F401
+
         return
     except ImportError:
         return
     except Exception as exc:
         for name in list(sys.modules):
-            if name == "pyautogui" or name.startswith("pyautogui.") or name == "mouseinfo":
+            if (
+                name == "pyautogui"
+                or name.startswith("pyautogui.")
+                or name == "mouseinfo"
+            ):
                 sys.modules.pop(name, None)
         sys.modules["mouseinfo"] = types.ModuleType("mouseinfo")
         x11 = types.ModuleType("pyautogui._pyautogui_x11")
@@ -116,11 +131,13 @@ def _keep_api_up_without_x_display() -> None:
         x11.keyboardMapping = {}
         sys.modules["pyautogui._pyautogui_x11"] = x11
         import pyautogui  # noqa: F401
+
         print(
             f"[PIA] Display X indisponível ({exc}). A API continua no ar; "
             "ações de teclado na tela ficam indisponíveis.",
             file=sys.stderr,
         )
+
 
 # Reuse the project's existing Gemini credential when a dedicated STT key was
 # not configured. Also normalize the unary model name to the Live variant used

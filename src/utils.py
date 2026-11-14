@@ -45,9 +45,38 @@ def play_sound_async(sound_path: Path):
 
 _URL_RE = re.compile(r"https?://[^\s<>\[\]()\"'`]+", re.IGNORECASE)
 _HOST_SUFFIXES = {
-    "com", "org", "net", "io", "app", "dev", "ai", "co", "me", "tv", "info",
-    "xyz", "br", "pt", "uk", "us", "de", "fr", "es", "it", "nl", "eu", "gov",
-    "edu", "cloud", "page", "site", "online", "tech", "design", "gg", "ly",
+    "com",
+    "org",
+    "net",
+    "io",
+    "app",
+    "dev",
+    "ai",
+    "co",
+    "me",
+    "tv",
+    "info",
+    "xyz",
+    "br",
+    "pt",
+    "uk",
+    "us",
+    "de",
+    "fr",
+    "es",
+    "it",
+    "nl",
+    "eu",
+    "gov",
+    "edu",
+    "cloud",
+    "page",
+    "site",
+    "online",
+    "tech",
+    "design",
+    "gg",
+    "ly",
 }
 
 
@@ -104,9 +133,9 @@ def parse_multipart(content_type: str, body: bytes):
     if "multipart/form-data" not in content_type.lower():
         raise ValueError("Content-Type não é multipart/form-data.")
 
-    synthetic = (
-        f"Content-Type: {content_type}\r\n" "MIME-Version: 1.0\r\n" "\r\n"
-    ).encode("utf-8") + body
+    synthetic = (f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n").encode(
+        "utf-8"
+    ) + body
 
     message = BytesParser(policy=policy.default).parsebytes(synthetic)
     if not message.is_multipart():
@@ -193,7 +222,7 @@ def speak_tts(text: str, conversation_epoch=None):
     try:
         response = requests.post(
             f"{PUBLIC_BASE_URL}/tts/speak",
-            json={"text": text, "conversation_epoch":conversation_epoch},
+            json={"text": text, "conversation_epoch": conversation_epoch},
             timeout=10,
         )
         response.raise_for_status()

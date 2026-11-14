@@ -29116,16 +29116,22 @@ function E6() {
     /* @__PURE__ */ h.jsx(Er, { order: 4, children: "Sincronização automática" }),
     /* @__PURE__ */ h.jsx(we, { size: "sm", children: "A PIA sincroniza configurações e conversas em segundo plano. As contas dos conectores são gerenciadas no servidor. Caminhos e preferências deste computador são mantidos localmente." }),
     /* @__PURE__ */ h.jsx(we, { size: "sm", role: "status", children: a[e.state] }),
-    /* @__PURE__ */ h.jsx(jr, { href: "https://pia.travelrpg.com", target: "_blank", rel: "noreferrer", children: "Abrir painel da PIA Server" })
+    /* @__PURE__ */ h.jsx(
+      jr,
+      {
+        href: "https://pia.travelrpg.com",
+        target: "_blank",
+        rel: "noreferrer",
+        children: "Abrir painel da PIA Server"
+      }
+    )
   ] }) });
 }
 function Oy({ section: e = "general" }) {
   const { navigate: r, language: a, setLanguage: i, t: l, boot: s, setRestarting: c } = ka(), [f, p] = w.useState([]), [m, v] = w.useState({}), [g, b] = w.useState(""), [x, S] = w.useState([]), [C, k] = w.useState(""), [j, _] = w.useState("Geral");
   if (w.useEffect(() => {
     let T = !0;
-    return ["logs", "documents", "credentials"].includes(
-      e
-    ) || De("/settings").then((M) => {
+    return ["logs", "documents", "credentials"].includes(e) || De("/settings").then((M) => {
       if (!T) return;
       p(M);
       const H = M.find((O) => O.id === e) || M[0], G = Object.fromEntries(
@@ -29521,8 +29527,16 @@ function j6() {
   ] });
 }
 const zl = [
-  { id: "pia_server", name: "PIA Server", info: "Preferências deste computador e perfil compartilhado." },
-  { id: "agents", name: "Agentes externos", info: "Codex, Google Antigravity e protocolos de ferramentas." }
+  {
+    id: "pia_server",
+    name: "PIA Server",
+    info: "Preferências deste computador e perfil compartilhado."
+  },
+  {
+    id: "agents",
+    name: "Agentes externos",
+    info: "Codex, Google Antigravity e protocolos de ferramentas."
+  }
 ];
 function Ym({ connector: e }) {
   return e === "agents" ? /* @__PURE__ */ h.jsx(j6, {}) : /* @__PURE__ */ h.jsx(Oy, { section: "Connectors/pia_server" });
@@ -38813,7 +38827,11 @@ function nI({ server: e }) {
   async function m(v) {
     v.preventDefault(), c(!0), p("");
     try {
-      l(await De("/integrations/pia_server/login-start", { server: r.trim() }));
+      l(
+        await De("/integrations/pia_server/login-start", {
+          server: r.trim()
+        })
+      );
     } catch (g) {
       p(g.message);
     } finally {
@@ -38825,7 +38843,9 @@ function nI({ server: e }) {
     let v = !0, g;
     async function b() {
       try {
-        const x = await De("/integrations/pia_server/login-poll", { id: i.id });
+        const x = await De("/integrations/pia_server/login-poll", {
+          id: i.id
+        });
         if (!v) return;
         if (x.status === "authorized") {
           location.reload();
@@ -38846,16 +38866,48 @@ function nI({ server: e }) {
       v = !1, clearTimeout(g);
     };
   }, [i]), /* @__PURE__ */ h.jsx("main", { className: "pia-login", children: /* @__PURE__ */ h.jsxs("section", { className: "pia-login-card", "aria-labelledby": "login-title", children: [
-    /* @__PURE__ */ h.jsx("img", { className: "pia-login-logo", src: "/pia/brand.svg", alt: "", width: "64", height: "64" }),
+    /* @__PURE__ */ h.jsx(
+      "img",
+      {
+        className: "pia-login-logo",
+        src: "/pia/brand.svg",
+        alt: "",
+        width: "64",
+        height: "64"
+      }
+    ),
     /* @__PURE__ */ h.jsx("h2", { id: "login-title", children: "Entrar na PIA" }),
     i ? /* @__PURE__ */ h.jsxs(gt, { align: "center", children: [
       /* @__PURE__ */ h.jsx(we, { children: "Confira o código abaixo ao autorizar este computador no navegador." }),
-      /* @__PURE__ */ h.jsx("strong", { className: "pia-login-code", "aria-label": "Código de autorização", children: i.code }),
-      /* @__PURE__ */ h.jsx(Le, { component: jr, href: i.url, target: "_blank", rel: "noreferrer", children: "Abrir login no navegador" }),
+      /* @__PURE__ */ h.jsx(
+        "strong",
+        {
+          className: "pia-login-code",
+          "aria-label": "Código de autorização",
+          children: i.code
+        }
+      ),
+      /* @__PURE__ */ h.jsx(
+        Le,
+        {
+          component: jr,
+          href: i.url,
+          target: "_blank",
+          rel: "noreferrer",
+          children: "Abrir login no navegador"
+        }
+      ),
       /* @__PURE__ */ h.jsx(we, { size: "sm", role: "status", children: "Aguardando autorização…" }),
-      /* @__PURE__ */ h.jsx(Le, { variant: "subtle", onClick: () => {
-        l(null), p("");
-      }, children: "Cancelar" })
+      /* @__PURE__ */ h.jsx(
+        Le,
+        {
+          variant: "subtle",
+          onClick: () => {
+            l(null), p("");
+          },
+          children: "Cancelar"
+        }
+      )
     ] }) : /* @__PURE__ */ h.jsxs("form", { onSubmit: m, children: [
       /* @__PURE__ */ h.jsx("p", { children: "Entre para conectar este computador à sua conta na PIA Server." }),
       /* @__PURE__ */ h.jsxs("button", { className: "google-signin", type: "submit", disabled: s, children: [
@@ -41006,22 +41058,39 @@ function dI({ standalone: e = null }) {
                   i.notifications?.unread > 0 && /* @__PURE__ */ h.jsx("span", { className: "notification-count", children: i.notifications.unread })
                 ] }),
                 !e && r?.authenticated && /* @__PURE__ */ h.jsxs(zt, { position: "right-end", shadow: "md", children: [
-                  /* @__PURE__ */ h.jsx(zt.Target, { children: /* @__PURE__ */ h.jsx(Pi, { variant: "subtle", size: 38, "aria-label": "Minha conta", title: r.email || "Minha conta", children: r.email ? /* @__PURE__ */ h.jsx(
-                    bd,
+                  /* @__PURE__ */ h.jsx(zt.Target, { children: /* @__PURE__ */ h.jsx(
+                    Pi,
                     {
-                      size: 30,
-                      color: "violet",
-                      src: r.picture || null,
-                      alt: "",
-                      imageProps: { referrerPolicy: "no-referrer" },
-                      children: r.email[0].toUpperCase()
+                      variant: "subtle",
+                      size: 38,
+                      "aria-label": "Minha conta",
+                      title: r.email || "Minha conta",
+                      children: r.email ? /* @__PURE__ */ h.jsx(
+                        bd,
+                        {
+                          size: 30,
+                          color: "violet",
+                          src: r.picture || null,
+                          alt: "",
+                          imageProps: { referrerPolicy: "no-referrer" },
+                          children: r.email[0].toUpperCase()
+                        }
+                      ) : /* @__PURE__ */ h.jsx(f6, { size: 19 })
                     }
-                  ) : /* @__PURE__ */ h.jsx(f6, { size: 19 }) }) }),
+                  ) }),
                   /* @__PURE__ */ h.jsxs(zt.Dropdown, { children: [
                     /* @__PURE__ */ h.jsx(zt.Label, { children: r.email || "Minha conta" }),
-                    /* @__PURE__ */ h.jsx(zt.Item, { color: "red", leftSection: /* @__PURE__ */ h.jsx(JO, { size: 16 }), onClick: Qe(async () => {
-                      await De("/integrations/pia_server/logout", {}), location.reload();
-                    }), children: "Sair" })
+                    /* @__PURE__ */ h.jsx(
+                      zt.Item,
+                      {
+                        color: "red",
+                        leftSection: /* @__PURE__ */ h.jsx(JO, { size: 16 }),
+                        onClick: Qe(async () => {
+                          await De("/integrations/pia_server/logout", {}), location.reload();
+                        }),
+                        children: "Sair"
+                      }
+                    )
                   ] })
                 ] }),
                 /* @__PURE__ */ h.jsx(

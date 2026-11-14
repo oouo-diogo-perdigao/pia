@@ -119,13 +119,12 @@ def tts_worker_process(task_queue, result_queue, backend):
                 logging.info(f"[WORKER QWEN] [{job_name}] Texto: {text}")
 
                 if qwen_model is None:
-
                     py_logging.getLogger("qwen_tts").setLevel(py_logging.ERROR)
 
                     py_logging.getLogger("transformers").setLevel(py_logging.ERROR)
 
                     logging.info(
-                        "[WORKER QWEN] Carregando Qwen3-TTS " "na memória (GPU)..."
+                        "[WORKER QWEN] Carregando Qwen3-TTS na memória (GPU)..."
                     )
 
                     qwen_model = Qwen3TTSModel.from_pretrained(
@@ -256,7 +255,7 @@ def tts_worker_process(task_queue, result_queue, backend):
 
         except Exception as e:
             logging.exception(
-                f"[WORKER {backend.upper()}] " f"[{job_name}] Erro na geração de áudio."
+                f"[WORKER {backend.upper()}] [{job_name}] Erro na geração de áudio."
             )
 
             result_queue.put(
@@ -273,9 +272,7 @@ def tts_worker_process(task_queue, result_queue, backend):
     if qwen_model:
         del qwen_model
 
-    logging.info(
-        f"[WORKER {backend.upper()}] " "Processo filho e modelo descarregados."
-    )
+    logging.info(f"[WORKER {backend.upper()}] Processo filho e modelo descarregados.")
 
 
 def split_text(text, max_chars=420):
@@ -569,7 +566,7 @@ class TTSManager:
             while True:
                 try:
                     removed = job_queue.get_nowait()
-                    completion = removed.get('completion')
+                    completion = removed.get("completion")
                     if completion is not None:
                         completion.cancel()
                     job_queue.task_done()
@@ -587,10 +584,12 @@ class TTSManager:
             except queue.Empty:
                 continue
 
-            completion = job.get('completion')
-            cancelled = job.get('cancelled')
+            completion = job.get("completion")
+            cancelled = job.get("cancelled")
             handed_to_player = False
-            if self._stop_event.is_set() or (cancelled is not None and cancelled.is_set()):
+            if self._stop_event.is_set() or (
+                cancelled is not None and cancelled.is_set()
+            ):
                 if completion is not None:
                     completion.cancel()
                 job_queue.task_done()
@@ -616,7 +615,11 @@ class TTSManager:
                     job_name=job_name,
                 )
 
-                if self._stop_event.is_set() or (cancelled is not None and cancelled.is_set()) or not wav_bytes:
+                if (
+                    self._stop_event.is_set()
+                    or (cancelled is not None and cancelled.is_set())
+                    or not wav_bytes
+                ):
                     continue
 
                 # ----------------------------------------------------------
@@ -657,7 +660,7 @@ class TTSManager:
                     handed_to_player = True
 
                     logging.info(
-                        "[TTSManager] [%s] " "Áudio enviado para fila de reprodução.",
+                        "[TTSManager] [%s] Áudio enviado para fila de reprodução.",
                         job_name,
                     )
 
@@ -665,12 +668,16 @@ class TTSManager:
                 if completion is not None and not completion.done():
                     completion.set_exception(exc)
                 logging.exception(
-                    "[TTSManager] Erro processando parte " "na fila %s.",
+                    "[TTSManager] Erro processando parte na fila %s.",
                     backend,
                 )
 
             finally:
-                if completion is not None and not completion.done() and not handed_to_player:
+                if (
+                    completion is not None
+                    and not completion.done()
+                    and not handed_to_player
+                ):
                     completion.cancel()
                 job_queue.task_done()
 
@@ -719,7 +726,7 @@ class TTSManager:
             )
 
             logging.info(
-                "[STORYTELLING] Parte %d de %d enviada " "para fila de reprodução.",
+                "[STORYTELLING] Parte %d de %d enviada para fila de reprodução.",
                 index,
                 story["total"],
             )
@@ -735,7 +742,7 @@ class TTSManager:
             )
 
             logging.info(
-                "[STORYTELLING] Todas as %d partes foram " "enviadas para reprodução.",
+                "[STORYTELLING] Todas as %d partes foram enviadas para reprodução.",
                 story["total"],
             )
 
@@ -926,7 +933,9 @@ class TTSManager:
             for process in self.worker_processes.values()
         )
 
-    def add_audio_job(self, jobName, wav_bytes, device=None, completion=None, cancelled=None):
+    def add_audio_job(
+        self, jobName, wav_bytes, device=None, completion=None, cancelled=None
+    ):
         with self.lock:
             self._stop_event.clear()
             self.queue.put(
@@ -953,7 +962,7 @@ class TTSManager:
             while not self.queue.empty():
                 try:
                     removed = self.queue.get_nowait()
-                    completion = removed.get('completion') if removed else None
+                    completion = removed.get("completion") if removed else None
                     if completion is not None:
                         completion.cancel()
                     self.queue.task_done()
@@ -968,6 +977,7 @@ class TTSManager:
     def _play_loop(self):
         import sounddevice as sd
         import numpy as np
+
         try:
             while not self._stop_event.is_set():
                 try:
@@ -976,22 +986,39 @@ class TTSManager:
                     continue
                 if not item:
                     continue
-                completion, cancelled = item.get('completion'), item.get('cancelled')
+                completion, cancelled = item.get("completion"), item.get("cancelled")
+
                 def stopped():
-                    return self._stop_event.is_set() or (cancelled is not None and cancelled.is_set())
+                    return self._stop_event.is_set() or (
+                        cancelled is not None and cancelled.is_set()
+                    )
+
                 try:
-                    if stopped() or not item['wav_bytes']:
+                    if stopped() or not item["wav_bytes"]:
                         if completion is not None:
                             completion.cancel()
                         continue
-                    with wave.open(io.BytesIO(item['wav_bytes']), 'rb') as wf:
-                        samples = np.frombuffer(wf.readframes(wf.getnframes()), dtype='<i2').astype(np.float32) / 32768.0
+                    with wave.open(io.BytesIO(item["wav_bytes"]), "rb") as wf:
+                        samples = (
+                            np.frombuffer(
+                                wf.readframes(wf.getnframes()), dtype="<i2"
+                            ).astype(np.float32)
+                            / 32768.0
+                        )
                         if wf.getnchannels() > 1:
                             samples = samples.reshape(-1, wf.getnchannels())
-                        logging.info('[PLAYER] [%s] Iniciando reprodução do áudio...', item['jobName'])
+                        logging.info(
+                            "[PLAYER] [%s] Iniciando reprodução do áudio...",
+                            item["jobName"],
+                        )
                         from src.voice_interrupt import begin_playback
-                        begin_playback(samples,wf.getframerate())
-                        sd.play(samples, samplerate=wf.getframerate(), device=self._resolve_output_device(item['device']))
+
+                        begin_playback(samples, wf.getframerate())
+                        sd.play(
+                            samples,
+                            samplerate=wf.getframerate(),
+                            device=self._resolve_output_device(item["device"]),
+                        )
                         while sd.get_stream().active and not stopped():
                             threading.Event().wait(0.05)
                         if stopped():
@@ -1000,22 +1027,25 @@ class TTSManager:
                                 completion.cancel()
                         elif completion is not None and not completion.done():
                             completion.set_result(True)
-                        logging.info('[PLAYER] [%s] Reprodução concluída.', item['jobName'])
+                        logging.info(
+                            "[PLAYER] [%s] Reprodução concluída.", item["jobName"]
+                        )
                 except Exception as exc:
                     if completion is not None and not completion.done():
                         completion.set_exception(exc)
-                    logging.exception('Erro durante a reprodução local.')
+                    logging.exception("Erro durante a reprodução local.")
                 finally:
                     from src.voice_interrupt import end_playback
+
                     end_playback()
                     self.queue.task_done()
                     with self.lock:
                         if self.queue.empty():
-                            self.status = 'idle'
+                            self.status = "idle"
         finally:
             with self.lock:
                 if self.queue.empty():
-                    self.status = 'idle'
+                    self.status = "idle"
 
     def _resolve_output_device(self, device_param):
         """
@@ -1100,7 +1130,8 @@ class TTSManager:
 
         token_re = re.compile(
             # [Personagem] "fala" {speech manner opcional}
-            r'\[([^\[\]\r\n]+)\]\s*"([^"]+)"(?:\s*\{([^{}\r\n]+)\})?' r"|"
+            r'\[([^\[\]\r\n]+)\]\s*"([^"]+)"(?:\s*\{([^{}\r\n]+)\})?'
+            r"|"
             # "fala anônima" {speech manner opcional}
             r'"([^"]+)"(?:\s*\{([^{}\r\n]+)\})?',
             re.MULTILINE,
@@ -1110,7 +1141,6 @@ class TTSManager:
         cursor = 0
 
         for match in token_re.finditer(text):
-
             between = text[cursor : match.start()]
 
             # ----------------------------------------------------------
@@ -1229,7 +1259,6 @@ class TTSManager:
         segments = []
 
         for segment in merged_segments:
-
             if segment["type"] == "narration":
                 segments.append(
                     {
@@ -1523,7 +1552,7 @@ class TTSManager:
                     " [CONSOLIDADO]" if count >= self.CONSOLIDATED_SPEECH_COUNT else ""
                 )
 
-                descriptions.append(f'{entry["name"]}: {count} fala(s){consolidated}')
+                descriptions.append(f"{entry['name']}: {count} fala(s){consolidated}")
 
             gender = self.voice_genders.get(voice, "unknown")
 
@@ -1703,7 +1732,7 @@ class TTSManager:
                 voice = self._fallback_voice(gender=gender)
 
             logging.info(
-                "[STORY VOICE] Classificação final: " "%s -> gênero=%s | voz=%s",
+                "[STORY VOICE] Classificação final: %s -> gênero=%s | voz=%s",
                 character,
                 gender,
                 voice,
@@ -1727,7 +1756,6 @@ class TTSManager:
         self,
         gender: str | None = None,
     ) -> str:
-
         with self.lock:
             usage_count = {voice: 0 for voice in self.available_voices}
 
@@ -1758,7 +1786,7 @@ class TTSManager:
         )
 
         logging.warning(
-            "[STORY VOICE] Fallback de menor utilização: " "%s | gênero=%s | peso=%d",
+            "[STORY VOICE] Fallback de menor utilização: %s | gênero=%s | peso=%d",
             selected,
             gender or "unknown",
             usage_count.get(selected, 0),

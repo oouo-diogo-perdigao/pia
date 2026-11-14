@@ -104,9 +104,11 @@ else
   fi
 fi
 run uv python install 3.12
-SYNC=(uv sync --python 3.12)
+SYNC=(uv sync --python 3.12 --group dev)
 if (( PODCAST )); then SYNC+=(--extra podcast); fi
 run "${SYNC[@]}"
+run npm --prefix "$ROOT/src/pia/frontend" ci
+run bash "$ROOT/scripts/install-hooks.sh"
 run uv run --no-sync python -m src.config_paths
 if (( AUTOSTART )); then
   run uv run --no-sync python -c 'from src import autostart; autostart.set_enabled(True)'

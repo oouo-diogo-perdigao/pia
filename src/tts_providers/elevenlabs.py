@@ -1,4 +1,5 @@
 """Provider remoto ElevenLabs TTS."""
+
 import json
 import logging
 import urllib.request
@@ -14,6 +15,7 @@ class ElevenLabsProvider(TTSProvider):
     def _key(self):
         try:
             from src.settings_store import get
+
             v = get("ELEVENLABS_API_KEY")
             if isinstance(v, str) and v.strip():
                 return v.strip()
@@ -44,7 +46,11 @@ class ElevenLabsProvider(TTSProvider):
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode(),
-            headers={"xi-api-key": key, "Content-Type": "application/json", "Accept": "audio/mpeg"},
+            headers={
+                "xi-api-key": key,
+                "Content-Type": "application/json",
+                "Accept": "audio/mpeg",
+            },
         )
         with urllib.request.urlopen(req, timeout=120) as r:
             return r.read()

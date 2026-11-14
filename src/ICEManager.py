@@ -6,7 +6,6 @@ import re
 import threading
 import uuid
 import mimetypes
-import uuid
 import time
 
 from .ComfyUIClient import ComfyUIClient

@@ -1,5 +1,14 @@
 import React, { useEffect, useState } from "react";
-import { Stack, Paper, Text, Button, Group, Modal, Textarea, Select } from "@mantine/core";
+import {
+  Stack,
+  Paper,
+  Text,
+  Button,
+  Group,
+  Modal,
+  Textarea,
+  Select,
+} from "@mantine/core";
 import { api, safe, report } from "./api";
 
 export function DocumentSettings() {

@@ -96,13 +96,11 @@ class GeradorResumoSessao:
                 return []
 
         except Exception as erro:
-            print(
-                f"Não foi possível obter o RSS do storage " f"({self.rss_key}): {erro}"
-            )
+            print(f"Não foi possível obter o RSS do storage ({self.rss_key}): {erro}")
             return []
 
         if not conteudo_rss:
-            print(f"RSS vazio ou não encontrado no storage: " f"{self.rss_key}")
+            print(f"RSS vazio ou não encontrado no storage: {self.rss_key}")
             return []
 
         try:
@@ -133,7 +131,7 @@ class GeradorResumoSessao:
 
         nomes = list(dict.fromkeys(nomes))
 
-        print(f"Nomes de sessões anteriores carregados do RSS: " f"{len(nomes)}")
+        print(f"Nomes de sessões anteriores carregados do RSS: {len(nomes)}")
 
         return nomes
 
