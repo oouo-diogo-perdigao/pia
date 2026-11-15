@@ -418,3 +418,31 @@ def test_suno_mcp_oauth_persistence_and_usage(tmp_path, monkeypatch):
         music_service.providers_catalog()["selection"]["suno_mcp_oauth_connected"]
         is False
     )
+
+    # Unknown explicit account_id in _ensure_suno_mcp_server must fail without modifying existing accounts
+    with pytest.raises(ValueError, match="missing"):
+        music_service._ensure_suno_mcp_server(
+            oauth_payload={"account_id": "missing", "client_id": "new"}
+        )
+    srv_unchanged = mgr.get_server("suno_mcp")
+    assert srv_unchanged["accounts"][0]["oauth"]["client_id"] == "suno-cid"
+    assert [a["id"] for a in srv_unchanged["accounts"]] == ["default", "secondary"]
+
+    # complete_oauth with code and no token_url must reject without marking connected=True
+    mgr.save_server(
+        {
+            "id": "no_token_url_srv",
+            "name": "No Token URL",
+            "transport": "http_streaming",
+            "url": "https://notoken.example.com/mcp",
+            "accounts": [{"id": "acc1", "name": "Acc 1", "auth_type": "oauth"}],
+        }
+    )
+    with pytest.raises(ValueError, match="token_url"):
+        mgr.complete_oauth(
+            "no_token_url_srv",
+            payload={"account_id": "acc1", "code": "synthetic-code"},
+        )
+    no_tok_acc = mgr.get_server("no_token_url_srv")["accounts"][0]
+    assert no_tok_acc["oauth"]["connected"] is False
+    assert vault.get("mcp:connector:no_token_url_srv:acc1:oauth_access_token") is None

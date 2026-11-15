@@ -163,10 +163,19 @@ def _ensure_suno_mcp_server(
         target_acc_id = str(oauth_payload.get("account_id") or "").strip()
         target_idx = 0
         if target_acc_id and existing_accounts:
-            for idx, item in enumerate(existing_accounts):
-                if item.get("id") == target_acc_id:
-                    target_idx = idx
-                    break
+            matched_idx = next(
+                (
+                    idx
+                    for idx, item in enumerate(existing_accounts)
+                    if item.get("id") == target_acc_id
+                ),
+                None,
+            )
+            if matched_idx is None:
+                raise ValueError(
+                    f"Conta '{target_acc_id}' não encontrada no servidor '{_SUNO_MCP_SERVER_ID}'."
+                )
+            target_idx = matched_idx
         acc = (
             dict(existing_accounts[target_idx])
             if existing_accounts
