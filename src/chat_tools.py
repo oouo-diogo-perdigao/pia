@@ -97,16 +97,109 @@ def image_intent(text):
     )
 
 
+def _strip_accents(text: str) -> str:
+    return "".join(
+        c
+        for c in unicodedata.normalize("NFD", (text or "").lower())
+        if not unicodedata.combining(c)
+    ).strip()
+
+
+def music_intent(text: str) -> bool:
+    plain = _strip_accents(text)
+    if re.match(r"^(como|explique|o que|qual|nao)\b", plain):
+        return False
+    purpose = re.search(
+        r"\b(texto|explicacao|tutorial|codigo|prompt|instrucoes)\b", plain
+    )
+    music = re.search(
+        r"\b(musica|musicas|cancao|cancoes|song|music|melodia|suno)\b", plain
+    )
+    if music and purpose and purpose.start() < music.start():
+        return False
+    return bool(
+        re.match(
+            r"^(?:(?:por favor[, ]*|pia[, ]*|agora[, ]*)|(?:voce (?:pode|consegue)\s+)|(?:pode\s+))*"
+            r"(?:(?:gere|gerar|crie|criar|faca|fazer|componha|compor|generate|create)\b[^\n]{0,120}\b(?:musica|musicas|cancao|cancoes|song|music|melodia|suno)\b)",
+            plain,
+        )
+    )
+
+
+def parse_music_request(text: str) -> dict[str, str | None]:
+    raw = (text or "").strip()
+    plain = _strip_accents(raw)
+    provider = "suno_mcp" if re.search(r"\bsuno\b", plain) else None
+
+    cleaned = re.sub(
+        r"^(?:(?:por favor|pia|agora)[, ]+|(?:voce\s+(?:pode|consegue)|pode)\s+)*",
+        "",
+        raw,
+        flags=re.IGNORECASE,
+    ).strip()
+    cleaned = re.sub(
+        r"^(?:gere|gerar|crie|criar|faça|faca|componha|compor|generate|create)\s+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip()
+    cleaned = re.sub(
+        r"^(?:no\s+suno|na\s+suno|usando\s+(?:o\s+)?suno|com\s+(?:o\s+)?suno)\s+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip()
+    cleaned = re.sub(
+        r"^(?:uma\s+|um\s+)?(?:m[uú]sica|can[cç][aã]o|melodia|song|music)\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip()
+    cleaned = re.sub(
+        r"^(?:no\s+suno|na\s+suno|usando\s+(?:o\s+)?suno|com\s+(?:o\s+)?suno)\s+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip()
+    cleaned = re.sub(
+        r"^(?:sobre|de|com\s+o\s+tema|about)\s+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    prompt = cleaned or raw
+    style = "Alegre / Pop" if "alegre" in plain or "feliz" in plain else "Personalizado"
+    style_match = re.search(
+        r"\b(?:estilo|genero|no\s+estilo|style)\s+([^,.;\n]+)",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if style_match:
+        style = style_match.group(1).strip()
+
+    title_words = [w for w in re.split(r"\s+", prompt) if w][:6]
+    title = " ".join(title_words).strip(" .!?\"'").title() or "Nova Música"
+    return {
+        "prompt": prompt,
+        "provider": provider,
+        "title": title,
+        "style": style,
+    }
+
+
 class ChatTools:
     def __init__(self, root=None, base_url=None, session=None, timeout=3600):
         self.root = Path(root or user_path("chat"))
         self.base_url = base_url
         self.session = session or requests.Session()
         self.timeout = timeout
+        self.last_meta: dict = {}
         if session is None:
             self.session.trust_env = False
 
     def execute(self, text):
+        self.last_meta = {}
         plain = (
             unicodedata.normalize("NFKD", text.lower())
             .encode("ascii", "ignore")
@@ -117,10 +210,63 @@ class ChatTools:
         ) and re.search(r"\b(camera|webcam)\b", plain):
             from .tool_registry import call
 
+            self.last_meta = {"tools_used": ["pia_camera"]}
             return save_camera(call("pia_camera", {}))
+        if music_intent(text):
+            return self.generate_music(text)
         if not image_intent(text):
             return None
+        self.last_meta = {"tools_used": ["pia_image"]}
         return self.generate_image(text)
+
+    def generate_music(self, text: str) -> str:
+        from Plugins.Apps.music import service as music_service
+
+        parsed = parse_music_request(text)
+        prompt = parsed["prompt"] or text
+        provider = parsed["provider"]
+        title = parsed["title"] or "Nova Música"
+        style = parsed["style"] or "Personalizado"
+        try:
+            item = music_service.generate(
+                prompt=prompt,
+                provider=provider,
+            )
+        except Exception as exc:
+            self.last_meta = {"tools_used": ["pia_music"]}
+            return (
+                "### Não foi possível concluir a geração musical\n\n"
+                f"- **Prompt:** {prompt}\n"
+                f"- **Provedor:** `{provider or 'padrão'}`\n"
+                f"- **Motivo:** {exc}\n\n"
+                "Verifique a configuração do provedor em **Configurações → Música** e tente novamente."
+            )
+
+        audio_url = item.get("url") or ""
+        used_provider = item.get("provider") or provider or "music"
+        attachment = {
+            "type": "audio",
+            "title": title,
+            "prompt": prompt,
+            "style": style,
+            "provider": used_provider,
+            "url": audio_url,
+            "file": item.get("file"),
+        }
+        self.last_meta = {
+            "tools_used": ["pia_music"],
+            "attachments": [attachment] if audio_url else [],
+        }
+        lines = [
+            f"### Música criada: {title}",
+            "",
+            f"- **Tema / Prompt:** {prompt}",
+            f"- **Estilo:** {style}",
+            f"- **Provedor:** `{used_provider}`",
+        ]
+        if audio_url:
+            lines.append(f"- **Áudio:** [Ouvir ou baixar música]({audio_url})")
+        return "\n".join(lines)
 
     def generate_image(self, prompt):
         context = app_access.issue("pia_chat", routes={"/v1/images/generations"})

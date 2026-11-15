@@ -1,4 +1,5 @@
 import { notify } from "./toasts";
+import { copyTextWithFallback } from "./clipboard-helpers";
 export async function session() {
   const response = await fetch("/api/pia/session", {
     method: "POST",
@@ -66,11 +67,10 @@ export function report(error) {
   );
 }
 export async function copy(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    await api("/native", { action: "clipboard-text", payload: { text } });
-  }
+  return copyTextWithFallback(text, {
+    nativeCopy: (value) =>
+      api("/native", { action: "clipboard-text", payload: { text: value } }),
+  });
 }
 export const safe =
   (fn) =>

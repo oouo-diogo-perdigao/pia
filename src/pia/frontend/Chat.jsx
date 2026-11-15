@@ -39,6 +39,7 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { api, watchJob, safe, report, copy } from "./api";
+import { notify } from "./toasts";
 import { Icon, usePia } from "./shared";
 import MessageInfoPopover, {
   McpUsageBadge,
@@ -125,7 +126,11 @@ function Message({
   const { t } = usePia(),
     [editing, setEditing] = useState(false),
     [text, setText] = useState(record.content),
-    [infoOpen, setInfoOpen] = useState(false);
+    [infoOpen, setInfoOpen] = useState(false),
+    [copied, setCopied] = useState(false),
+    copyTimer = useRef();
+
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
 
   const info = useMemo(() => formatMessageInfo(record), [record]);
   const media = useMemo(() => extractMessageMedia(record), [record]);
@@ -310,8 +315,14 @@ function Message({
         <Icon
           feedback
           icon={Copy}
-          label={t("Copiar")}
-          onClick={() => copy(record.content)}
+          label={copied ? "Copiado!" : t("Copiar")}
+          onClick={async () => {
+            await copy(record.content);
+            setCopied(true);
+            clearTimeout(copyTimer.current);
+            copyTimer.current = setTimeout(() => setCopied(false), 2000);
+            notify("Copiado para a área de transferência.");
+          }}
         />
         <Icon
           icon={Pencil}

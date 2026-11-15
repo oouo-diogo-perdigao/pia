@@ -88,11 +88,14 @@ class DesktopBackend:
                 if bot_instruction
                 else MARKDOWN_INSTRUCTION
             )
-            tool_result = ChatTools().execute(text)
+            chat_tools = ChatTools()
+            tool_result = chat_tools.execute(text)
             if tool_result is not None:
+                if getattr(chat_tools, "last_meta", None):
+                    meta.update(chat_tools.last_meta)
                 if on_delta:
                     on_delta(tool_result)
-                self.store.append(chat, "assistant", tool_result, meta=meta)
+                self.store.append(chat, "assistant", tool_result, meta=meta or None)
                 self._last_reply_meta = meta
                 return tool_result
             answer = []
@@ -160,16 +163,25 @@ class DesktopBackend:
                     meta.update(self.agent.last_meta() or {})
 
             runtime = get_runtime()
-            if is_stop_phrase(text):
-                self.voice_stop.set()
-                runtime.cancel()
-                result = "Interação encerrada."
-            elif runtime.active and runtime.dispatch(text):
-                result = "Mensagem entregue à skill ativa."
-            elif process_command(text, fallback):
-                result = "Comando enviado à PIA."
-            else:
-                result = "".join(answer)
+            try:
+                if is_stop_phrase(text):
+                    self.voice_stop.set()
+                    runtime.cancel()
+                    result = "Interação encerrada."
+                elif runtime.active and runtime.dispatch(text):
+                    result = "Mensagem entregue à skill ativa."
+                elif process_command(text, fallback):
+                    result = "Comando enviado à PIA."
+                else:
+                    result = "".join(answer)
+            except (RuntimeError, ValueError) as exc:
+                if answer:
+                    raise
+                result = (
+                    "### Modelos de IA indisponíveis no momento\n\n"
+                    f"{exc}\n\n"
+                    "Verifique suas chaves/créditos em **Configurações → LLMs** ou selecione outro modelo."
+                )
             if on_delta and not answer:
                 on_delta(result)
             self.store.append(chat, "assistant", result, meta=meta or None)
