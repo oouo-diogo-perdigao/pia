@@ -72,6 +72,7 @@ def edit_pauses(source, duration, config, run_ffmpeg):
             "-",
         ],
         capture_output=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         text=True,
         check=True,
     )
