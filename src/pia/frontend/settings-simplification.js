@@ -76,23 +76,28 @@ export function isManagedSettingField(sectionId, field) {
   return true;
 }
 
+export function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 export function buildManagedInitialValues(sectionId, fields = []) {
   return Object.fromEntries(
-    fields
+    safeArray(fields)
       .filter((field) => isManagedSettingField(sectionId, field))
       .map((field) => [field.name, field.value]),
   );
 }
 
 export function mergeSelectOptions(options, currentValue) {
+  const safeOptions = safeArray(options);
   const raw = currentValue ?? "";
-  if (options.some((opt) => opt.value === raw)) {
-    return options;
+  if (safeOptions.some((opt) => opt.value === raw)) {
+    return safeOptions;
   }
   if (!String(raw).trim()) {
-    return options;
+    return safeOptions;
   }
-  return [...options, { value: raw, label: String(raw) }];
+  return [...safeOptions, { value: raw, label: String(raw) }];
 }
 
 export function toSttLangSelectValue(value) {
@@ -164,4 +169,32 @@ export function formatVoiceOptionLabel(voice) {
     return name;
   }
   return `${name} · ${lang}`;
+}
+
+export function resolveTtsPanelState(providers, draft = {}) {
+  const safeProviders = safeArray(providers);
+  const safeDraft = draft && typeof draft === "object" ? draft : {};
+  const activeProvider =
+    safeProviders.find((p) => p?.id === safeDraft.provider) ||
+    safeProviders[0] ||
+    {};
+  const activeModels = safeArray(activeProvider.models);
+  const activeModel =
+    activeModels.find((m) => m?.id === safeDraft.model) ||
+    activeModels[0] ||
+    {};
+  const voices = safeArray(activeModel.voices).length
+    ? safeArray(activeModel.voices)
+    : safeArray(activeProvider.voices);
+  const selectedVoice = voices.some((v) => v?.id === safeDraft.voice)
+    ? safeDraft.voice
+    : voices[0]?.id || "";
+  return {
+    providers: safeProviders,
+    activeProvider,
+    activeModels,
+    activeModel,
+    voices,
+    selectedVoice,
+  };
 }

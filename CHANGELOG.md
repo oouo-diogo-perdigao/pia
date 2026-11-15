@@ -18,6 +18,9 @@
 ### Changed
 - Removidos inputs textuais brutos `TTS_*` da sub-aba `TTS` em `Settings.jsx`, preservando parâmetros avançados (`TTS_DEVICE`, timeouts, `TTS_LLM_MODEL`) em seção dobrável dedicada.
 
+### Fixed
+- Corrigido `TypeError: Cannot read properties of undefined (reading 'length')` ao abrir a aba `TTS` (`TTSSettingsPanel.jsx` agora desestrutura `{ providers, refresh }` corretamente de `useTtsCatalog()`, corrige a ordem de argumentos de `resolveDraftForModel` e aplica guardas defensivas `safeArray` em `TTSSettingsPanel.jsx`, `VoiceSelector.jsx`, `Settings.jsx`, `GeneralSettingsTabs.jsx`, `MusicSettingsPanel.jsx`, `tts-helpers.js` e `settings-simplification.js`).
+
 ### Security
 - Sanitização XML estrita de SVG rejeitando `<script>`, `foreignObject`, DTD/entidades, atributos `on*` e referências externas.
 - Bloqueio de desinstalação de modelos TTS em uso (`409 model_in_use`) e conflitos de revisão (`409 revision_conflict`).

@@ -14,9 +14,17 @@ import {
   isRecordingSoundsEnabled,
   mergeSelectOptions,
   normalizePreviewText,
+  resolveTtsPanelState,
+  safeArray,
   toSttLangSelectValue,
   toggleRecordingSounds,
 } from "./settings-simplification.js";
+import {
+  buildVoiceSelectGroups,
+  findProviderAndModel,
+  resolveDraftForModel,
+  splitTtsFields,
+} from "./tts-helpers.js";
 
 describe("settings-simplification", () => {
   it("exposes all 7 simplified general settings tabs including Música", () => {
@@ -160,6 +168,50 @@ describe("settings-simplification", () => {
     assert.equal(
       formatVoiceOptionLabel({ id: "pf_dora", name: "Dora", lang: "pt-BR" }),
       "Dora · pt-BR",
+    );
+  });
+
+  it("handles undefined, null, and partial catalog/settings props without throwing TypeError on .length", () => {
+    assert.deepEqual(safeArray(undefined), []);
+    assert.deepEqual(safeArray(null), []);
+    assert.deepEqual(buildManagedInitialValues("general", undefined), {});
+    assert.deepEqual(buildManagedInitialValues("general", null), {});
+    assert.deepEqual(mergeSelectOptions(undefined, "custom"), [
+      { value: "custom", label: "custom" },
+    ]);
+    assert.equal(normalizePreviewText(undefined), "");
+
+    const emptyState = resolveTtsPanelState(undefined, undefined);
+    assert.equal(emptyState.providers.length, 0);
+    assert.equal(emptyState.activeModels.length, 0);
+    assert.equal(emptyState.voices.length, 0);
+    assert.equal(emptyState.selectedVoice, "");
+
+    const partialProviderState = resolveTtsPanelState(
+      [{ id: "supertonic3", name: "Supertonic 3" }],
+      { provider: "missing", model: "missing", voice: "F1" },
+    );
+    assert.equal(partialProviderState.activeProvider.id, "supertonic3");
+    assert.equal(partialProviderState.activeModels.length, 0);
+    assert.equal(partialProviderState.voices.length, 0);
+
+    assert.deepEqual(splitTtsFields(undefined), {
+      ttsFields: [],
+      otherFields: [],
+    });
+    assert.deepEqual(findProviderAndModel(undefined, "supertonic3", "s3"), {
+      provider: null,
+      model: null,
+    });
+    assert.deepEqual(buildVoiceSelectGroups(undefined), []);
+    assert.deepEqual(
+      resolveDraftForModel(undefined, "supertonic3", "s3", undefined),
+      {
+        provider: "supertonic3",
+        model: "s3",
+        voice: "",
+        speed: 1.0,
+      },
     );
   });
 });

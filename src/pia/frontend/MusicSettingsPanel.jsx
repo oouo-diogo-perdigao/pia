@@ -67,12 +67,13 @@ export default function MusicSettingsPanel() {
     return () => jobSourceRef.current?.close();
   }, [loadCatalog]);
 
-  const providers = catalog?.providers || [];
+  const providers = Array.isArray(catalog?.providers) ? catalog.providers : [];
   const activeProvider =
-    providers.find((item) => item.id === draft.provider) || providers[0] || {};
+    providers.find((item) => item?.id === draft.provider) || providers[0] || {};
   const dirty = !loading && draftSnapshot(draft) !== savedSnapshot;
   const sunoConfigured = Boolean(
-    draft.suno_mcp_url.trim() || draft.suno_mcp_command.trim(),
+    String(draft.suno_mcp_url ?? "").trim() ||
+    String(draft.suno_mcp_command ?? "").trim(),
   );
 
   async function installLocalEngine() {

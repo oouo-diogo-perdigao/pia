@@ -9,7 +9,7 @@ export function isTtsField(field) {
 export function splitTtsFields(fields = []) {
   const ttsFields = [];
   const otherFields = [];
-  for (const field of fields) {
+  for (const field of Array.isArray(fields) ? fields : []) {
     if (isTtsField(field)) ttsFields.push(field);
     else otherFields.push(field);
   }
@@ -31,7 +31,7 @@ export function decodeModelKey(key) {
 export function groupProviders(providers = []) {
   const local = [];
   const remote = [];
-  for (const p of providers) {
+  for (const p of Array.isArray(providers) ? providers : []) {
     if (p?.kind === "local") local.push(p);
     else if (p) remote.push(p);
   }
@@ -39,11 +39,12 @@ export function groupProviders(providers = []) {
 }
 
 export function findProviderAndModel(providers = [], providerId, modelId) {
-  const provider = providers.find((p) => p.id === providerId) || null;
+  const safeProviders = Array.isArray(providers) ? providers : [];
+  const provider = safeProviders.find((p) => p?.id === providerId) || null;
   if (!provider) return { provider: null, model: null };
-  const models = provider.models || [];
+  const models = Array.isArray(provider.models) ? provider.models : [];
   const model =
-    (modelId && models.find((m) => m.id === modelId)) || models[0] || null;
+    (modelId && models.find((m) => m?.id === modelId)) || models[0] || null;
   return { provider, model };
 }
 
@@ -84,9 +85,13 @@ export function resolveDraftForModel(
     };
   }
   const resolvedModelId = model?.id || nextModelId || "";
-  const voices = model?.voices || provider.voices || [];
+  const voices = Array.isArray(model?.voices)
+    ? model.voices
+    : Array.isArray(provider.voices)
+      ? provider.voices
+      : [];
   const currentVoice = currentProfile?.voice || "";
-  const voiceStillValid = voices.some((v) => v.id === currentVoice);
+  const voiceStillValid = voices.some((v) => v?.id === currentVoice);
   const voice = voiceStillValid ? currentVoice : voices[0]?.id || "";
   const bounds = speedBounds(model, provider);
   const speed = clampSpeed(

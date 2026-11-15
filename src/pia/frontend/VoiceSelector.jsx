@@ -53,11 +53,11 @@ export function useTtsCatalog() {
     try {
       setError(null);
       const res = await api("/tts/providers");
-      setProviders(res.providers || []);
-      const sel = res.selection?.profile || res.selected || null;
+      setProviders(Array.isArray(res?.providers) ? res.providers : []);
+      const sel = res?.selection?.profile || res?.selected || null;
       setSelection(sel);
-      setRevision(res.revision || res.selection?.revision || 1);
-      setWarnings(res.warnings || []);
+      setRevision(res?.revision || res?.selection?.revision || 1);
+      setWarnings(Array.isArray(res?.warnings) ? res.warnings : []);
       return res;
     } catch (err) {
       setError(err?.message || "Falha ao carregar catálogo de voz.");
@@ -73,10 +73,10 @@ export function useTtsCatalog() {
     api("/tts/providers")
       .then((res) => {
         if (!active) return;
-        setProviders(res.providers || []);
-        setSelection(res.selection?.profile || res.selected || null);
-        setRevision(res.revision || res.selection?.revision || 1);
-        setWarnings(res.warnings || []);
+        setProviders(Array.isArray(res?.providers) ? res.providers : []);
+        setSelection(res?.selection?.profile || res?.selected || null);
+        setRevision(res?.revision || res?.selection?.revision || 1);
+        setWarnings(Array.isArray(res?.warnings) ? res.warnings : []);
       })
       .catch((err) => {
         if (!active) return;
@@ -173,22 +173,28 @@ export default function VoiceSelector({
   label = "Modelo e voz",
 }) {
   const [previewPhrase, setPreviewPhrase] = useState(DEFAULT_TTS_PREVIEW_TEXT);
+  const safeCatalog = Array.isArray(catalog) ? catalog : [];
   const safeVal = value && typeof value === "object" ? value : null;
   const { provider, model } = findProviderAndModel(
-    catalog,
+    safeCatalog,
     safeVal?.provider,
     safeVal?.model,
   );
-  const voices = model?.voices || provider?.voices || [];
+  const voices = Array.isArray(model?.voices)
+    ? model.voices
+    : Array.isArray(provider?.voices)
+      ? provider.voices
+      : [];
+  const safePreviewPhrase = String(previewPhrase ?? "");
   const bounds = speedBounds(model, provider);
   const modelKey = provider
     ? encodeModelKey(provider.id, model?.id || safeVal?.model)
     : null;
-  const selectedVoice = voices.some((v) => v.id === safeVal?.voice)
+  const selectedVoice = voices.some((v) => v?.id === safeVal?.voice)
     ? safeVal?.voice
     : null;
   const speed = clampSpeed(safeVal?.speed, bounds);
-  const groups = buildVoiceSelectGroups(catalog);
+  const groups = buildVoiceSelectGroups(safeCatalog);
 
   const unavailableReason =
     provider && !model?.available
@@ -204,13 +210,13 @@ export default function VoiceSelector({
         placeholder="Selecione um modelo de voz"
         data={groups}
         value={modelKey}
-        disabled={disabled || !catalog.length}
+        disabled={disabled || !safeCatalog.length}
         searchable
         nothingFoundMessage="Nenhum modelo disponível"
         onChange={(nextKey) => {
           if (!nextKey) return;
           const { provider: pid, model: mid } = decodeModelKey(nextKey);
-          onChange?.(resolveDraftForModel(catalog, pid, mid, safeVal));
+          onChange?.(resolveDraftForModel(safeCatalog, pid, mid, safeVal));
         }}
       />
       {unavailableReason && (
@@ -257,7 +263,7 @@ export default function VoiceSelector({
               !provider?.id ||
               !selectedVoice ||
               !model?.available ||
-              !previewPhrase.trim()
+              !safePreviewPhrase.trim()
             }
             onClick={() =>
               onPreview(
@@ -267,7 +273,7 @@ export default function VoiceSelector({
                   voice: selectedVoice,
                   speed,
                 },
-                normalizePreviewText(previewPhrase),
+                normalizePreviewText(safePreviewPhrase),
               )
             }
           >
@@ -281,7 +287,7 @@ export default function VoiceSelector({
           label="Texto de teste da voz"
           placeholder={DEFAULT_TTS_PREVIEW_TEXT}
           maxLength={MAX_TTS_PREVIEW_CHARS}
-          value={previewPhrase}
+          value={safePreviewPhrase}
           disabled={disabled}
           onChange={(e) =>
             setPreviewPhrase(normalizePreviewText(e.currentTarget.value))
@@ -289,7 +295,7 @@ export default function VoiceSelector({
           rightSectionWidth={52}
           rightSection={
             <Text size="xs" c="dimmed">
-              {previewPhrase.length}/{MAX_TTS_PREVIEW_CHARS}
+              {safePreviewPhrase.length}/{MAX_TTS_PREVIEW_CHARS}
             </Text>
           }
         />

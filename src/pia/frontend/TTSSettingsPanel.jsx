@@ -46,6 +46,8 @@ import {
   MAX_TTS_PREVIEW_CHARS,
   formatVoiceOptionLabel,
   normalizePreviewText,
+  resolveTtsPanelState,
+  safeArray,
 } from "./settings-simplification";
 
 function sameProfile(a, b) {
@@ -59,10 +61,17 @@ function sameProfile(a, b) {
 }
 
 export default function TTSSettingsPanel() {
-  const { navigate, refresh } = usePia();
-  const { catalog, selection, revision, loading, error, reload } =
-    useTtsCatalog();
+  const { navigate, refresh: refreshPia } = usePia();
+  const {
+    providers: rawProviders,
+    selection,
+    revision,
+    loading,
+    error,
+    refresh: refreshCatalog,
+  } = useTtsCatalog();
   const { preview, previewing } = useTtsPreview();
+  const catalog = safeArray(rawProviders);
 
   const [draft, setDraft] = useState({
     provider: "",
@@ -133,7 +142,7 @@ export default function TTSSettingsPanel() {
           ) {
             clearInterval(pollers.current[key]);
             delete pollers.current[key];
-            await reload();
+            await refreshCatalog();
             notifyTtsUpdated();
             if (snap.status === "completed" || snap.status === "done") {
               notify(`Modelo ${modelId} instalado com sucesso.`);
@@ -147,12 +156,12 @@ export default function TTSSettingsPanel() {
       pollers.current[key] = setInterval(poll, 1200);
       poll();
     },
-    [reload],
+    [refreshCatalog],
   );
 
   useEffect(() => {
     for (const provider of catalog) {
-      for (const model of provider.models || []) {
+      for (const model of safeArray(provider?.models)) {
         if (
           model.installation?.state === "installing" &&
           model.installation?.job_id
@@ -161,7 +170,7 @@ export default function TTSSettingsPanel() {
         }
       }
     }
-  }, [catalog, attachJob]);
+  }, [rawProviders, attachJob]);
 
   useEffect(() => {
     const active = pollers.current;
@@ -185,15 +194,15 @@ export default function TTSSettingsPanel() {
     );
   }
 
-  const localProviders = catalog.filter((p) => p.kind !== "remote");
-  const remoteProviders = catalog.filter((p) => p.kind === "remote");
+  const localProviders = catalog.filter((p) => p?.kind !== "remote");
+  const remoteProviders = catalog.filter((p) => p?.kind === "remote");
 
   const modelGroups = [];
   if (localProviders.length) {
     modelGroups.push({
       group: "Modelos locais",
       items: localProviders.flatMap((p) =>
-        (p.models || []).map((m) => ({
+        safeArray(p?.models).map((m) => ({
           value: encodeModelKey(p.id, m.id),
           label: m.name || `${p.name} · ${m.id}`,
         })),
@@ -204,7 +213,7 @@ export default function TTSSettingsPanel() {
     modelGroups.push({
       group: "Provedores na nuvem",
       items: remoteProviders.flatMap((p) =>
-        (p.models || []).map((m) => ({
+        safeArray(p?.models).map((m) => ({
           value: encodeModelKey(p.id, m.id),
           label: `${p.name} · ${m.name || m.id}`,
         })),
@@ -212,11 +221,8 @@ export default function TTSSettingsPanel() {
     });
   }
 
-  const activeProvider =
-    catalog.find((p) => p.id === draft.provider) || catalog[0] || {};
-  const activeModels = activeProvider.models || [];
-  const activeModel =
-    activeModels.find((m) => m.id === draft.model) || activeModels[0] || {};
+  const { activeProvider, activeModel, voices, selectedVoice } =
+    resolveTtsPanelState(catalog, draft);
 
   const currentModelKey =
     activeProvider.id && activeModel.id
@@ -241,10 +247,7 @@ export default function TTSSettingsPanel() {
       activeProvider.credential_state === "configured",
     );
 
-  const voices = activeModel.voices || [];
-  const selectedVoice = voices.some((v) => v.id === draft.voice)
-    ? draft.voice
-    : voices[0]?.id || "";
+  const safePreviewText = String(previewText ?? "");
   const bounds = speedBounds(activeModel, activeProvider);
   const speed = clampSpeed(draft.speed, bounds);
   const dirty = !sameProfile(
@@ -270,7 +273,7 @@ export default function TTSSettingsPanel() {
       const updated = { ...notifSettings, read_aloud: next };
       await api("/notifications/settings", updated);
       setNotifSettings(updated);
-      await refresh().catch(() => {});
+      await refreshPia().catch(() => {});
     } finally {
       setSavingReadAloud(false);
     }
@@ -298,7 +301,7 @@ export default function TTSSettingsPanel() {
     const jobId = activeJob?.job_id || activeModel.installation?.job_id;
     if (!jobId) return;
     await api(`/tts/jobs/${jobId}/cancel`, {});
-    await reload();
+    await refreshCatalog();
   }
 
   async function uninstallActiveModel() {
@@ -311,7 +314,7 @@ export default function TTSSettingsPanel() {
       });
       setConfirmRemove(false);
       notify(`Modelo ${activeModel.name || activeModel.id} removido.`);
-      await reload();
+      await refreshCatalog();
       notifyTtsUpdated();
     } catch (err) {
       if (err?.status === 409) {
@@ -338,7 +341,7 @@ export default function TTSSettingsPanel() {
       await api(
         `/tts/voices?provider=${encodeURIComponent(activeProvider.id)}&model=${encodeURIComponent(activeModel.id || "")}&refresh=true`,
       );
-      await reload();
+      await refreshCatalog();
       notify("Lista de vozes atualizada.");
     } finally {
       setRefreshingVoices(false);
@@ -356,7 +359,7 @@ export default function TTSSettingsPanel() {
         speed,
         revision,
       });
-      await reload();
+      await refreshCatalog();
       notify("Voz Geral da PIA salva com sucesso.");
       notifyTtsUpdated();
     } catch (err) {
@@ -388,7 +391,7 @@ export default function TTSSettingsPanel() {
               variant="light"
               onClick={safe(async () => {
                 setConflict(false);
-                await reload();
+                await refreshCatalog();
               })}
             >
               Recarregar agora
@@ -483,15 +486,15 @@ export default function TTSSettingsPanel() {
                 value={currentModelKey}
                 onChange={(val) => {
                   const decoded = decodeModelKey(val);
-                  if (!decoded) return;
-                  const p =
-                    catalog.find((item) => item.id === decoded.provider) ||
-                    activeProvider;
-                  const m =
-                    (p.models || []).find(
-                      (item) => item.id === decoded.model,
-                    ) || (p.models || [])[0];
-                  setDraft((old) => resolveDraftForModel(p, m, old.speed));
+                  if (!decoded?.provider) return;
+                  setDraft((old) =>
+                    resolveDraftForModel(
+                      catalog,
+                      decoded.provider,
+                      decoded.model,
+                      old,
+                    ),
+                  );
                 }}
               />
             </div>
@@ -529,10 +532,10 @@ export default function TTSSettingsPanel() {
                 title="Não foi possível remover o modelo"
               >
                 <Text size="xs">{uninstallError.message}</Text>
-                {uninstallError.references?.length > 0 && (
+                {safeArray(uninstallError?.references).length > 0 && (
                   <Text size="xs" mt={4} c="dimmed">
                     Em uso por:{" "}
-                    {uninstallError.references
+                    {safeArray(uninstallError.references)
                       .map(formatReferenceLabel)
                       .join(", ")}
                   </Text>
@@ -571,14 +574,14 @@ export default function TTSSettingsPanel() {
                 aria-label="Texto de teste da voz"
                 placeholder={DEFAULT_TTS_PREVIEW_TEXT}
                 maxLength={MAX_TTS_PREVIEW_CHARS}
-                value={previewText}
+                value={safePreviewText}
                 onChange={(e) =>
                   setPreviewText(normalizePreviewText(e.currentTarget.value))
                 }
                 rightSectionWidth={52}
                 rightSection={
                   <Text size="xs" c="dimmed">
-                    {previewText.length}/{MAX_TTS_PREVIEW_CHARS}
+                    {safePreviewText.length}/{MAX_TTS_PREVIEW_CHARS}
                   </Text>
                 }
               />
@@ -595,7 +598,7 @@ export default function TTSSettingsPanel() {
                   !activeProvider.id ||
                   !selectedVoice ||
                   !activeModel.available ||
-                  !previewText.trim()
+                  !safePreviewText.trim()
                 }
                 onClick={() =>
                   preview(
@@ -605,7 +608,7 @@ export default function TTSSettingsPanel() {
                       voice: selectedVoice,
                       speed,
                     },
-                    normalizePreviewText(previewText),
+                    normalizePreviewText(safePreviewText),
                   )
                 }
               >

@@ -24,6 +24,7 @@ import GeneralSettingsTabs from "./GeneralSettingsTabs";
 import {
   GENERAL_TABS,
   buildManagedInitialValues,
+  safeArray,
 } from "./settings-simplification";
 
 function ServerProfilePanel() {
@@ -95,12 +96,13 @@ export default function SettingsPanel({ section = "general" }) {
       api("/settings")
         .then((result) => {
           if (!active) return;
-          setSections(result);
-          const selected = result.find((s) => s.id === section) || result[0];
-          const initial = buildManagedInitialValues(
-            selected.id,
-            selected.fields,
-          );
+          const safeResult = safeArray(result);
+          setSections(safeResult);
+          const selected =
+            safeResult.find((s) => s?.id === section) || safeResult[0];
+          const initial = selected
+            ? buildManagedInitialValues(selected.id, selected.fields)
+            : {};
           setValues(initial);
           setInitialValues(initial);
           setSavedValues(fingerprint(initial));
@@ -114,12 +116,15 @@ export default function SettingsPanel({ section = "general" }) {
   if (section === "logs") return <LogsPanel />;
   if (section === "documents") return <DocumentSettings />;
   if (section === "credentials") return <VaultSettings />;
-  const selected = sections.find((s) => s.id === section) || sections[0];
+  const safeSections = safeArray(sections);
+  const selected =
+    safeSections.find((s) => s?.id === section) || safeSections[0];
   if (!selected) return <Text>{t("Carregando…")}</Text>;
+  const selectedFields = safeArray(selected.fields);
   const { otherFields } =
     selected.id === "general"
-      ? splitTtsFields(selected.fields)
-      : { otherFields: selected.fields };
+      ? splitTtsFields(selectedFields)
+      : { otherFields: selectedFields };
   const isCustomTtsTab = selected.id === "general" && group === "TTS";
   const isCustomMusicTab =
     (selected.id === "general" && group === "Música") ||

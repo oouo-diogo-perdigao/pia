@@ -25,7 +25,11 @@ import {
 } from "./settings-simplification";
 
 function fieldByName(fields, name) {
-  return fields.find((f) => (f.base || f.name) === name) || null;
+  return (
+    (Array.isArray(fields) ? fields : []).find(
+      (f) => (f?.base || f?.name) === name,
+    ) || null
+  );
 }
 
 function VaultLinkRow({ title, description, configured, onOpenVault }) {
@@ -71,12 +75,14 @@ export default function GeneralSettingsTabs({
 }) {
   const { language, setLanguage, navigate } = usePia();
   const [editingIceUrl, setEditingIceUrl] = useState(false);
+  const safeFields = Array.isArray(fields) ? fields : [];
+  const safeValues = values && typeof values === "object" ? values : {};
 
   const openVault = () =>
     navigate({ view: "settings", section: "credentials" });
 
   if (group === "Geral") {
-    const compatKey = fieldByName(fields, "OPENAI_COMPAT_API_KEY");
+    const compatKey = fieldByName(safeFields, "OPENAI_COMPAT_API_KEY");
     return (
       <Stack gap="lg">
         <div>
@@ -127,9 +133,9 @@ export default function GeneralSettingsTabs({
   }
 
   if (group === "STT") {
-    const sttGeminiKey = fieldByName(fields, "STT_GEMINI_API_KEY");
-    const sttModelValue = values.STT_MODEL ?? "large-v3-turbo";
-    const sttLangSelectValue = toSttLangSelectValue(values.STT_LANG);
+    const sttGeminiKey = fieldByName(safeFields, "STT_GEMINI_API_KEY");
+    const sttModelValue = safeValues.STT_MODEL ?? "large-v3-turbo";
+    const sttLangSelectValue = toSttLangSelectValue(safeValues.STT_LANG);
     return (
       <Stack gap="lg">
         <div>
@@ -205,8 +211,8 @@ export default function GeneralSettingsTabs({
   }
 
   if (group === "Imagens · ICE") {
-    const comfyUrl = String(values.ICE_COMFYUI_URL || "").trim();
-    const defaultSize = values.ICE_IMAGE_DEFAULT_SIZE ?? "1024x1024";
+    const comfyUrl = String(safeValues.ICE_COMFYUI_URL || "").trim();
+    const defaultSize = safeValues.ICE_IMAGE_DEFAULT_SIZE ?? "1024x1024";
     return (
       <Stack gap="lg">
         <div>
@@ -240,7 +246,7 @@ export default function GeneralSettingsTabs({
                       w={240}
                       aria-label="Endereço do servidor de imagens"
                       placeholder="http://127.0.0.1:8188"
-                      value={values.ICE_COMFYUI_URL ?? ""}
+                      value={safeValues.ICE_COMFYUI_URL ?? ""}
                       onChange={(e) => {
                         const next = e.currentTarget.value;
                         setValues((old) => ({ ...old, ICE_COMFYUI_URL: next }));
@@ -299,13 +305,13 @@ export default function GeneralSettingsTabs({
   }
 
   if (group === "LLMs") {
-    const modelValue = values.LLM_MODEL ?? "free";
+    const modelValue = safeValues.LLM_MODEL ?? "free";
     const remoteKeys = [
-      fieldByName(fields, "AGE_GEMINI_API_KEY"),
-      fieldByName(fields, "GROQ_API_KEY"),
-      fieldByName(fields, "OPENROUTER_API_KEY"),
-      fieldByName(fields, "CLOUDFLARE_API_TOKEN"),
-      fieldByName(fields, "CLOUDFLARE_API_KEY"),
+      fieldByName(safeFields, "AGE_GEMINI_API_KEY"),
+      fieldByName(safeFields, "GROQ_API_KEY"),
+      fieldByName(safeFields, "OPENROUTER_API_KEY"),
+      fieldByName(safeFields, "CLOUDFLARE_API_TOKEN"),
+      fieldByName(safeFields, "CLOUDFLARE_API_KEY"),
     ].filter(Boolean);
     const anyConfigured = remoteKeys.some((item) => item.configured);
 
@@ -327,7 +333,7 @@ export default function GeneralSettingsTabs({
                 <TextInput
                   w={240}
                   aria-label="Como a PIA deve te chamar"
-                  value={values.AGE_USER_NAME ?? ""}
+                  value={safeValues.AGE_USER_NAME ?? ""}
                   onChange={(e) => {
                     const next = e.currentTarget.value;
                     setValues((old) => ({ ...old, AGE_USER_NAME: next }));
@@ -372,7 +378,7 @@ export default function GeneralSettingsTabs({
                   w={260}
                   aria-label="Modelo local (Ollama)"
                   placeholder="ollama/qwen3:8b"
-                  value={values.LLM_LOCAL_MODEL ?? ""}
+                  value={safeValues.LLM_LOCAL_MODEL ?? ""}
                   onChange={(e) => {
                     const next = e.currentTarget.value;
                     setValues((old) => ({ ...old, LLM_LOCAL_MODEL: next }));
@@ -399,7 +405,7 @@ export default function GeneralSettingsTabs({
   }
 
   if (group === "Voz e áudio") {
-    const soundsEnabled = isRecordingSoundsEnabled(values);
+    const soundsEnabled = isRecordingSoundsEnabled(safeValues);
     return (
       <Stack gap="lg">
         <div>
