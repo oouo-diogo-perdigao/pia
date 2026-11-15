@@ -159,11 +159,18 @@ def _ensure_suno_mcp_server(
         payload["bearer_token"] = str(suno_token).strip()
 
     if oauth_payload:
-        existing_accounts = list((existing or {}).get("accounts") or [])
+        existing_accounts = [dict(a) for a in ((existing or {}).get("accounts") or [])]
+        target_acc_id = str(oauth_payload.get("account_id") or "").strip()
+        target_idx = 0
+        if target_acc_id and existing_accounts:
+            for idx, item in enumerate(existing_accounts):
+                if item.get("id") == target_acc_id:
+                    target_idx = idx
+                    break
         acc = (
-            dict(existing_accounts[0])
+            dict(existing_accounts[target_idx])
             if existing_accounts
-            else {"id": "default", "name": "Suno OAuth"}
+            else {"id": target_acc_id or "default", "name": "Suno OAuth"}
         )
         oauth = dict(acc.get("oauth") or {})
         for key in ("client_id", "auth_url", "token_url", "scopes", "redirect_uri"):
@@ -176,7 +183,11 @@ def _ensure_suno_mcp_server(
             acc["auth_type"] = str(oauth_payload["auth_type"]).strip()
         elif oauth.get("client_id") or oauth.get("auth_url"):
             acc["auth_type"] = "oauth"
-        payload["accounts"] = [acc]
+        if existing_accounts:
+            existing_accounts[target_idx] = acc
+            payload["accounts"] = existing_accounts
+        else:
+            payload["accounts"] = [acc]
 
     return mgr.save_server(payload, server_id=_SUNO_MCP_SERVER_ID)
 

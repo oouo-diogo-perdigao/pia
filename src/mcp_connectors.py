@@ -1096,8 +1096,9 @@ class MCPConnectorManager:
                 token = str(token_data.get("access_token") or "").strip()
                 if not refresh_token and token_data.get("refresh_token"):
                     refresh_token = str(token_data["refresh_token"]).strip()
-
-        if not token:
+            if not token:
+                raise ValueError("Endpoint OAuth não retornou access_token.")
+        elif not token:
             token = code
         if not token:
             raise ValueError("Token ou código OAuth ausente.")

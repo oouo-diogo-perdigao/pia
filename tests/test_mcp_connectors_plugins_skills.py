@@ -386,3 +386,35 @@ def test_suno_mcp_oauth_persistence_and_usage(tmp_path, monkeypatch):
         seen_token_post["mcp_headers"]["Authorization"]
         == "Bearer suno-oauth-access-9999"
     )
+
+    # Preserves secondary accounts when updating Suno OAuth
+    mgr.save_server(
+        {
+            "id": "suno_mcp",
+            "name": "Suno (MCP)",
+            "transport": "http_streaming",
+            "url": "https://suno.example.com/mcp",
+            "accounts": [
+                mgr.get_server("suno_mcp")["accounts"][0],
+                {"id": "secondary", "name": "Conta Extra", "auth_type": "bearer"},
+            ],
+        },
+        server_id="suno_mcp",
+    )
+    music_service.select_provider(suno_mcp_scopes="music.generate music.read")
+    srv_after = mgr.get_server("suno_mcp")
+    assert [a["id"] for a in srv_after["accounts"]] == ["default", "secondary"]
+
+    # Empty access_token response from token_url must fail and not mark connected=True
+    music_service.suno_oauth_disconnect()
+    assert (
+        music_service.providers_catalog()["selection"]["suno_mcp_oauth_connected"]
+        is False
+    )
+    monkeypatch.setattr("requests.post", lambda url, **kw: FakeResp({}))
+    with pytest.raises(ValueError, match="access_token"):
+        music_service.suno_oauth_callback({"account_id": "default", "code": "bad-code"})
+    assert (
+        music_service.providers_catalog()["selection"]["suno_mcp_oauth_connected"]
+        is False
+    )
