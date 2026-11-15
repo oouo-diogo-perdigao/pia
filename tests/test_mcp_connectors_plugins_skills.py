@@ -465,9 +465,11 @@ def test_suno_mcp_dcr_pkce_and_no_false_positive_token(tmp_path, monkeypatch):
     from src.core.secrets.vault import MemoryVault
     from src.workspace_store import WorkspaceStore
 
-    sstore = settings_store.SettingsStore(path=tmp_path / "settings.sqlite3")
-    monkeypatch.setattr(settings_store, "_store", sstore)
     vault = MemoryVault()
+    sstore = settings_store.SettingsStore(
+        path=tmp_path / "settings.sqlite3", vault=vault
+    )
+    monkeypatch.setattr(settings_store, "_store", sstore)
     wstore = WorkspaceStore(tmp_path / "ws.sqlite3")
     mgr = mcp_connectors.MCPConnectorManager(store=wstore, vault=vault)
     monkeypatch.setattr(mcp_connectors, "_manager", mgr)
