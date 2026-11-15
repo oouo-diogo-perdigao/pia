@@ -24,6 +24,7 @@ import {
   clampSpeed,
   resolveDraftForModel,
   buildVoiceSelectGroups,
+  ttsPreviewController,
 } from "./tts-helpers";
 
 export const TTS_UPDATED_EVENT = "pia:tts-updated";
@@ -102,84 +103,58 @@ export function useTtsCatalog() {
 
 export function useTtsPreview() {
   const [previewing, setPreviewing] = useState(false);
-  const audioRef = useRef(null);
-  const sourceRef = useRef(null);
+  const inFlightRef = useRef(false);
+  const mountedRef = useRef(true);
+  const ownerRef = useRef(null);
+  if (!ownerRef.current) {
+    ownerRef.current = Symbol("tts-preview");
+  }
 
   useEffect(() => {
+    mountedRef.current = true;
+    const owner = ownerRef.current;
     return () => {
-      sourceRef.current?.close();
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
+      mountedRef.current = false;
+      ttsPreviewController.stop(owner);
     };
   }, []);
 
+  const stop = useCallback(() => {
+    ttsPreviewController.stop(ownerRef.current);
+  }, []);
+
   const preview = useCallback(async (profile, text) => {
+    if (inFlightRef.current) return;
     if (!profile?.provider || !profile?.voice) {
       notify("Selecione um modelo e uma voz antes de testar.", "error");
       return;
     }
+    inFlightRef.current = true;
     setPreviewing(true);
     try {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
-      sourceRef.current?.close();
-      const started = await api("/tts/preview", {
-        profile,
-        ...(text ? { text } : {}),
-      });
-      const jobId = started.job_id;
-      await new Promise((resolve, reject) => {
-        let settled = false;
-        const finish = (err) => {
-          if (settled) return;
-          settled = true;
-          clearInterval(poll);
-          sourceRef.current?.close();
-          if (err) reject(err);
-          else resolve();
-        };
-
-        const playUrl = (audioUrl) => {
-          const audio = new Audio(audioUrl);
-          audioRef.current = audio;
-          audio.onended = () => finish();
-          audio.onerror = () => finish(Error("Falha ao reproduzir prévia."));
-          audio.play().catch(finish);
-        };
-
-        sourceRef.current = watchJob(jobId, (ev) => {
-          if (ev.type === "done" && ev.result?.audio_url) {
-            playUrl(ev.result.audio_url);
-          } else if (ev.type === "error") {
-            finish(Error(ev.error || "Erro ao sintetizar prévia."));
-          }
-        });
-
-        const poll = setInterval(async () => {
-          try {
-            const snap = await api(`/tts/jobs/${jobId}`);
-            if (snap.state === "done" && snap.result?.audio_url) {
-              playUrl(snap.result.audio_url);
-            } else if (snap.state === "error") {
-              finish(
-                Error(snap.error?.message || "Erro ao sintetizar prévia."),
-              );
-            }
-          } catch {}
-        }, 700);
+      await ttsPreviewController.play(profile, text, {
+        owner: ownerRef.current,
+        requestPreview: (prof, previewText) =>
+          api("/tts/preview", {
+            profile: prof,
+            ...(previewText ? { text: previewText } : {}),
+          }),
+        watch: watchJob,
+        pollJob: (jobId) => api(`/tts/jobs/${jobId}`),
+        createAudio: (url) => new Audio(url),
+        notifyError: (msg) => notify(msg, "error"),
       });
     } catch (err) {
       report(err);
     } finally {
-      setPreviewing(false);
+      inFlightRef.current = false;
+      if (mountedRef.current) {
+        setPreviewing(false);
+      }
     }
   }, []);
 
-  return { preview, previewing };
+  return { preview, previewing, stop };
 }
 
 export default function VoiceSelector({

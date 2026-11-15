@@ -15,6 +15,7 @@ import {
   normalizeInstallJob,
   mergeInstallJob,
   resolveLocalModelBadges,
+  createTtsPreviewController,
 } from "./tts-helpers.js";
 
 const SAMPLE_PROVIDERS = [
@@ -282,5 +283,213 @@ describe("tts-helpers", () => {
     );
     assert.equal(missingUnselected.activeBadge, null);
     assert.equal(missingUnselected.statusBadge?.label, "Não instalado");
+  });
+
+  it("plays TTS preview audio exactly once even when SSE and multiple poll ticks return done", async () => {
+    const controller = createTtsPreviewController();
+    const audioInstances = [];
+    let sseCallback = null;
+    let sseClosed = 0;
+    let pollCalls = 0;
+
+    const previewPromise = controller.play(
+      { provider: "kokoro", model: "kokoro-82m", voice: "pf_dora", speed: 1 },
+      "Olá, eu sou a PIA",
+      {
+        pollIntervalMs: 10,
+        requestPreview: async () => ({ job_id: "job-preview-1" }),
+        watch: (_jobId, cb) => {
+          sseCallback = cb;
+          return {
+            close: () => {
+              sseClosed += 1;
+            },
+          };
+        },
+        pollJob: async () => {
+          pollCalls += 1;
+          return {
+            state: "done",
+            result: { audio_url: "/api/pia/tts/previews/job-preview-1/audio" },
+          };
+        },
+        createAudio: (url) => {
+          const audio = {
+            url,
+            currentTime: 0,
+            playCalls: 0,
+            pauseCalls: 0,
+            onended: null,
+            onerror: null,
+            play() {
+              this.playCalls += 1;
+              return Promise.resolve();
+            },
+            pause() {
+              this.pauseCalls += 1;
+            },
+          };
+          audioInstances.push(audio);
+          return audio;
+        },
+      },
+    );
+
+    // Wait for requestPreview + watch/poll setup
+    await new Promise((r) => setTimeout(r, 5));
+
+    // Simulate SSE "done" arriving, followed by a duplicate SSE "done" and multiple poll windows
+    sseCallback({
+      type: "done",
+      result: { audio_url: "/api/pia/tts/previews/job-preview-1/audio" },
+    });
+    sseCallback({
+      type: "done",
+      result: { audio_url: "/api/pia/tts/previews/job-preview-1/audio" },
+    });
+
+    // Wait > 4x pollIntervalMs while audio is still playing (before onended fires)
+    await new Promise((r) => setTimeout(r, 60));
+
+    assert.equal(audioInstances.length, 1);
+    assert.equal(audioInstances[0].playCalls, 1);
+    assert.ok(sseClosed >= 1);
+    assert.ok(pollCalls <= 1);
+
+    audioInstances[0].onended();
+    const played = await previewPromise;
+    assert.equal(played, true);
+    assert.equal(controller.isActive(), false);
+  });
+
+  it("plays TTS preview audio once when polling completes before SSE", async () => {
+    const controller = createTtsPreviewController();
+    const audioInstances = [];
+    let sseCallback = null;
+
+    const previewPromise = controller.play(
+      { provider: "kokoro", model: "kokoro-82m", voice: "pf_dora", speed: 1 },
+      undefined,
+      {
+        pollIntervalMs: 5,
+        requestPreview: async () => ({ job_id: "job-preview-2" }),
+        watch: (_jobId, cb) => {
+          sseCallback = cb;
+          return { close: () => {} };
+        },
+        pollJob: async () => ({
+          state: "done",
+          result: { audio_url: "/api/pia/tts/previews/job-preview-2/audio" },
+        }),
+        createAudio: (url) => {
+          const audio = {
+            url,
+            currentTime: 0,
+            playCalls: 0,
+            onended: null,
+            onerror: null,
+            play() {
+              this.playCalls += 1;
+              return Promise.resolve();
+            },
+            pause() {},
+          };
+          audioInstances.push(audio);
+          return audio;
+        },
+      },
+    );
+
+    await new Promise((r) => setTimeout(r, 30));
+    // Late SSE done event after polling already started playback
+    sseCallback?.({
+      type: "done",
+      result: { audio_url: "/api/pia/tts/previews/job-preview-2/audio" },
+    });
+
+    assert.equal(audioInstances.length, 1);
+    assert.equal(audioInstances[0].playCalls, 1);
+    audioInstances[0].onended();
+    assert.equal(await previewPromise, true);
+  });
+
+  it("enforces singleton playback by pausing/resetting previous audio and isolating stop(owner)", async () => {
+    const controller = createTtsPreviewController();
+    const ownerA = Symbol("A");
+    const ownerB = Symbol("B");
+    const audioInstances = [];
+
+    const makeAudio = (url) => {
+      const audio = {
+        url,
+        currentTime: 1.5,
+        playCalls: 0,
+        pauseCalls: 0,
+        onended: null,
+        onerror: null,
+        play() {
+          this.playCalls += 1;
+          return Promise.resolve();
+        },
+        pause() {
+          this.pauseCalls += 1;
+        },
+      };
+      audioInstances.push(audio);
+      return audio;
+    };
+
+    let sseA;
+    const firstPromise = controller.play(
+      { provider: "kokoro", model: "kokoro-82m", voice: "pf_dora", speed: 1 },
+      "um",
+      {
+        owner: ownerA,
+        pollIntervalMs: 100,
+        requestPreview: async () => ({ job_id: "job-a" }),
+        watch: (_id, cb) => {
+          sseA = cb;
+          return { close: () => {} };
+        },
+        pollJob: async () => ({ state: "running" }),
+        createAudio: makeAudio,
+      },
+    );
+    await new Promise((r) => setTimeout(r, 5));
+    sseA({ type: "done", result: { audio_url: "/audio-a.wav" } });
+    assert.equal(audioInstances.length, 1);
+
+    let sseB;
+    const secondPromise = controller.play(
+      { provider: "kokoro", model: "kokoro-82m", voice: "pm_alex", speed: 1 },
+      "dois",
+      {
+        owner: ownerB,
+        pollIntervalMs: 100,
+        requestPreview: async () => ({ job_id: "job-b" }),
+        watch: (_id, cb) => {
+          sseB = cb;
+          return { close: () => {} };
+        },
+        pollJob: async () => ({ state: "running" }),
+        createAudio: makeAudio,
+      },
+    );
+
+    // First audio must be paused and reset immediately; first promise resolves false
+    assert.equal(audioInstances[0].pauseCalls, 1);
+    assert.equal(audioInstances[0].currentTime, 0);
+    assert.equal(await firstPromise, false);
+
+    // Stopping with ownerA must NOT stop ownerB
+    assert.equal(controller.stop(ownerA), false);
+
+    await new Promise((r) => setTimeout(r, 5));
+    sseB({ type: "done", result: { audio_url: "/audio-b.wav" } });
+    assert.equal(audioInstances.length, 2);
+    assert.equal(audioInstances[1].playCalls, 1);
+
+    audioInstances[1].onended();
+    assert.equal(await secondPromise, true);
   });
 });

@@ -542,3 +542,99 @@ def test_tts_install_job_reports_incremental_progress(api, tmp_path, monkeypatch
         "percent": 100.0,
     }
     assert done_job["result"]["installed"] is True
+
+
+def test_preview_synthesizes_once_without_local_playback_or_duplicate_events(
+    api, monkeypatch
+):
+    import time
+    from src.TTSManager import TTSManager
+    from src.tts_service import get_tts_service
+
+    request, port = api
+    origin = f"http://127.0.0.1:{port}"
+    st_s, _, hdrs = request(
+        payload={},
+        path="/api/pia/session",
+        method="POST",
+        headers={"Origin": origin},
+    )
+    assert st_s == 200
+    cookie = (hdrs.get("Set-Cookie") or hdrs.get("set-cookie")).split(";", 1)[0]
+
+    tm = TTSManager()
+    playback_calls = []
+    monkeypatch.setattr(
+        tm, "add_tts_job", lambda *a, **kw: playback_calls.append(("tts", a, kw))
+    )
+    monkeypatch.setattr(
+        tm, "add_audio_job", lambda *a, **kw: playback_calls.append(("audio", a, kw))
+    )
+    monkeypatch.setattr("src.TTSManager.TTSManager", lambda: tm)
+
+    svc = get_tts_service()
+    prov = svc.registry.get("kokoro")
+    synth_calls = []
+
+    def fake_synthesize(
+        text, voice, speed, response_format, *, model=None, style=None, device=None
+    ):
+        synth_calls.append((text, voice, speed, response_format, model))
+        return b"RIFFpreview-once"
+
+    monkeypatch.setattr(prov, "synthesize", fake_synthesize)
+
+    st_prev, prev_data, _ = request(
+        payload={
+            "text": "Olá, eu sou a PIA e esta é a minha voz.",
+            "profile": {
+                "provider": "kokoro",
+                "model": "kokoro-v1.0",
+                "voice": "pm_santa",
+                "speed": 1.0,
+            },
+        },
+        path="/api/pia/tts/preview",
+        method="POST",
+        headers={"Cookie": cookie, "Origin": origin},
+    )
+    assert st_prev == 202
+    job_id = prev_data["job_id"]
+
+    done_snap = None
+    for _ in range(40):
+        st_j, snap, _ = request(
+            path=f"/api/pia/tts/jobs/{job_id}",
+            method="GET",
+            headers={"Cookie": cookie},
+        )
+        assert st_j == 200
+        if snap.get("state") == "done":
+            done_snap = snap
+            break
+        time.sleep(0.025)
+
+    assert done_snap is not None
+    assert done_snap["result"]["audio_url"] == f"/api/pia/tts/previews/{job_id}/audio"
+
+    st_aud, aud_bytes, _ = request(
+        path=f"/api/pia/tts/previews/{job_id}/audio",
+        method="GET",
+        headers={"Cookie": cookie},
+    )
+    assert st_aud == 200
+    assert aud_bytes == b"RIFFpreview-once"
+
+    assert len(synth_calls) == 1
+    assert playback_calls == []
+
+    # Verifica que o stream de eventos do job emitiu apenas 1 evento 'done' (sem duplicidade)
+    from src.pia.http import get_service
+
+    ws_job = get_service().jobs.get(job_id)
+    assert ws_job is not None
+    done_events = [ev for ev in ws_job.events if ev.get("type") == "done"]
+    assert len(done_events) == 1
+    assert (
+        done_events[0]["result"]["audio_url"] == f"/api/pia/tts/previews/{job_id}/audio"
+    )

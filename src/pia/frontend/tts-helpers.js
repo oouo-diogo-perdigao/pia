@@ -294,3 +294,181 @@ export function resolveLocalModelBadges(
         : null,
   };
 }
+
+/**
+ * Singleton-capable TTS preview player controller.
+ * Ensures at most one preview audio plays at a time and deduplicates
+ * SSE + polling completion notifications for the same preview job.
+ */
+export function createTtsPreviewController() {
+  let active = null;
+  let nextToken = 0;
+
+  function stopAudio(audio) {
+    if (!audio) return;
+    try {
+      audio.onended = null;
+      audio.onerror = null;
+      audio.pause?.();
+      if ("currentTime" in audio) {
+        audio.currentTime = 0;
+      }
+    } catch {}
+  }
+
+  function cleanupWatchers(entry) {
+    if (!entry) return;
+    if (entry.pollTimer != null) {
+      clearInterval(entry.pollTimer);
+      entry.pollTimer = null;
+    }
+    try {
+      entry.source?.close?.();
+    } catch {}
+    entry.source = null;
+  }
+
+  function stop(owner) {
+    const current = active;
+    if (!current) return false;
+    if (owner !== undefined && current.owner !== owner) return false;
+    active = null;
+    cleanupWatchers(current);
+    stopAudio(current.audio);
+    current.audio = null;
+    current.cancel?.();
+    return true;
+  }
+
+  async function play(
+    profile,
+    text,
+    {
+      owner = null,
+      requestPreview,
+      watch,
+      pollJob,
+      createAudio = (url) => new Audio(url),
+      notifyError,
+      pollIntervalMs = 700,
+    } = {},
+  ) {
+    if (!profile?.provider || !profile?.voice) {
+      notifyError?.("Selecione um modelo e uma voz antes de testar.");
+      return false;
+    }
+
+    stop();
+
+    const token = ++nextToken;
+    let settled = false;
+    let playbackStarted = false;
+    let resolvePromise = null;
+
+    const entry = {
+      token,
+      owner,
+      audio: null,
+      source: null,
+      pollTimer: null,
+      cancel: () => {
+        if (settled) return;
+        settled = true;
+        resolvePromise?.(false);
+      },
+    };
+    active = entry;
+
+    try {
+      const started = await requestPreview(profile, text);
+      if (active !== entry || settled) {
+        return false;
+      }
+
+      const jobId = started?.job_id;
+      if (!jobId) {
+        throw Error("Resposta inválida ao iniciar prévia de voz.");
+      }
+
+      return await new Promise((resolve, reject) => {
+        resolvePromise = resolve;
+
+        const finish = (err, played = true) => {
+          if (settled) return;
+          settled = true;
+          cleanupWatchers(entry);
+          stopAudio(entry.audio);
+          entry.audio = null;
+          if (active === entry) active = null;
+          if (err) reject(err);
+          else resolve(played);
+        };
+
+        const playUrlOnce = (audioUrl) => {
+          if (settled || playbackStarted || active !== entry || !audioUrl) {
+            return;
+          }
+          playbackStarted = true;
+          cleanupWatchers(entry);
+
+          try {
+            const audio = createAudio(audioUrl);
+            entry.audio = audio;
+            audio.onended = () => finish(null, true);
+            audio.onerror = () => finish(Error("Falha ao reproduzir prévia."));
+            Promise.resolve(audio.play()).catch((err) => finish(err));
+          } catch (err) {
+            finish(err);
+          }
+        };
+
+        entry.source = watch?.(jobId, (ev) => {
+          if (active !== entry || settled) return;
+          if (ev?.type === "done" && ev?.result?.audio_url) {
+            playUrlOnce(ev.result.audio_url);
+          } else if (ev?.type === "error") {
+            finish(Error(ev.error || "Erro ao sintetizar prévia."));
+          }
+        });
+
+        let pollInFlight = false;
+        entry.pollTimer = setInterval(async () => {
+          if (settled || playbackStarted || active !== entry || pollInFlight) {
+            return;
+          }
+          pollInFlight = true;
+          try {
+            const snap = await pollJob?.(jobId);
+            if (settled || playbackStarted || active !== entry) return;
+            if (snap?.state === "done" && snap?.result?.audio_url) {
+              playUrlOnce(snap.result.audio_url);
+            } else if (snap?.state === "error") {
+              finish(
+                Error(snap.error?.message || "Erro ao sintetizar prévia."),
+              );
+            }
+          } catch {
+            // Keep polling until SSE or next poll succeeds, unless stopped.
+          } finally {
+            pollInFlight = false;
+          }
+        }, pollIntervalMs);
+      });
+    } finally {
+      if (active === entry) {
+        cleanupWatchers(entry);
+        stopAudio(entry.audio);
+        entry.audio = null;
+        active = null;
+      }
+    }
+  }
+
+  return {
+    play,
+    stop,
+    isActive: () => Boolean(active),
+  };
+}
+
+export const ttsPreviewController = createTtsPreviewController();
