@@ -1,10 +1,13 @@
 """Contrato HTTP da integração de resumos, sem acessar um servidor real."""
 
 import importlib.util
+import json
 import os
 from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
+
+from podcast_automation.geradorResumoSessao import GeradorResumoSessao
 
 spec = importlib.util.spec_from_file_location(
     "pia_client", Path(__file__).resolve().parents[1] / "src/podcast_automation/llm.py"
@@ -72,6 +75,28 @@ class PiaClientTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "HTTP 400.*seletor LLM"):
                 llm.PiaClient().complete_json("Roteiro", ("resumo",))
         self.assertEqual(post.call_count, 1)
+
+    def test_accepts_summary_with_one_paragraph(self):
+        summary = object.__new__(GeradorResumoSessao)
+        data = dict(
+            nome_sessao="Sessão",
+            resumo_rapido="Uma frase.",
+            resumo_completo="Um único parágrafo.",
+        )
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            "choices": [{"message": {"content": json.dumps(data)}}]
+        }
+
+        with patch.object(llm.requests, "post", return_value=response) as post:
+            result = llm.PiaClient().complete_json(
+                "Roteiro",
+                summary.CAMPOS_OBRIGATORIOS,
+                attempts=1,
+                validate=summary.validar_dados,
+            )
+        post.assert_called_once()
+        self.assertEqual(result, data)
 
     def test_unauthorized_is_not_retried(self):
         with patch.object(

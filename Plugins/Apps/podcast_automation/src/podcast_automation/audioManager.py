@@ -374,6 +374,7 @@ class AudioManager:
                     arquivo,
                 ],
                 capture_output=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 text=True,
                 check=True,
             )
@@ -422,6 +423,7 @@ class AudioManager:
         processo = subprocess.Popen(
             comando,
             stdout=subprocess.PIPE,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             stderr=error_log,
             text=True,
             encoding="utf-8",

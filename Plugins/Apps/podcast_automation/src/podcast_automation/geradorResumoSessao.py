@@ -177,7 +177,7 @@ class GeradorResumoSessao:
     - Diferencie conversas fora do jogo dos acontecimentos narrados quando o contexto permitir.
     - O nome da sessão deve ser curto, chamativo e adequado a um titulo de episodio.
     - O resumo rápido deve conter uma ou duas frases.
-    - O resumo completo deve conter de tres a seis parágrafos, separados por uma linha em branco.
+    - Prefira três a seis parágrafos na string JSON "resumo_completo". Use \\n\\n entre parágrafos.
     - Preserve os nomes próprios encontrados no texto.
     - Nao inclua comentários sobre a tarefa, sobre a transcrição ou sobre estas regras.
 
@@ -200,7 +200,10 @@ class GeradorResumoSessao:
 
     def consultar_llm(self, prompt: str) -> dict[str, Any]:
         return self.client.complete_json(
-            prompt, self.CAMPOS_OBRIGATORIOS, self.max_tentativas
+            prompt,
+            self.CAMPOS_OBRIGATORIOS,
+            self.max_tentativas,
+            validate=self.validar_dados,
         )
 
     def validar_dados(self, dados: dict[str, Any]) -> dict[str, str]:
@@ -228,13 +231,8 @@ class GeradorResumoSessao:
             trecho.strip() for trecho in re.split(r"\n\s*\n", texto) if trecho.strip()
         ]
 
-        if not 3 <= len(paragrafos) <= 6:
-            raise ValueError(
-                "O resumo_completo deve conter entre 3 e 6 paragrafos; "
-                f"foram recebidos {len(paragrafos)}.\n"
-                f"repr(resumo_completo): {repr(resultado['resumo_completo'])}\n\n"
-                f"Resumo completo recebido:\n{resultado['resumo_completo']}"
-            )
+        if not paragrafos:
+            raise ValueError("Campo ausente ou vazio na resposta: resumo_completo")
 
         resultado["resumo_completo"] = "\n\n".join(paragrafos)
 
@@ -323,12 +321,11 @@ class GeradorResumoSessao:
 
         roteiro = self.carregar_roteiro()
         prompt = self.montar_prompt(roteiro)
-        dados = self.consultar_llm(prompt)
-        dados_validados = self.validar_dados(dados)
+        dados_validados = self.consultar_llm(prompt)
 
         caminho_debug = Path(self.resumo_json_path).with_suffix(".llm.json")
         caminho_debug.write_text(
-            json.dumps(dados, ensure_ascii=False, indent=2) + "\n",
+            json.dumps(dados_validados, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
         dados_validados = self.completar_dados(dados_validados)

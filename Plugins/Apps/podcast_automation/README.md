@@ -38,6 +38,8 @@ Credenciais Google, Discord e Object Storage são migradas do .env do podcast pa
 No painel, escolha a conta e a pasta do Google Drive, a conta/bucket do Object Storage e as notificações opcionais do Discord/voz. As contas e pastas são retornadas pelos plugins compartilhados. Formatos padrão: MP3 (obrigatório), resumo.json, SRT, TXT e VTT (opcionais, inicialmente habilitados). Somente os selecionados são publicados; MP3 sozinho dispensa transcrição e LLM. Quando só resumo.json precisa do texto, o roteiro é temporário e não é exportado.
 
 
+O app pede de três a seis parágrafos para o resumo completo e aceita outras contagens quando os três campos obrigatórios têm texto. Se o processamento parar nessa etapa, execute-o novamente no mesmo diretório de trabalho para reaproveitar o áudio final com seu mapa de edição e as transcrições válidas.
+
 ## Manifesto e idioma
 
 Os metadados desta extensão ficam em `pia.json` e os textos em `lang/pt-BR.json`. Consulte o [padrão de extensões e variáveis tipadas](../../../docs/EXTENSIONS.md) para criar telas, campos de configuração e integrações compartilhadas.
