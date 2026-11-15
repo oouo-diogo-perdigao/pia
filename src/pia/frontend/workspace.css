@@ -736,3 +736,67 @@ button:disabled {
     width: 100%;
   }
 }
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.mcp-docs-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #b7afc6;
+  text-decoration: none;
+}
+.mcp-docs-link:hover {
+  color: #f3effb;
+  text-decoration: underline;
+}
+.mcp-form-box {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+.mcp-type-row {
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.mcp-account-modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+}
+.mcp-mode-option {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.02);
+  color: inherit;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+.mcp-mode-option:hover {
+  border-color: rgba(167, 139, 250, 0.5);
+  background: rgba(167, 139, 250, 0.06);
+}
+.mcp-mode-option.active {
+  border-color: rgba(167, 139, 250, 0.85);
+  background: rgba(167, 139, 250, 0.14);
+}
+.mcp-account-item {
+  background: rgba(255, 255, 255, 0.02);
+}
+.mcp-connector-card,
+.extension-card {
+  background: rgba(255, 255, 255, 0.025);
+}
+.mcp-tool-schema {
+  max-height: 180px;
+  overflow: auto;
+  font-size: 11px;
+}

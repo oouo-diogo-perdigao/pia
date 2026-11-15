@@ -91,6 +91,14 @@ TOOLS = [
         },
     ),
     spec(
+        "pia_run_skill",
+        "Executar uma skill cadastrada ou comando de sistema da PIA (ex.: iniciar bloco de notas, abrir calculadora).",
+        {
+            "skill_id": {"type": "string"},
+            "query": {"type": "string"},
+        },
+    ),
+    spec(
         "pia_delegate",
         "Perguntar ao Codex CLI ou Google Antigravity CLI (agy), usando seu login existente.",
         {
@@ -168,6 +176,20 @@ def call(name, arguments, resources=None):
         from .mcp_chat_tools import rpg_sessions
 
         return rpg_sessions(**arguments)
+    if name == "pia_run_skill":
+        from .skills_catalog import get_skills_catalog
+
+        cat = get_skills_catalog()
+        skill_id = str(arguments.get("skill_id") or "").strip()
+        if not skill_id and arguments.get("query"):
+            matched = cat.match_by_text(str(arguments["query"]))
+            if matched:
+                skill_id = matched["id"]
+        if not skill_id:
+            raise ValueError(
+                "Informe skill_id ou query correspondente a uma skill ativa."
+            )
+        return cat.execute_skill(skill_id)
     if name == "pia_delegate":
         from Plugins.Connectors.agents.service import ask
 
@@ -178,7 +200,21 @@ def complete_with_tools(
     agent, messages, model=None, allowed=None, on_delta=None, return_meta=False
 ):
     """Bounded real function calling. Model-supplied names cannot bypass allowlists."""
-    selected = [t for t in TOOLS if t["name"] in (allowed or ())]
+    from .mcp_connectors import get_mcp_manager
+
+    custom_specs = {}
+    try:
+        for spec_item in get_mcp_manager().chat_tool_specs():
+            custom_specs[spec_item["name"]] = spec_item
+    except Exception:
+        custom_specs = {}
+
+    allowed_set = set(allowed or ())
+    selected = [t for t in TOOLS if t["name"] in allowed_set]
+    for cname, cspec in custom_specs.items():
+        if cname in allowed_set:
+            selected.append(cspec)
+
     history = list(messages)
     tools_used = []
     attachments = []
@@ -216,7 +252,14 @@ def complete_with_tools(
                 raise ValueError("Ferramenta não autorizada nesta conversa.")
             tools_used.append(f"mcp:{tool.function.name}")
             try:
-                result = call(tool.function.name, json.loads(tool.function.arguments))
+                args = json.loads(tool.function.arguments or "{}")
+                if tool.function.name in custom_specs:
+                    cspec = custom_specs[tool.function.name]
+                    result = get_mcp_manager().call_tool(
+                        cspec["server_id"], cspec["tool_name"], args
+                    )
+                else:
+                    result = call(tool.function.name, args)
                 if isinstance(result, dict):
                     if result.get("image_url"):
                         attachments.append(

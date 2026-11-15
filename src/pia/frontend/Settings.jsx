@@ -1,6 +1,9 @@
 import { splitTtsFields } from "./tts-helpers";
 import { DocumentSettings, VaultSettings } from "./ProfileSettings";
 import LogsPanel from "./LogsPanel";
+import McpConnectorsPanel from "./McpConnectorsPanel";
+import PluginsPanel from "./PluginsPanel";
+import SkillsPanel from "./SkillsPanel";
 import { fingerprint } from "./forms";
 import React, { useState, useEffect, useRef } from "react";
 import {
@@ -92,7 +95,16 @@ export default function SettingsPanel({ section = "general" }) {
     [group, setGroup] = useState("Geral");
   useEffect(() => {
     let active = true;
-    if (!["logs", "documents", "credentials"].includes(section)) {
+    if (
+      ![
+        "logs",
+        "documents",
+        "credentials",
+        "mcp",
+        "plugins",
+        "skills",
+      ].includes(section)
+    ) {
       api("/settings")
         .then((result) => {
           if (!active) return;
@@ -116,6 +128,9 @@ export default function SettingsPanel({ section = "general" }) {
   if (section === "logs") return <LogsPanel />;
   if (section === "documents") return <DocumentSettings />;
   if (section === "credentials") return <VaultSettings />;
+  if (section === "mcp") return <McpConnectorsPanel />;
+  if (section === "plugins") return <PluginsPanel />;
+  if (section === "skills") return <SkillsPanel />;
   const safeSections = safeArray(sections);
   const selected =
     safeSections.find((s) => s?.id === section) || safeSections[0];

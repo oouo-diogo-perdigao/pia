@@ -51,6 +51,8 @@ import {
   ChevronDown,
   ChevronRight,
   LogOut,
+  Puzzle,
+  Sparkles,
   UserRound,
 } from "lucide-react";
 import { api, session, safe, report } from "./api";
@@ -325,7 +327,13 @@ export default function Workspace({ standalone = null }) {
               ? " / Conectores / " +
                 (connectors.find((item) => item.id === route.connector)?.name ||
                   "Google")
-              : "")
+              : route.section === "mcp"
+                ? " / Conectores MCP"
+                : route.section === "plugins"
+                  ? " / Plugins"
+                  : route.section === "skills"
+                    ? " / Skills"
+                    : "")
           : route.view === "connectors"
             ? "Conectores / " +
               (connectors.find((c) => c.id === route.connector)?.name ||
@@ -975,12 +983,35 @@ export default function Workspace({ standalone = null }) {
                       </div>
                     )}
                     <Nav
+                      active={
+                        route.section === "mcp" ||
+                        (route.section === "connectors" &&
+                          route.connector === "mcp")
+                      }
+                      onClick={() =>
+                        navigate({ view: "settings", section: "mcp" })
+                      }
+                    >
+                      <Plug size={15} />
+                      {t("Conectores MCP")}
+                    </Nav>
+                    <Nav
                       active={route.section === "plugins"}
                       onClick={() =>
                         navigate({ view: "settings", section: "plugins" })
                       }
                     >
-                      {t("Configurações dos plugins")}
+                      <Puzzle size={15} />
+                      {t("Plugins")}
+                    </Nav>
+                    <Nav
+                      active={route.section === "skills"}
+                      onClick={() =>
+                        navigate({ view: "settings", section: "skills" })
+                      }
+                    >
+                      <Sparkles size={15} />
+                      {t("Skills")}
                     </Nav>
                     <Nav
                       active={route.section === "documents"}

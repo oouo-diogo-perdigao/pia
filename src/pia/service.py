@@ -807,6 +807,87 @@ class WorkspaceService:
                 suno_mcp_command=data.get("suno_mcp_command"),
                 suno_mcp_token=data.get("suno_mcp_token"),
             )
+        if path == "/mcp/servers":
+            from src.mcp_connectors import ACCOUNT_MODES, get_mcp_manager
+
+            mgr = get_mcp_manager()
+            if method == "POST":
+                return {"server": mgr.save_server(data)}
+            return {"servers": mgr.list_servers(), "account_modes": ACCOUNT_MODES}
+        if path.startswith("/mcp/servers/"):
+            from urllib.parse import unquote
+            from src.mcp_connectors import get_mcp_manager
+
+            mgr = get_mcp_manager()
+            rest = path.removeprefix("/mcp/servers/").strip("/")
+            parts_mcp = [unquote(p) for p in rest.split("/") if p]
+            if len(parts_mcp) == 1:
+                sid = parts_mcp[0]
+                if method == "DELETE":
+                    return mgr.delete_server(sid)
+                if method in ("PUT", "POST", "PATCH"):
+                    return {"server": mgr.save_server(data, server_id=sid)}
+                return {"server": mgr.get_server(sid)}
+            if len(parts_mcp) == 2 and parts_mcp[1] in ("tools", "inspect"):
+                return mgr.inspect_server(parts_mcp[0])
+            if len(parts_mcp) == 3 and parts_mcp[1] == "oauth":
+                sid, action_oauth = parts_mcp[0], parts_mcp[2]
+                if action_oauth == "start" and method == "POST":
+                    return mgr.start_oauth(
+                        sid, account_id=data.get("account_id"), payload=data
+                    )
+                if action_oauth == "callback" and method == "POST":
+                    return mgr.complete_oauth(sid, payload=data)
+            raise ValueError("Operação MCP não encontrada.")
+        if path == "/plugins":
+            from src.plugins_catalog import get_plugins_catalog
+
+            return {"plugins": get_plugins_catalog().list_plugins()}
+        if (
+            path.startswith("/plugins/")
+            and path.endswith("/toggle")
+            and method == "POST"
+        ):
+            from urllib.parse import unquote
+            from src.plugins_catalog import get_plugins_catalog
+
+            plugin_id = unquote(
+                path.removeprefix("/plugins/").removesuffix("/toggle").strip("/")
+            )
+            return get_plugins_catalog().toggle_plugin(
+                plugin_id, data.get("enabled") if "enabled" in data else None
+            )
+        if path == "/skills":
+            from src.skills_catalog import get_skills_catalog
+
+            cat = get_skills_catalog()
+            if method == "POST":
+                return {"skill": cat.create_skill(data)}
+            return {"skills": cat.list_skills()}
+        if path.startswith("/skills/"):
+            from urllib.parse import unquote
+            from src.skills_catalog import get_skills_catalog
+
+            cat = get_skills_catalog()
+            rest = path.removeprefix("/skills/").strip("/")
+            parts_sk = [unquote(p) for p in rest.split("/") if p]
+            if len(parts_sk) == 1:
+                sk_id = parts_sk[0]
+                if method == "DELETE":
+                    return cat.delete_skill(sk_id)
+                if method in ("PUT", "POST", "PATCH"):
+                    return {"skill": cat.update_skill(sk_id, data)}
+                return {"skill": cat.get_skill(sk_id)}
+            if len(parts_sk) == 2 and parts_sk[1] == "toggle" and method == "POST":
+                return {
+                    "skill": cat.toggle_skill(
+                        parts_sk[0],
+                        data.get("enabled") if "enabled" in data else None,
+                    )
+                }
+            if len(parts_sk) == 2 and parts_sk[1] == "execute" and method == "POST":
+                return cat.execute_skill(parts_sk[0], data)
+            raise ValueError("Operação de skill não encontrada.")
         if path == "/tts/select" and method == "POST":
             from src.tts_service import get_tts_service
 

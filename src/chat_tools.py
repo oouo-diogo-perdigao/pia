@@ -44,6 +44,29 @@ def allowed_tools(text, history=None):
         tools.update(("pia_storage_list", "pia_storage_get", "pia_rpg_sessions"))
     if re.search(r"\b(musica|musicas|cancao|cancoes|suno|song|music|melodia)\b", plain):
         tools.add("pia_music")
+    if re.search(
+        r"\b(bloco de notas|notepad|calculadora|explorador|skill|executar|abrir|iniciar)\b",
+        plain,
+    ):
+        tools.add("pia_run_skill")
+    try:
+        from .mcp_connectors import get_mcp_manager
+
+        for cspec in get_mcp_manager().chat_tool_specs():
+            sname = (
+                unicodedata.normalize("NFKD", cspec["server_name"].lower())
+                .encode("ascii", "ignore")
+                .decode()
+            )
+            tname = cspec["tool_name"].lower()
+            if (
+                "mcp" in plain
+                or any(tok in plain for tok in sname.split() if len(tok) > 2)
+                or tname.replace("_", " ") in plain
+            ):
+                tools.add(cspec["name"])
+    except Exception:
+        pass
     return tools
 
 

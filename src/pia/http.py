@@ -235,10 +235,14 @@ def route(handler):
                 "/tts/selection",
                 "/music/providers",
                 "/chat/models",
+                "/mcp/servers",
+                "/plugins",
+                "/skills",
             }
             is_allowed_get = (
                 subpath in allowed_get
                 or subpath.startswith("/tts/jobs/")
+                or subpath.startswith("/mcp/servers/")
                 or (subpath.startswith("/speakers/") and subpath.endswith("/voice"))
                 or subpath.startswith("/openbot/bots")
                 or subpath.startswith("/openbot/runs/")
