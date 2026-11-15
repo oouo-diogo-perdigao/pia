@@ -31,7 +31,10 @@ class ConnectorWorkspaceTests(unittest.TestCase):
                 ("Bot/secretaria", root),
                 ("Connectors/google", root),
             ]
-            with patch("src.pia.service.BASE_DIR", root):
+            with (
+                patch("src.pia.service.BASE_DIR", root),
+                patch("src.log_reader.BASE_DIR", root),
+            ):
                 logs = service._dispatch("GET", "/logs", {}, {})
                 self.assertEqual(len(logs), 3)
                 target = root / "logs/plugins/Bot/secretaria.log"
