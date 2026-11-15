@@ -36,7 +36,7 @@ class TTSProviderRegistry:
                 logger.warning("Provider %s indisponível: %s", key, e)
 
     def catalog(
-        self, active_jobs: dict[tuple[str, str], str] | None = None
+        self, active_jobs: dict[tuple[str, str], str | dict[str, Any]] | None = None
     ) -> list[dict[str, Any]]:
         """Retorna descritores completos de todos os providers (locais e remotos)."""
         jobs = active_jobs or {}
@@ -62,21 +62,33 @@ class TTSProviderRegistry:
                 except Exception as exc:
                     avail = False
                     provider_error = str(exc)
-                job_id = jobs.get((key, mid))
-                if job_id:
+                job_entry = jobs.get((key, mid))
+                if isinstance(job_entry, dict):
+                    job_id = job_entry.get("job_id")
+                    inst_state = {
+                        "state": "installing",
+                        "job_id": job_id,
+                        "phase": job_entry.get("phase"),
+                        "progress": job_entry.get("progress"),
+                        "error": None,
+                    }
+                elif job_entry:
+                    job_id = job_entry
                     inst_state = {
                         "state": "installing",
                         "job_id": job_id,
                         "error": None,
                     }
-                elif hasattr(prov, "installation_status"):
-                    inst_state = prov.installation_status(mid)
                 else:
-                    inst_state = {
-                        "state": "installed" if avail else "not_installed",
-                        "job_id": None,
-                        "error": None,
-                    }
+                    job_id = None
+                    if hasattr(prov, "installation_status"):
+                        inst_state = prov.installation_status(mid)
+                    else:
+                        inst_state = {
+                            "state": "installed" if avail else "not_installed",
+                            "job_id": None,
+                            "error": None,
+                        }
                 try:
                     voices = prov.list_voices(mid)
                 except Exception as exc:

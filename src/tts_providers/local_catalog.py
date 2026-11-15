@@ -71,7 +71,12 @@ def _download_file(
     with urllib.request.urlopen(req, timeout=60) as resp:
         content_len = resp.headers.get("Content-Length")
         file_total = int(content_len) if content_len and content_len.isdigit() else None
-        effective_total = total_bytes or file_total
+        if total_bytes and file_total:
+            effective_total: int | None = max(total_bytes, completed_base + file_total)
+        else:
+            effective_total = total_bytes or file_total
+        if progress_cb is not None:
+            progress_cb(completed_base, effective_total)
         with dest.open("wb") as out:
             while True:
                 if cancel_event is not None and cancel_event.is_set():
@@ -106,6 +111,8 @@ def install_artifacts(
     staging_dir.mkdir(parents=True, exist_ok=True)
 
     total_hint = sum(int(a.get("size_bytes") or 0) for a in artifacts) or None
+    if progress_cb is not None:
+        progress_cb(0, total_hint)
     downloaded = 0
     rel_files: list[str] = []
     try:

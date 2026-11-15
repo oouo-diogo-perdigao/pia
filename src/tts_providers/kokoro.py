@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -20,13 +21,13 @@ _MODEL_ID = "kokoro-v1.0"
 _ARTIFACTS = [
     {
         "filename": "kokoro-v1.0.onnx",
-        "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx",
-        "size_bytes": 325_000_000,
+        "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.onnx",
+        "size_bytes": 325_505_369,
     },
     {
         "filename": "voices-v1.0.bin",
-        "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin",
-        "size_bytes": 28_000_000,
+        "url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin",
+        "size_bytes": 28_214_398,
     },
 ]
 
@@ -53,29 +54,67 @@ class KokoroProvider(TTSProvider):
             }
         ]
 
+    @staticmethod
+    def _has_kokoro_files(directory: Path) -> bool:
+        onnx = directory / "kokoro-v1.0.onnx"
+        voices = directory / "voices-v1.0.bin"
+        try:
+            return (
+                onnx.is_file()
+                and onnx.stat().st_size > 0
+                and voices.is_file()
+                and voices.stat().st_size > 0
+            )
+        except OSError:
+            return False
+
     def _custom_or_cache_dir(self) -> Path | None:
+        candidates: list[Path] = []
         try:
             from src import settings_store
 
             custom = settings_store.get("TTS_KOKORO_MODEL", "", section="general")
             if isinstance(custom, str) and custom.strip():
-                p = Path(custom.strip())
-                if (p / "kokoro-v1.0.onnx").is_file() and (
-                    p / "voices-v1.0.bin"
-                ).is_file():
-                    return p
+                p = Path(custom.strip()).expanduser()
+                candidates.extend([p, p / "kokoro"])
+        except Exception:
+            pass
+        env_custom = os.environ.get("TTS_KOKORO_MODEL", "").strip()
+        if env_custom:
+            p = Path(env_custom).expanduser()
+            candidates.extend([p, p / "kokoro"])
+        try:
+            from src.config import TTS_KOKORO_MODEL
+
+            if TTS_KOKORO_MODEL:
+                candidates.append(Path(TTS_KOKORO_MODEL))
         except Exception:
             pass
         try:
-            from src.cache_paths import TTS_CACHE_DIR
+            from src import cache_paths
 
-            for candidate in (Path(TTS_CACHE_DIR), Path(TTS_CACHE_DIR) / "kokoro"):
-                if (candidate / "kokoro-v1.0.onnx").is_file() and (
-                    candidate / "voices-v1.0.bin"
-                ).is_file():
-                    return candidate
+            tts_dir = getattr(cache_paths, "TTS_CACHE_DIR", None)
+            if tts_dir:
+                candidates.extend([Path(tts_dir), Path(tts_dir) / "kokoro"])
+            candidates.extend(
+                [
+                    cache_paths.CACHE / "main/tts/kokoro",
+                    cache_paths.CACHE / "Kokoro-82M",
+                ]
+            )
         except Exception:
             pass
+        seen: set[Path] = set()
+        for cand in candidates:
+            try:
+                resolved = cand.resolve()
+            except OSError:
+                resolved = cand
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            if self._has_kokoro_files(cand):
+                return cand
         return None
 
     def is_available(self, model_id: str | None = None) -> bool:
@@ -129,6 +168,21 @@ class KokoroProvider(TTSProvider):
         mid = model_id or _MODEL_ID
         if mid != _MODEL_ID:
             raise ValueError(f"Modelo Kokoro desconhecido: {mid}")
+        existing = self._custom_or_cache_dir()
+        if existing is not None:
+            total = (existing / "kokoro-v1.0.onnx").stat().st_size + (
+                existing / "voices-v1.0.bin"
+            ).stat().st_size
+            if progress_cb is not None:
+                progress_cb(total, total)
+            return {
+                "schema_version": 1,
+                "provider": self.id,
+                "model": mid,
+                "files": ["kokoro-v1.0.onnx", "voices-v1.0.bin"],
+                "bytes": total,
+                "source_dir": str(existing),
+            }
         manifest = install_artifacts(
             self.id,
             mid,
@@ -144,7 +198,15 @@ class KokoroProvider(TTSProvider):
         if mid != _MODEL_ID:
             raise ValueError(f"Modelo Kokoro desconhecido: {mid}")
         self.unload(mid)
-        return uninstall_artifacts(self.id, mid)
+        removed = uninstall_artifacts(self.id, mid)
+        existing = self._custom_or_cache_dir()
+        if existing is not None:
+            for fname in ("kokoro-v1.0.onnx", "voices-v1.0.bin"):
+                fpath = existing / fname
+                if fpath.is_file() and not fpath.is_symlink():
+                    fpath.unlink(missing_ok=True)
+                    removed = True
+        return removed
 
     def unload(self, model_id: str | None = None) -> None:
         try:

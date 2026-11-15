@@ -25,8 +25,33 @@ _ARTIFACTS = [
     {
         "filename": "tts.json",
         "url": "https://huggingface.co/Supertone/supertonic/resolve/main/onnx/tts.json",
-        "size_bytes": 16_384,
-    }
+        "size_bytes": 8_645,
+    },
+    {
+        "filename": "unicode_indexer.json",
+        "url": "https://huggingface.co/Supertone/supertonic/resolve/main/onnx/unicode_indexer.json",
+        "size_bytes": 262_134,
+    },
+    {
+        "filename": "duration_predictor.onnx",
+        "url": "https://huggingface.co/Supertone/supertonic/resolve/main/onnx/duration_predictor.onnx",
+        "size_bytes": 1_500_789,
+    },
+    {
+        "filename": "text_encoder.onnx",
+        "url": "https://huggingface.co/Supertone/supertonic/resolve/main/onnx/text_encoder.onnx",
+        "size_bytes": 27_348_373,
+    },
+    {
+        "filename": "vector_estimator.onnx",
+        "url": "https://huggingface.co/Supertone/supertonic/resolve/main/onnx/vector_estimator.onnx",
+        "size_bytes": 132_471_364,
+    },
+    {
+        "filename": "vocoder.onnx",
+        "url": "https://huggingface.co/Supertone/supertonic/resolve/main/onnx/vocoder.onnx",
+        "size_bytes": 101_405_066,
+    },
 ]
 
 

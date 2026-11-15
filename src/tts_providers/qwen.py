@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -46,17 +47,29 @@ class QwenTTSProvider(TTSProvider):
             }
         ]
 
-    def _has_hf_cache(self) -> bool:
+    def _hf_cache_dir(self) -> Path | None:
         if importlib.util.find_spec("qwen_tts") is None:
-            return False
-        hf_dir = (
-            Path.home()
-            / ".cache"
-            / "huggingface"
-            / "hub"
-            / "models--Qwen--Qwen3-TTS-12Hz-1.7B-CustomVoice"
-        )
-        return hf_dir.is_dir() and any(hf_dir.iterdir())
+            return None
+        repo_dir = "models--Qwen--Qwen3-TTS-12Hz-1.7B-CustomVoice"
+        roots: list[Path] = []
+        hub_env = os.environ.get("HUGGINGFACE_HUB_CACHE", "").strip()
+        if hub_env:
+            roots.append(Path(hub_env).expanduser())
+        hf_home = os.environ.get("HF_HOME", "").strip()
+        if hf_home:
+            roots.append(Path(hf_home).expanduser() / "hub")
+        roots.append(Path.home() / ".cache" / "huggingface" / "hub")
+        for root in roots:
+            hf_dir = root / repo_dir
+            snaps = hf_dir / "snapshots"
+            if snaps.is_dir() and any(snaps.iterdir()):
+                return hf_dir
+            if hf_dir.is_dir() and any(hf_dir.iterdir()):
+                return hf_dir
+        return None
+
+    def _has_hf_cache(self) -> bool:
+        return self._hf_cache_dir() is not None
 
     def is_available(self, model_id: str | None = None) -> bool:
         if model_id and model_id != _MODEL_ID:
@@ -109,6 +122,18 @@ class QwenTTSProvider(TTSProvider):
             raise ValueError(f"Modelo Qwen desconhecido: {mid}")
         if importlib.util.find_spec("qwen_tts") is None:
             raise RuntimeError("Pacote qwen-tts não está instalado neste ambiente.")
+        existing = self._hf_cache_dir()
+        if existing is not None:
+            if progress_cb is not None:
+                progress_cb(3_400_000_000, 3_400_000_000)
+            return {
+                "schema_version": 1,
+                "provider": self.id,
+                "model": mid,
+                "files": [],
+                "bytes": 3_400_000_000,
+                "source_dir": str(existing),
+            }
         artifacts = [
             {
                 "filename": "config.json",

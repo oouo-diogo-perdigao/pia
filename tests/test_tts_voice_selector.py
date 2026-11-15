@@ -399,3 +399,146 @@ def test_keys_not_in_logs(caplog):
         p.synthesize("hi", "alloy", 1.0, "mp3")
     except Exception as ex:
         assert "sk-" not in str(ex)
+
+
+def test_kokoro_detected_when_installed_in_tts_manager_path(tmp_path, monkeypatch):
+    from src import config as cfg
+    from src.tts_providers.kokoro import KokoroProvider
+    from src.tts_providers.registry import TTSProviderRegistry
+
+    kokoro_dir = tmp_path / "main" / "tts" / "kokoro"
+    kokoro_dir.mkdir(parents=True)
+    (kokoro_dir / "kokoro-v1.0.onnx").write_bytes(b"onnx-weights")
+    (kokoro_dir / "voices-v1.0.bin").write_bytes(b"voices-bin")
+
+    monkeypatch.setattr(cfg, "TTS_KOKORO_MODEL", str(kokoro_dir))
+    monkeypatch.setattr(
+        "src.tts_providers.kokoro.is_manifest_installed",
+        lambda *_a, **_kw: False,
+    )
+
+    prov = KokoroProvider()
+    assert prov.is_available("kokoro-v1.0") is True
+
+    reg = TTSProviderRegistry()
+    cat = {p["id"]: p for p in reg.catalog()}
+    kok = cat["kokoro"]
+    assert kok["available"] is True
+    assert kok["installed"] is True
+    assert kok["installation"]["state"] == "installed"
+    assert kok["models"][0]["installed"] is True
+    assert kok["models"][0]["installation"]["state"] == "installed"
+
+
+def test_tts_install_job_reports_incremental_progress(api, tmp_path, monkeypatch):
+    import threading
+    import time
+    from src.tts_providers import local_catalog, piper
+
+    request, port = api
+    origin = f"http://127.0.0.1:{port}"
+    st_s, _, hdrs = request(
+        payload={},
+        path="/api/pia/session",
+        method="POST",
+        headers={"Origin": origin},
+    )
+    assert st_s == 200
+    cookie = (hdrs.get("Set-Cookie") or hdrs.get("set-cookie")).split(";", 1)[0]
+
+    monkeypatch.setenv("PIA_USER_DIR", str(tmp_path / "user_data"))
+    monkeypatch.setattr(
+        piper,
+        "_ARTIFACTS",
+        [
+            {
+                "filename": "pt_BR-faber-medium.onnx",
+                "url": "https://example.invalid/model.onnx",
+                "size_bytes": 100,
+            }
+        ],
+    )
+
+    release_second_chunk = threading.Event()
+    first_chunk_sent = threading.Event()
+
+    class _FakeResp:
+        def __init__(self):
+            self.headers = {"Content-Length": "100"}
+            self._chunks = [b"a" * 50, b"b" * 50, b""]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, _n=-1):
+            chunk = self._chunks.pop(0)
+            if len(self._chunks) == 2:
+                return chunk
+            if len(self._chunks) == 1:
+                first_chunk_sent.set()
+                release_second_chunk.wait(timeout=5)
+                return chunk
+            return chunk
+
+    monkeypatch.setattr(
+        local_catalog.urllib.request, "urlopen", lambda *_a, **_kw: _FakeResp()
+    )
+
+    st_ins, ins_data, _ = request(
+        payload={"provider": "piper", "model": "pt_BR-faber-medium"},
+        path="/api/pia/tts/install",
+        method="POST",
+        headers={"Cookie": cookie, "Origin": origin},
+    )
+    assert st_ins == 202
+    job_id = ins_data["job_id"]
+
+    assert first_chunk_sent.wait(timeout=5)
+    # Wait briefly for on_progress(50, 100) to record 50%
+    mid_job = None
+    for _ in range(40):
+        st_j, job_snap, _ = request(
+            path=f"/api/pia/tts/jobs/{job_id}",
+            method="GET",
+            headers={"Cookie": cookie},
+        )
+        assert st_j == 200
+        if (job_snap.get("progress") or {}).get("completed_bytes") == 50:
+            mid_job = job_snap
+            break
+        time.sleep(0.025)
+
+    assert mid_job is not None
+    assert mid_job["state"] == "running"
+    assert mid_job["phase"] == "downloading"
+    assert mid_job["progress"] == {
+        "completed_bytes": 50,
+        "total_bytes": 100,
+        "percent": 50.0,
+    }
+
+    release_second_chunk.set()
+    done_job = None
+    for _ in range(60):
+        st_j, job_snap, _ = request(
+            path=f"/api/pia/tts/jobs/{job_id}",
+            method="GET",
+            headers={"Cookie": cookie},
+        )
+        assert st_j == 200
+        if job_snap.get("state") == "done":
+            done_job = job_snap
+            break
+        time.sleep(0.025)
+
+    assert done_job is not None
+    assert done_job["phase"] == "done"
+    assert done_job["progress"] == {
+        "completed_bytes": 100,
+        "total_bytes": 100,
+        "percent": 100.0,
+    }
+    assert done_job["result"]["installed"] is True

@@ -72,6 +72,14 @@ class TTSJobState:
         }
 
 
+def _emit_ws_job(ws_job: Any, event_type: str, job_state: TTSJobState) -> None:
+    if ws_job is None:
+        return
+    snap = job_state.snapshot()
+    job_kind = snap.pop("kind", None)
+    ws_job.emit(event_type, job_kind=job_kind, **snap)
+
+
 def normalize_speaker_id(speaker_id: str | None) -> str:
     raw = (speaker_id or "pia").strip()
     if not raw or raw == "pia":
@@ -216,7 +224,10 @@ class TTSService:
 
     def catalog(self) -> dict[str, Any]:
         with self._lock:
-            active = dict(self._active_model_jobs)
+            active = {
+                k: (self._jobs[jid].snapshot() if jid in self._jobs else jid)
+                for k, jid in self._active_model_jobs.items()
+            }
         providers = self.registry.catalog(active_jobs=active)
         profile, rev, warnings = self._read_general_profile()
         return {
@@ -490,19 +501,31 @@ class TTSService:
         def run():
             job_state.state = "running"
             job_state.phase = "downloading"
-            if ws_job:
-                ws_job.emit("progress", **job_state.snapshot())
+            _emit_ws_job(ws_job, "progress", job_state)
+
+            last_emit_ts = [0.0]
+            last_emit_pct = [-1.0]
 
             def on_progress(completed: int, total: int | None):
                 job_state.completed_bytes = completed
                 job_state.total_bytes = total
-                job_state.percent = (
-                    round((completed / total) * 100.0, 1)
+                pct = (
+                    round(min(99.9, (completed / total) * 100.0), 1)
                     if total and total > 0
                     else None
                 )
+                job_state.percent = pct
                 if ws_job:
-                    ws_job.emit("progress", **job_state.snapshot())
+                    now = time.monotonic()
+                    pct_val = pct if pct is not None else -1.0
+                    if (
+                        last_emit_pct[0] < 0
+                        or now - last_emit_ts[0] >= 0.15
+                        or (pct is not None and abs(pct_val - last_emit_pct[0]) >= 1.0)
+                    ):
+                        last_emit_ts[0] = now
+                        last_emit_pct[0] = pct_val
+                        _emit_ws_job(ws_job, "progress", job_state)
 
             try:
                 manifest = prov.install(
@@ -511,12 +534,18 @@ class TTSService:
                     progress_cb=on_progress,
                     cancel_event=cancel_ev,
                 )
+                job_state.phase = "verifying"
+                if isinstance(manifest, dict) and isinstance(
+                    manifest.get("bytes"), int
+                ):
+                    total_done = int(manifest["bytes"])
+                    job_state.completed_bytes = total_done
+                    job_state.total_bytes = total_done
                 job_state.state = "done"
-                job_state.phase = "installed"
+                job_state.phase = "done"
                 job_state.percent = 100.0
                 job_state.result = {"installed": True, "manifest": manifest}
-                if ws_job:
-                    ws_job.emit("done", **job_state.snapshot())
+                _emit_ws_job(ws_job, "done", job_state)
             except InterruptedError:
                 job_state.state = "error"
                 job_state.phase = "cancelled"
@@ -608,7 +637,7 @@ class TTSService:
             ws_job = Job()
             ws_job.id = job_id
             workspace_jobs[job_id] = ws_job
-            ws_job.emit("done", **job_state.snapshot())
+            _emit_ws_job(ws_job, "done", job_state)
         return {"job_id": job_id, "state": "done", "uninstalled": removed}
 
     def get_job(self, job_id: str) -> dict[str, Any]:
@@ -687,8 +716,7 @@ class TTSService:
                     "mime": res.mime,
                     "format": res.format,
                 }
-                if ws_job:
-                    ws_job.emit("done", **job_state.snapshot())
+                _emit_ws_job(ws_job, "done", job_state)
             except Exception as exc:
                 job_state.state = "error"
                 job_state.phase = "error"
