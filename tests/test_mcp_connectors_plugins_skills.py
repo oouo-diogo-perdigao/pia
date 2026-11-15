@@ -412,8 +412,11 @@ def test_suno_mcp_oauth_persistence_and_usage(tmp_path, monkeypatch):
         is False
     )
     monkeypatch.setattr("requests.post", lambda url, **kw: FakeResp({}))
+    start_bad = music_service.suno_oauth_start({"account_id": "default"})
     with pytest.raises(ValueError, match="access_token"):
-        music_service.suno_oauth_callback({"account_id": "default", "code": "bad-code"})
+        music_service.suno_oauth_callback(
+            {"state": start_bad["state"], "account_id": "default", "code": "bad-code"}
+        )
     assert (
         music_service.providers_catalog()["selection"]["suno_mcp_oauth_connected"]
         is False
@@ -438,11 +441,181 @@ def test_suno_mcp_oauth_persistence_and_usage(tmp_path, monkeypatch):
             "accounts": [{"id": "acc1", "name": "Acc 1", "auth_type": "oauth"}],
         }
     )
+    start_notok = mgr.start_oauth("no_token_url_srv", account_id="acc1")
     with pytest.raises(ValueError, match="token_url"):
         mgr.complete_oauth(
             "no_token_url_srv",
-            payload={"account_id": "acc1", "code": "synthetic-code"},
+            payload={
+                "state": start_notok["state"],
+                "account_id": "acc1",
+                "code": "synthetic-code",
+            },
         )
     no_tok_acc = mgr.get_server("no_token_url_srv")["accounts"][0]
     assert no_tok_acc["oauth"]["connected"] is False
     assert vault.get("mcp:connector:no_token_url_srv:acc1:oauth_access_token") is None
+
+
+def test_suno_mcp_dcr_pkce_and_no_false_positive_token(tmp_path, monkeypatch):
+    import base64
+    import hashlib
+    from urllib.parse import parse_qs, urlsplit
+    from Plugins.Apps.music import service as music_service
+    from src import mcp_connectors, settings_store
+    from src.core.secrets.vault import MemoryVault
+    from src.workspace_store import WorkspaceStore
+
+    sstore = settings_store.SettingsStore(path=tmp_path / "settings.sqlite3")
+    monkeypatch.setattr(settings_store, "_store", sstore)
+    vault = MemoryVault()
+    wstore = WorkspaceStore(tmp_path / "ws.sqlite3")
+    mgr = mcp_connectors.MCPConnectorManager(store=wstore, vault=vault)
+    monkeypatch.setattr(mcp_connectors, "_manager", mgr)
+
+    # Selecting Suno URL without token or OAuth must NOT report connected/token_configured
+    cat0 = music_service.select_provider(
+        provider="suno_mcp",
+        suno_mcp_url="https://api.suno.com/mcp",
+        suno_mcp_token="",
+    )
+    suno_item = next(p for p in cat0["providers"] if p["id"] == "suno_mcp")
+    assert suno_item["token_configured"] is False
+    assert suno_item["credential_state"] == "missing"
+    assert cat0["selection"]["suno_mcp_token_configured"] is False
+    assert cat0["selection"]["suno_mcp_oauth_connected"] is False
+
+    # Stale connected=True without vault secret must not cause false positive
+    raw_servers = mgr._raw_servers()
+    raw_servers[0]["accounts"] = [
+        {"id": "default", "name": "Suno", "oauth": {"connected": True}}
+    ]
+    mgr._save_raw_servers(raw_servers)
+    assert mgr.get_server("suno_mcp")["accounts"][0]["oauth"]["connected"] is False
+    assert (
+        music_service.providers_catalog()["selection"]["suno_mcp_oauth_connected"]
+        is False
+    )
+
+    # DCR + PKCE S256 in suno_oauth_start when client_id is empty
+    seen = {}
+
+    class FakeResp:
+        def __init__(self, payload):
+            self._payload = payload
+            self.content = b"{}"
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    def fake_post(url, **kwargs):
+        if url == mcp_connectors.SUNO_OAUTH_DEFAULTS["register_url"]:
+            seen["dcr_json"] = kwargs.get("json")
+            return FakeResp({"client_id": "dcr--official-test-id"})
+        if url == mcp_connectors.SUNO_OAUTH_DEFAULTS["token_url"]:
+            seen["token_data"] = kwargs.get("data")
+            return FakeResp(
+                {"access_token": "suno-pkce-token-42", "refresh_token": "ref-42"}
+            )
+        raise AssertionError(f"Unexpected POST {url}")
+
+    monkeypatch.setattr("requests.post", fake_post)
+
+    start = music_service.suno_oauth_start({})
+    assert start["ok"] is True
+    assert seen["dcr_json"] == {
+        "client_name": "pia.travelrpg.com",
+        "redirect_uris": ["https://pia.travelrpg.com/oauth/callback"],
+    }
+    parsed = urlsplit(start["auth_url"])
+    assert (
+        f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        == "https://studio-api-prod.suno.com/api/v2/external/oauth/authorize/"
+    )
+    qs = parse_qs(parsed.query)
+    assert qs["client_id"] == ["dcr--official-test-id"]
+    assert qs["redirect_uri"] == ["https://pia.travelrpg.com/oauth/callback"]
+    assert qs["response_type"] == ["code"]
+    assert qs["code_challenge_method"] == ["S256"]
+    assert qs["scope"] == [mcp_connectors.SUNO_OAUTH_DEFAULTS["scopes"]]
+    challenge = qs["code_challenge"][0]
+
+    # Callback exchanges code + code_verifier + redirect_uri and persists token in vault
+    cb = music_service.suno_oauth_callback(
+        {"state": start["state"], "code": "suno-auth-code-1"}
+    )
+    assert cb["ok"] is True
+    assert cb["account"]["oauth"]["connected"] is True
+    assert seen["token_data"]["grant_type"] == "authorization_code"
+    assert seen["token_data"]["code"] == "suno-auth-code-1"
+    assert seen["token_data"]["client_id"] == "dcr--official-test-id"
+    assert (
+        seen["token_data"]["redirect_uri"] == "https://pia.travelrpg.com/oauth/callback"
+    )
+    verifier = seen["token_data"]["code_verifier"]
+    expected_challenge = (
+        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest())
+        .rstrip(b"=")
+        .decode("ascii")
+    )
+    assert expected_challenge == challenge
+    assert (
+        vault.get("mcp:connector:suno_mcp:default:oauth_access_token")
+        == "suno-pkce-token-42"
+    )
+
+    # Security checks: _is_suno_server restricts to exact ID or api.suno.com hostname
+    assert (
+        mcp_connectors._is_suno_server("suno_mcp", {"url": "https://other.test"})
+        is True
+    )
+    assert (
+        mcp_connectors._is_suno_server("custom", {"url": "https://api.suno.com/mcp"})
+        is True
+    )
+    assert (
+        mcp_connectors._is_suno_server(
+            "my-suno-clone",
+            {"name": "Suno Clone", "url": "https://evil.example.com/mcp"},
+        )
+        is False
+    )
+
+    # Reusing the same state (single-use) or missing/invalid/expired/mismatched state must fail
+    with pytest.raises(ValueError, match="State OAuth"):
+        music_service.suno_oauth_callback({"state": start["state"], "code": "replay"})
+    with pytest.raises(ValueError, match="State OAuth"):
+        music_service.suno_oauth_callback({"code": "missing-state"})
+
+    start2 = music_service.suno_oauth_start({"account_id": "default"})
+    with pytest.raises(ValueError, match="servidor"):
+        mgr.complete_oauth("other_srv", payload={"state": start2["state"], "code": "c"})
+
+    start3 = music_service.suno_oauth_start({"account_id": "default"})
+    with pytest.raises(ValueError, match="conta"):
+        mgr.complete_oauth(
+            "suno_mcp",
+            payload={"state": start3["state"], "account_id": "wrong_acc", "code": "c"},
+        )
+
+    # Expired state is rejected
+    start4 = music_service.suno_oauth_start({"account_id": "default"})
+    states_map = wstore.get(mcp_connectors.OAUTH_STATE_KEY, {})
+    states_map[start4["state"]]["created_at"] = "2020-01-01T00:00:00+00:00"
+    wstore.set(mcp_connectors.OAUTH_STATE_KEY, states_map)
+    with pytest.raises(ValueError, match="expirado"):
+        music_service.suno_oauth_callback({"state": start4["state"], "code": "c"})
+
+    # Attacker-supplied code_verifier in payload must NOT override state's stored code_verifier
+    start5 = music_service.suno_oauth_start({"account_id": "default"})
+    cb5 = music_service.suno_oauth_callback(
+        {
+            "state": start5["state"],
+            "code": "suno-auth-code-5",
+            "code_verifier": "attacker-verifier-override",
+        }
+    )
+    assert cb5["ok"] is True
+    assert seen["token_data"]["code_verifier"] != "attacker-verifier-override"

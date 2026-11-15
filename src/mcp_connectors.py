@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import logging
 import os
@@ -11,7 +13,7 @@ import subprocess
 import uuid
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import requests
 
@@ -22,6 +24,40 @@ logger = logging.getLogger(__name__)
 
 STORE_KEY = "mcp:custom_servers"
 OAUTH_STATE_KEY = "mcp:oauth_states"
+OAUTH_STATE_TTL_SECONDS = 900
+
+SUNO_OAUTH_DEFAULTS = {
+    "mcp_url": "https://api.suno.com/mcp",
+    "register_url": "https://studio-api-prod.suno.com/api/v2/external/oauth/register/",
+    "auth_url": "https://studio-api-prod.suno.com/api/v2/external/oauth/authorize/",
+    "token_url": "https://studio-api-prod.suno.com/api/v2/external/oauth/token/",
+    "scopes": "api:v0 credits:spend download library:read library:search library:write offline_access profile:read",
+    "redirect_uri": "https://pia.travelrpg.com/oauth/callback",
+    "client_name": "pia.travelrpg.com",
+}
+
+
+def _is_suno_server(server_id: str, server: dict[str, Any] | None = None) -> bool:
+    if (server_id or "").strip() == "suno_mcp":
+        return True
+    raw_url = str((server or {}).get("url") or "").strip()
+    if not raw_url:
+        return False
+    try:
+        return (urlsplit(raw_url).hostname or "").lower() == "api.suno.com"
+    except ValueError:
+        return False
+
+
+def _generate_pkce_pair() -> tuple[str, str]:
+    verifier = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=").decode("ascii")
+    challenge = (
+        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest())
+        .rstrip(b"=")
+        .decode("ascii")
+    )
+    return verifier, challenge
+
 
 ACCOUNT_MODES = [
     {
@@ -336,11 +372,7 @@ class MCPConnectorManager:
 
         stored_access = self._get_secret(server_id, acc_id, "oauth_access_token")
         stored_csecret = self._get_secret(server_id, acc_id, "oauth_client_secret")
-        oauth_connected = bool(
-            raw_oauth.get("connected")
-            if "connected" in raw_oauth
-            else (stored_access or prev_oauth.get("connected", False))
-        )
+        oauth_connected = bool(stored_access)
         oauth_cfg = {
             "client_id": str(
                 raw_oauth.get("client_id", prev_oauth.get("client_id", ""))
@@ -585,6 +617,27 @@ class MCPConnectorManager:
     def _public_server(self, server: dict[str, Any]) -> dict[str, Any]:
         out = {k: v for k, v in server.items() if k != "rr_cursor"}
         out["type"] = out.get("transport", "http_streaming")
+        sid = str(server.get("id") or "")
+        if sid:
+            srv_bearer = bool(self._get_secret(sid, "_server", "bearer_token").strip())
+            out["has_bearer_token"] = srv_bearer
+            if not srv_bearer:
+                out["bearer_token_masked"] = ""
+            accounts = []
+            for acc in server.get("accounts") or []:
+                acc_copy = dict(acc)
+                acc_id = str(acc_copy.get("id") or "")
+                oauth_tok = self._get_secret(sid, acc_id, "oauth_access_token").strip()
+                acc_bearer = self._get_secret(sid, acc_id, "bearer_token").strip()
+                acc_copy["has_bearer_token"] = bool(acc_bearer)
+                if isinstance(acc_copy.get("oauth"), dict):
+                    oauth_copy = dict(acc_copy["oauth"])
+                    oauth_copy["connected"] = bool(oauth_tok)
+                    if not oauth_tok:
+                        oauth_copy["token_masked"] = ""
+                    acc_copy["oauth"] = oauth_copy
+                accounts.append(acc_copy)
+            out["accounts"] = accounts
         return out
 
     def _resolve_credentials(
@@ -1001,6 +1054,35 @@ class MCPConnectorManager:
             )
             oauth["has_client_secret"] = True
 
+        if _is_suno_server(server_id, server):
+            for field in ("auth_url", "token_url", "scopes", "redirect_uri"):
+                if not str(oauth.get(field) or "").strip():
+                    oauth[field] = SUNO_OAUTH_DEFAULTS[field]
+            if not str(oauth.get("client_id") or "").strip() and not payload.get(
+                "access_token"
+            ):
+                reg_url = SUNO_OAUTH_DEFAULTS["register_url"]
+                reg_resp = requests.post(
+                    reg_url,
+                    json={
+                        "client_name": SUNO_OAUTH_DEFAULTS["client_name"],
+                        "redirect_uris": [oauth["redirect_uri"]],
+                    },
+                    headers={
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=15,
+                )
+                reg_resp.raise_for_status()
+                reg_data = reg_resp.json() if reg_resp.content else {}
+                cid = str((reg_data or {}).get("client_id") or "").strip()
+                if not cid:
+                    raise ValueError(
+                        "Registro dinâmico (DCR) do Suno não retornou client_id."
+                    )
+                oauth["client_id"] = cid
+
         if payload.get("access_token"):
             token = str(payload["access_token"]).strip()
             self._set_secret(server_id, account_id, "oauth_access_token", token)
@@ -1010,6 +1092,7 @@ class MCPConnectorManager:
             self._save_raw_servers(servers)
             return {"ok": True, "auth_url": oauth.get("auth_url", ""), "account": acc}
 
+        code_verifier, code_challenge = _generate_pkce_pair()
         state = uuid.uuid4().hex
         states = self.store.get(OAUTH_STATE_KEY, {})
         if not isinstance(states, dict):
@@ -1017,6 +1100,8 @@ class MCPConnectorManager:
         states[state] = {
             "server_id": server_id,
             "account_id": account_id,
+            "code_verifier": code_verifier,
+            "redirect_uri": oauth.get("redirect_uri", ""),
             "created_at": _now_iso(),
         }
         self.store.set(OAUTH_STATE_KEY, states)
@@ -1033,6 +1118,8 @@ class MCPConnectorManager:
                 "redirect_uri": oauth.get("redirect_uri", ""),
                 "scope": oauth.get("scopes", ""),
                 "state": state,
+                "code_challenge": code_challenge,
+                "code_challenge_method": "S256",
             }
         )
         sep = "&" if "?" in base_auth else "?"
@@ -1046,14 +1133,51 @@ class MCPConnectorManager:
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         payload = payload or {}
-        account_id = str(payload.get("account_id") or "").strip()
+        req_account_id = str(payload.get("account_id") or "").strip()
         state = str(payload.get("state") or "").strip()
+        token = str(payload.get("access_token") or "").strip()
+        refresh_token = str(payload.get("refresh_token") or "").strip()
+        code = str(payload.get("code") or "").strip()
+
+        code_verifier = ""
+        state_redirect_uri = ""
+        account_id = req_account_id
+
+        if code and not token:
+            if not state:
+                raise ValueError("State OAuth ausente ou inválido.")
+
         if state:
             states = self.store.get(OAUTH_STATE_KEY, {})
             info = states.pop(state, None) if isinstance(states, dict) else None
-            if info:
+            if info is not None:
                 self.store.set(OAUTH_STATE_KEY, states)
-                account_id = account_id or info.get("account_id", "")
+            if not isinstance(info, dict):
+                raise ValueError("State OAuth inválido ou já utilizado.")
+            if str(info.get("server_id") or "") != server_id:
+                raise ValueError("State OAuth não pertence a este servidor MCP.")
+            state_account_id = str(info.get("account_id") or "").strip()
+            if (
+                req_account_id
+                and state_account_id
+                and req_account_id != state_account_id
+            ):
+                raise ValueError("State OAuth não pertence à conta informada.")
+            created_raw = str(info.get("created_at") or "").strip()
+            if not created_raw:
+                raise ValueError("State OAuth expirado ou inválido.")
+            try:
+                created_dt = datetime.fromisoformat(created_raw)
+                if created_dt.tzinfo is None:
+                    created_dt = created_dt.replace(tzinfo=timezone.utc)
+                age = (datetime.now(timezone.utc) - created_dt).total_seconds()
+            except ValueError as exc:
+                raise ValueError("State OAuth expirado ou inválido.") from exc
+            if age < 0 or age > OAUTH_STATE_TTL_SECONDS:
+                raise ValueError("State OAuth expirado.")
+            account_id = account_id or state_account_id
+            code_verifier = str(info.get("code_verifier") or "").strip()
+            state_redirect_uri = str(info.get("redirect_uri") or "").strip()
 
         servers = self._raw_servers()
         server = next((s for s in servers if s.get("id") == server_id), None)
@@ -1065,9 +1189,6 @@ class MCPConnectorManager:
         if acc is None:
             raise KeyError(f"Conta '{account_id}' não encontrada.")
 
-        token = str(payload.get("access_token") or "").strip()
-        refresh_token = str(payload.get("refresh_token") or "").strip()
-        code = str(payload.get("code") or "").strip()
         oauth_cfg = acc.setdefault("oauth", {})
 
         if not token and code and oauth_cfg.get("token_url"):
@@ -1082,8 +1203,13 @@ class MCPConnectorManager:
             }
             if client_secret:
                 form_data["client_secret"] = client_secret
-            if oauth_cfg.get("redirect_uri"):
-                form_data["redirect_uri"] = str(oauth_cfg["redirect_uri"])
+            redirect_uri = (
+                state_redirect_uri or str(oauth_cfg.get("redirect_uri") or "").strip()
+            )
+            if redirect_uri:
+                form_data["redirect_uri"] = redirect_uri
+            if code_verifier:
+                form_data["code_verifier"] = code_verifier
             resp = requests.post(
                 token_url,
                 data=form_data,

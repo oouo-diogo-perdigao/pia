@@ -1,5 +1,16 @@
 # PIA Changelog
 
+## [Correção — Autorização Suno MCP] - 2026-11-15
+
+### Fixed
+- OAuth do Suno usa registro automático de cliente quando o Client ID está vazio, endpoints oficiais e PKCE S256. O código é trocado com o verifier e redirect associados ao state, válido por 15 minutos e consumido uma única vez.
+- Callback rejeita state ausente, expirado, reutilizado ou pertencente a outra conta/servidor. Access token e refresh token permanecem no cofre.
+- Status de conexão consulta credenciais efetivamente presentes: servidor registrado e referência vazia não significam conexão; token manual aparece como “Token configurado”, sem afirmar autenticação validada.
+- Frontend mantém conclusão manual da autorização. O callback público configurado depende de uma rota no pia-server; esta alteração local não implementa nem publica essa rota.
+
+### Tests
+- Regressões de DCR/PKCE, state, persistência no cofre e status; bundle reconstruído.
+
 ## [Correção — Música pelo chat e cópia de erros] - 2026-11-15
 
 ### Fixed
