@@ -1,5 +1,16 @@
 # PIA Changelog
 
+## [Correção — Música pelo chat e cópia de erros] - 2026-11-15
+
+### Fixed
+- Pedidos diretos de criação musical no chat acionam o serviço de música sem depender de LLM; pedidos que mencionam Suno selecionam explicitamente `suno_mcp`. O retorno inclui o áudio e os metadados da ferramenta quando a geração tem sucesso, ou uma mensagem de falha quando o provedor não atende.
+- Falhas de disponibilidade dos modelos no chat recebem uma resposta legível com orientação para conferir a configuração.
+- Cópia de mensagens e do balão de erro usa fallback com textarea e `document.execCommand('copy')` quando a API de clipboard falha ou está ausente, com confirmação “Copiado!” após sucesso.
+- Timeouts e respostas inválidas do Suno não repetem automaticamente a geração por REST, evitando pedidos duplicados. O fallback REST fica restrito à rejeição explícita do endpoint/protocolo.
+
+### Tests
+- Regressões para intenção musical, propagação de áudio, indisponibilidade de LLM, prevenção de repetição e fallbacks de clipboard; bundle do frontend reconstruído.
+
 ## [Etapa 2 — Presets de Cores, 12 Rostos Dinâmicos e OAuth Suno MCP] - 2026-11-15
 
 ### Added

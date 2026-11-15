@@ -131,6 +131,9 @@ def call_suno_mcp(
                 return rpc_res
             if isinstance(rpc_res, dict) and rpc_res:
                 return rpc_res
+            raise RuntimeError(
+                "Resposta vazia ou inválida do Suno (MCP); a solicitação não foi repetida."
+            )
         except requests.Timeout:
             raise RuntimeError(
                 "Tempo esgotado aguardando resposta do Suno (MCP); a geração pode já estar em andamento."
@@ -141,8 +144,9 @@ def call_suno_mcp(
             if status not in (404, 405, 415, 501):
                 raise
         except ValueError:
-            # Non-JSON response from a plain REST endpoint: allow REST fallback below.
-            pass
+            raise RuntimeError(
+                "Resposta inválida do Suno (MCP); a geração pode já estar em andamento e não foi repetida."
+            ) from None
 
         headers = {"Content-Type": "application/json"}
         if suno_token:
