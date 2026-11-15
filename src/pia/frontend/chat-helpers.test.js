@@ -7,6 +7,7 @@ import {
   buildChatActionPayload,
   formatMessageInfo,
   extractMessageMedia,
+  extractMessageSuggestions,
   prepareSpeechText,
   createChatSpeechController,
 } from "./chat-helpers.js";
@@ -297,4 +298,84 @@ test("createChatSpeechController switches Sound -> Stop immediately, stops Audio
   assert.equal(sourceClosedDuringStop, 1);
   assert.deepEqual(cancelledJobs, [{ jobId: "tts-job-2", started: false }]);
   assert.deepEqual(pendingStates.at(-1), { activeId: null, status: "idle" });
+});
+
+test("extractMessageSuggestions reads structured meta.suggestions and ignores user/pending messages", () => {
+  assert.deepEqual(
+    extractMessageSuggestions({
+      role: "user",
+      content: "Sugestões:\n- Fazer algo",
+    }),
+    [],
+  );
+
+  assert.deepEqual(
+    extractMessageSuggestions({
+      id: 1,
+      role: "assistant",
+      content: "Tudo pronto!",
+      meta: {
+        suggestions: [
+          "Ver resumo",
+          { label: "Rodar testes", prompt: "Execute todos os testes" },
+          "ver resumo",
+        ],
+      },
+    }),
+    [
+      { label: "Ver resumo", prompt: "Ver resumo" },
+      { label: "Rodar testes", prompt: "Execute todos os testes" },
+    ],
+  );
+});
+
+test("extractMessageSuggestions extracts trailing Markdown suggestion lists and quoted prompts while ignoring code blocks and factual lists", () => {
+  const fromHeader = extractMessageSuggestions({
+    id: 2,
+    role: "assistant",
+    content: [
+      "Aqui está a análise completa do servidor.",
+      "",
+      "```bash",
+      "# Sugestões:",
+      "# - rm -rf /tmp/fake",
+      "```",
+      "",
+      "### Próximos passos",
+      '- Pedir detalhes: "Me explique a arquitetura da PIA"',
+      "- **Listar buckets ativos** — consulta seus buckets configurados",
+      "- Opção 3: Reiniciar serviço da porta 8762",
+    ].join("\n"),
+  });
+
+  assert.deepEqual(fromHeader, [
+    {
+      label: "Me explique a arquitetura da PIA",
+      prompt: "Me explique a arquitetura da PIA",
+    },
+    { label: "Listar buckets ativos", prompt: "Listar buckets ativos" },
+    {
+      label: "Reiniciar serviço da porta 8762",
+      prompt: "Reiniciar serviço da porta 8762",
+    },
+  ]);
+
+  const fromQuestion = extractMessageSuggestions({
+    id: 3,
+    role: "assistant",
+    content:
+      "Encontrei 3 arquivos na campanha. Como gostaria de prosseguir?\n1. Resumir última sessão\n2. Comparar personagens",
+  });
+  assert.deepEqual(fromQuestion, [
+    { label: "Resumir última sessão", prompt: "Resumir última sessão" },
+    { label: "Comparar personagens", prompt: "Comparar personagens" },
+  ]);
+
+  const factualListOnly = extractMessageSuggestions({
+    id: 4,
+    role: "assistant",
+    content:
+      "Os 3 estados da água são:\n- Sólido\n- Líquido\n- Gasoso\n\nEspero que tenha ajudado.",
+  });
+  assert.deepEqual(factualListOnly, []);
 });

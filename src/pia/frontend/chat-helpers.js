@@ -756,3 +756,202 @@ export function createChatSpeechController({
     getActiveId,
   };
 }
+
+const SUGGESTION_HEADER_RE =
+  /(sugest[õo]es|pr[óo]ximos?\s+passos?|o\s+que\s+(?:voc[êe]\s+)?(?:pode|gostaria|quer)\s+(?:fazer|pedir|perguntar|escolher|explorar)|voc[êe]\s+pode\s+(?:pedir|perguntar|dizer|escolher|tentar)|posso\s+(?:ajudar|fazer|executar|continuar)|quer\s+que\s+eu|se\s+quiser\b|op[çc][õo]es\s*(?:dispon[íi]veis|r[áa]pidas|para\s+continuar)?|exemplos?\s*(?:do\s+que\s+(?:pedir|perguntar)|de\s+(?:comandos?|perguntas?))?|ideias\s*(?:para\s+(?:continuar|explorar))?|experimente|next\s+steps?|suggestions?|follow[- ]ups?|try\s+asking|you\s+can\s+ask)/i;
+
+const INTERACTIVE_OFFER_RE =
+  /(\bquer\b|\bdeseja\b|\bprefere\b|\bgostaria\b|\bescolha\b|\bposso\b|\bpodemos\b|\bqual\b|\bwhich\b|\bwould\s+you\b|\bdo\s+you\s+want\b)/i;
+
+const LIST_ITEM_RE = /^\s*(?:[-*•+]|\d+[.)])\s+(.+)$/;
+const GENERIC_PREFIX_RE =
+  /^(?:op[çc][ãa]o|sugest[ãa]o|ideia|passo|exemplo|item)\s*\d*$/i;
+
+function stripMarkdownInline(text) {
+  return String(text || "")
+    .replace(/^#{1,6}\s+/, "")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/(\*\*|__|\*|_|`)/g, "")
+    .trim();
+}
+
+function normalizeSuggestionEntry(raw) {
+  if (!raw) return null;
+  let label = "";
+  let prompt = "";
+  if (typeof raw === "string") {
+    const cleaned = stripMarkdownInline(raw).replace(/\s+/g, " ").trim();
+    if (!cleaned) return null;
+
+    const quotedMatch = cleaned.match(
+      /[""«]([^""»]{5,140})[""»]|"([^"]{5,140})"/,
+    );
+    const quoted = quotedMatch
+      ? (quotedMatch[1] || quotedMatch[2] || "").trim()
+      : "";
+    if (quoted) {
+      prompt = quoted;
+      label = quoted;
+    } else {
+      const colonIdx = cleaned.indexOf(":");
+      const dashMatch = cleaned.match(/\s+[—–-]\s+/);
+      if (colonIdx > 0 && colonIdx < 36) {
+        const left = cleaned.slice(0, colonIdx).trim();
+        const right = cleaned.slice(colonIdx + 1).trim();
+        if (GENERIC_PREFIX_RE.test(left) && right.length >= 3) {
+          prompt = right;
+          label = right;
+        } else {
+          prompt = cleaned;
+          label = cleaned;
+        }
+      } else if (dashMatch && dashMatch.index > 3 && dashMatch.index <= 65) {
+        prompt = cleaned.slice(0, dashMatch.index).trim();
+        label = prompt;
+      } else {
+        prompt = cleaned;
+        label = cleaned;
+      }
+    }
+  } else if (typeof raw === "object") {
+    prompt = String(
+      raw.prompt || raw.text || raw.query || raw.command || raw.label || "",
+    )
+      .replace(/\s+/g, " ")
+      .trim();
+    label = String(raw.label || raw.title || prompt)
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  prompt = prompt.replace(/^["'“”«]+|["'“”»]+$/g, "").trim();
+  label = label.replace(/^["'“”«]+|["'“”»]+$/g, "").trim();
+  if (!prompt || prompt.length < 3 || prompt.length > 160) return null;
+  if (/^https?:\/\/\S+$/i.test(prompt)) return null;
+  return { label: label || prompt, prompt };
+}
+
+/**
+ * Extracts clickable quick-reply suggestion buttons from structured message fields
+ * or concluding suggestion lists in assistant Markdown replies.
+ */
+export function extractMessageSuggestions(record, maxItems = 6) {
+  if (!record || (record.role && record.role !== "assistant")) return [];
+  if (record.id === "pending") return [];
+
+  const meta =
+    record.meta && typeof record.meta === "object"
+      ? record.meta
+      : record.metadata && typeof record.metadata === "object"
+        ? record.metadata
+        : {};
+
+  const out = [];
+  const seen = new Set();
+  const addItem = (raw) => {
+    if (out.length >= maxItems) return;
+    const item = normalizeSuggestionEntry(raw);
+    if (!item) return;
+    const key = item.prompt.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(item);
+  };
+
+  const structured =
+    record.suggestions ??
+    record.quick_replies ??
+    record.next_steps ??
+    meta.suggestions ??
+    meta.quick_replies ??
+    meta.next_steps;
+
+  if (Array.isArray(structured)) {
+    structured.forEach(addItem);
+    if (out.length > 0) return out;
+  }
+
+  const content = String(record.content || "");
+  if (!content.trim()) return [];
+
+  const withoutCode = content.replace(/```[\s\S]*?```/g, "\n");
+  const commentMatch = withoutCode.match(
+    /<!--\s*suggestions\s*:\s*(\[[\s\S]*?\])\s*-->/i,
+  );
+  if (commentMatch) {
+    try {
+      const parsed = JSON.parse(commentMatch[1]);
+      if (Array.isArray(parsed)) {
+        parsed.forEach(addItem);
+        if (out.length > 0) return out;
+      }
+    } catch {
+      // Ignore malformed comment JSON and fall back to text heuristics.
+    }
+  }
+
+  const lines = withoutCode.split(/\r?\n/);
+
+  // Explicit inline `[Sugestão: ...]` tags anywhere outside code blocks
+  for (const line of lines) {
+    const tagMatch = line.match(
+      /^\s*(?:[-*•]\s*)?\[(?:sugest[ãa]o|suggestion)\s*:\s*([^\]]+)\]\s*$/i,
+    );
+    if (tagMatch) addItem(tagMatch[1]);
+  }
+  if (out.length > 0) return out;
+
+  // Locate list blocks in the reply and inspect the trailing block(s)
+  const blocks = [];
+  let idx = 0;
+  while (idx < lines.length) {
+    if (!LIST_ITEM_RE.test(lines[idx])) {
+      idx += 1;
+      continue;
+    }
+    const start = idx;
+    const items = [];
+    while (idx < lines.length && LIST_ITEM_RE.test(lines[idx])) {
+      const m = lines[idx].match(LIST_ITEM_RE);
+      if (m) items.push(m[1]);
+      idx += 1;
+    }
+    blocks.push({ start, end: idx - 1, items });
+  }
+
+  if (blocks.length === 0) return [];
+
+  const lastBlock = blocks[blocks.length - 1];
+  const trailingNonEmpty = lines
+    .slice(lastBlock.end + 1)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  // Only treat trailing lists (at most 1 short closing sentence after them) as quick replies
+  if (trailingNonEmpty.length > 1) return [];
+  if (trailingNonEmpty.length === 1 && trailingNonEmpty[0].length > 140) {
+    return [];
+  }
+
+  let leadLine = "";
+  for (let i = lastBlock.start - 1; i >= 0; i--) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) continue;
+    leadLine = stripMarkdownInline(trimmed);
+    break;
+  }
+
+  const hasExplicitHeader = SUGGESTION_HEADER_RE.test(leadLine);
+  const looksLikeChoiceOffer =
+    lastBlock.items.length >= 2 &&
+    lastBlock.items.length <= 6 &&
+    (leadLine.endsWith("?") ||
+      (leadLine.endsWith(":") && INTERACTIVE_OFFER_RE.test(leadLine)));
+
+  if (!hasExplicitHeader && !looksLikeChoiceOffer) {
+    return [];
+  }
+
+  lastBlock.items.forEach(addItem);
+  return out;
+}

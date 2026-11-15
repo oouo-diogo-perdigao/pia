@@ -1,6 +1,7 @@
 import { MediaTrack } from "./MediaPlayer";
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
+  Button,
   Group,
   Text,
   Textarea,
@@ -35,6 +36,7 @@ import {
   FileText,
   Database,
   Sparkles,
+  ArrowUpRight,
 } from "lucide-react";
 import { api, watchJob, safe, report, copy } from "./api";
 import { Icon, usePia } from "./shared";
@@ -45,6 +47,7 @@ import {
   buildChatActionPayload,
   formatMessageInfo,
   extractMessageMedia,
+  extractMessageSuggestions,
   isImageUrl,
   isAudioUrl,
   createChatSpeechController,
@@ -112,6 +115,8 @@ function Message({
   isSpeaking,
   onToggleSpeak,
   onPreviewImage,
+  onSendSuggestion,
+  busy,
 }) {
   const { t } = usePia(),
     [editing, setEditing] = useState(false),
@@ -120,6 +125,10 @@ function Message({
 
   const info = useMemo(() => formatMessageInfo(record), [record]);
   const media = useMemo(() => extractMessageMedia(record), [record]);
+  const suggestions = useMemo(
+    () => extractMessageSuggestions(record),
+    [record],
+  );
   const markdownComponents = useMemo(
     () => buildMarkdownComponents(onPreviewImage),
     [onPreviewImage],
@@ -272,6 +281,30 @@ function Message({
                   </Badge>
                 ))}
               </Group>
+            )}
+            {record.role === "assistant" && suggestions.length > 0 && (
+              <div
+                className="chat-suggestions"
+                role="group"
+                aria-label={t("Sugestões rápidas")}
+              >
+                {suggestions.map((item) => (
+                  <Button
+                    key={item.prompt}
+                    size="xs"
+                    variant="light"
+                    color="violet"
+                    radius="xl"
+                    className="chat-suggestion-btn"
+                    disabled={busy}
+                    title={item.prompt}
+                    rightSection={<ArrowUpRight size={13} />}
+                    onClick={safe(() => onSendSuggestion?.(item.prompt))}
+                  >
+                    {item.label}
+                  </Button>
+                ))}
+              </div>
             )}
           </>
         )}
@@ -668,16 +701,20 @@ export default function Chat({ chat }) {
       window.removeEventListener("focus", visibility);
     };
   }, [messages, chat]);
-  async function send() {
+  async function send(overrideText) {
+    const isOverride = typeof overrideText === "string";
     if (running) {
+      if (isOverride) return;
       await api("/chat/cancel", { job: running });
       return;
     }
-    const text = draft.trim();
+    const text = (isOverride ? overrideText : draft).trim();
     if (!text || sending) return;
     setSending(true);
-    clearTimeout(draftTimer.current);
-    setDraft("");
+    if (!isOverride) {
+      clearTimeout(draftTimer.current);
+      setDraft("");
+    }
     let target = chat;
     try {
       if (!target) {
@@ -711,7 +748,7 @@ export default function Chat({ chat }) {
       if (target === activeChat.current) watch(result.job);
       await refresh();
     } catch (error) {
-      setDraft(text);
+      if (!isOverride) setDraft(text);
       throw error;
     } finally {
       setSending(false);
@@ -826,6 +863,8 @@ export default function Chat({ chat }) {
               isSpeaking={speakingId === record.id}
               onToggleSpeak={(rec) => speechController.current?.toggle(rec)}
               onPreviewImage={setPreviewImage}
+              onSendSuggestion={(prompt) => send(prompt)}
+              busy={sending || Boolean(running)}
             />
           ),
         )}
