@@ -1,5 +1,40 @@
 # PIA Changelog
 
+## [v0.2.1] - 2026-11-15
+
+### Added
+- Presets de 18 cores e 12 rostos para bots dinâmicos; autorização Suno MCP com registro automático de cliente e PKCE S256.
+
+### Fixed
+- Criação musical direta pelo chat sem depender de LLM, com áudio quando o provedor conclui a geração e erro legível quando falha.
+- Cópia de mensagens e erros com fallback para HTTP local e confirmação visual; estado OAuth vinculado à conta/servidor, expiração e uso único.
+- Indicadores de credenciais baseados no cofre e proteção contra repetição de geração em respostas ambíguas do Suno.
+
+### Notes
+- A autorização Suno requer login/consentimento. O callback público da release pia-server apresenta o código para conclusão manual na PIA; abrir a autorização não significa que a conta já esteja conectada.
+
+## [Correção — Autorização Suno MCP] - 2026-11-15
+
+### Fixed
+- OAuth do Suno usa registro automático de cliente quando o Client ID está vazio, endpoints oficiais e PKCE S256. O código é trocado com o verifier e redirect associados ao state, válido por 15 minutos e consumido uma única vez.
+- Callback rejeita state ausente, expirado, reutilizado ou pertencente a outra conta/servidor. Access token e refresh token permanecem no cofre.
+- Status de conexão consulta credenciais efetivamente presentes: servidor registrado e referência vazia não significam conexão; token manual aparece como “Token configurado”, sem afirmar autenticação validada.
+- Frontend mantém conclusão manual da autorização. O callback público configurado depende de uma rota no pia-server; esta alteração local não implementa nem publica essa rota.
+
+### Tests
+- Regressões de DCR/PKCE, state, persistência no cofre e status; bundle reconstruído.
+
+## [Correção — Música pelo chat e cópia de erros] - 2026-11-15
+
+### Fixed
+- Pedidos diretos de criação musical no chat acionam o serviço de música sem depender de LLM; pedidos que mencionam Suno selecionam explicitamente `suno_mcp`. O retorno inclui o áudio e os metadados da ferramenta quando a geração tem sucesso, ou uma mensagem de falha quando o provedor não atende.
+- Falhas de disponibilidade dos modelos no chat recebem uma resposta legível com orientação para conferir a configuração.
+- Cópia de mensagens e do balão de erro usa fallback com textarea e `document.execCommand('copy')` quando a API de clipboard falha ou está ausente, com confirmação “Copiado!” após sucesso.
+- Timeouts e respostas inválidas do Suno não repetem automaticamente a geração por REST, evitando pedidos duplicados. O fallback REST fica restrito à rejeição explícita do endpoint/protocolo.
+
+### Tests
+- Regressões para intenção musical, propagação de áudio, indisponibilidade de LLM, prevenção de repetição e fallbacks de clipboard; bundle do frontend reconstruído.
+
 ## [Etapa 2 — Presets de Cores, 12 Rostos Dinâmicos e OAuth Suno MCP] - 2026-11-15
 
 ### Added

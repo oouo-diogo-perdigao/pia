@@ -69,10 +69,11 @@ export default function MusicSettingsPanel() {
   const providers = Array.isArray(catalog?.providers) ? catalog.providers : [];
   const activeProvider =
     providers.find((item) => item?.id === draft.provider) || providers[0] || {};
+  const sunoProvider = providers.find((item) => item?.id === "suno_mcp") || {};
   const dirty = !loading && musicDraftSnapshot(draft) !== savedSnapshot;
   const sunoStatus = resolveSunoConnectionStatus(
     catalog?.selection,
-    activeProvider,
+    sunoProvider,
   );
 
   async function installLocalEngine() {
@@ -146,7 +147,7 @@ export default function MusicSettingsPanel() {
       if (res?.auth_url && /^https?:\/\//i.test(res.auth_url)) {
         window.open(res.auth_url, "_blank", "noopener,noreferrer");
       }
-      if (res?.account?.oauth?.connected) {
+      if (res?.account?.oauth?.connected === true) {
         setPendingOAuth(null);
         notify("Conta Suno MCP conectada via OAuth.");
       } else {
@@ -360,8 +361,13 @@ export default function MusicSettingsPanel() {
                     </Badge>
                   </Group>
                   <Text size="xs" c="dimmed">
-                    Conecte sua conta Suno via OAuth ou gerencie múltiplas
-                    contas salvas no Cofre Único.
+                    {sunoStatus.connected
+                      ? "Conta OAuth conectada e salva no Cofre Único."
+                      : sunoStatus.mode === "oauth_pending"
+                        ? "Autorização OAuth pendente. Conclua no navegador e cole o código abaixo se necessário."
+                        : sunoStatus.mode === "token"
+                          ? "Token presente no Cofre Único (autenticação validada somente na chamada ao servidor)."
+                          : "Conecte via OAuth (DCR automático + PKCE) ou informe um token manual no Cofre Único."}
                   </Text>
                 </div>
                 <div className="settings-row-control">
@@ -372,11 +378,11 @@ export default function MusicSettingsPanel() {
                       leftSection={<Link2 size={14} />}
                       onClick={safe(startSunoOAuth)}
                     >
-                      {sunoStatus.mode === "oauth"
+                      {sunoStatus.connected
                         ? "Reconectar OAuth"
                         : "Conectar via OAuth"}
                     </Button>
-                    {sunoStatus.mode === "oauth" && (
+                    {sunoStatus.connected && (
                       <Button
                         size="xs"
                         variant="light"
@@ -532,9 +538,11 @@ export default function MusicSettingsPanel() {
                     Token do Suno MCP (opcional)
                   </Text>
                   <Text size="xs" c="dimmed">
-                    {catalog?.selection?.suno_mcp_token_configured
-                      ? "Token ou sessão OAuth já ativa no Cofre. Preencha apenas para substituir."
-                      : "Chave Bearer manual caso não utilize OAuth."}
+                    {sunoStatus.connected
+                      ? "Sessão OAuth ativa no Cofre. Preencha apenas se quiser definir um token manual."
+                      : catalog?.selection?.suno_mcp_token_configured === true
+                        ? "Token manual configurado no Cofre (presença não valida autenticação). Preencha apenas para substituir."
+                        : "Chave Bearer manual caso não utilize OAuth."}
                   </Text>
                 </div>
                 <div className="settings-row-control">
@@ -542,8 +550,8 @@ export default function MusicSettingsPanel() {
                     w={280}
                     aria-label="Token do servidor MCP do Suno"
                     placeholder={
-                      catalog?.selection?.suno_mcp_token_configured
-                        ? "Já configurado"
+                      catalog?.selection?.suno_mcp_token_configured === true
+                        ? "Token configurado"
                         : "Cole o token (opcional)"
                     }
                     value={draft.suno_mcp_token}
@@ -559,8 +567,8 @@ export default function MusicSettingsPanel() {
                 <Stack gap="xs" style={{ width: "100%" }}>
                   <Group justify="space-between">
                     <Text size="xs" c="dimmed">
-                      Parâmetros avançados de cliente OAuth (Client ID, URLs e
-                      escopos)
+                      Parâmetros avançados de OAuth (opcionais — usa DCR
+                      automático + PKCE por padrão)
                     </Text>
                     <Button
                       size="xs"
@@ -576,8 +584,8 @@ export default function MusicSettingsPanel() {
                       <Group grow align="flex-start">
                         <TextInput
                           size="xs"
-                          label="Client ID"
-                          placeholder="OAuth client_id"
+                          label="Client ID (opcional)"
+                          placeholder="Automático via DCR se vazio"
                           value={draft.suno_mcp_client_id}
                           onChange={(e) => {
                             const val = e.currentTarget.value;
@@ -589,7 +597,7 @@ export default function MusicSettingsPanel() {
                         />
                         <PasswordInput
                           size="xs"
-                          label="Client Secret"
+                          label="Client Secret (opcional)"
                           placeholder="Opcional"
                           value={draft.suno_mcp_client_secret}
                           onChange={(e) => {
@@ -604,8 +612,8 @@ export default function MusicSettingsPanel() {
                       <Group grow align="flex-start">
                         <TextInput
                           size="xs"
-                          label="Authorization URL"
-                          placeholder="https://.../oauth/authorize"
+                          label="Authorization URL (opcional)"
+                          placeholder="Usa padrão Suno se vazio"
                           value={draft.suno_mcp_auth_url}
                           onChange={(e) => {
                             const val = e.currentTarget.value;
@@ -617,8 +625,8 @@ export default function MusicSettingsPanel() {
                         />
                         <TextInput
                           size="xs"
-                          label="Token URL"
-                          placeholder="https://.../oauth/token"
+                          label="Token URL (opcional)"
+                          placeholder="Usa padrão Suno se vazio"
                           value={draft.suno_mcp_token_url}
                           onChange={(e) => {
                             const val = e.currentTarget.value;
@@ -631,7 +639,7 @@ export default function MusicSettingsPanel() {
                       </Group>
                       <TextInput
                         size="xs"
-                        label="Escopos OAuth"
+                        label="Escopos OAuth (opcional)"
                         placeholder="music.generate profile"
                         value={draft.suno_mcp_scopes}
                         onChange={(e) => {

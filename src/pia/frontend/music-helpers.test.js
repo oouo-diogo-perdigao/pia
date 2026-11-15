@@ -62,7 +62,20 @@ describe("music-helpers Suno MCP & OAuth", () => {
     });
   });
 
-  it("reports clear connection status badges for OAuth, bearer, and disconnected states", () => {
+  it("does not require manual client_id when starting Suno OAuth with DCR defaults", () => {
+    assert.deepEqual(buildSunoOAuthStartPayload({}), {});
+    assert.deepEqual(
+      buildSunoOAuthStartPayload({
+        suno_mcp_client_id: "",
+        suno_mcp_auth_url: "",
+        suno_mcp_token_url: "",
+        suno_mcp_scopes: "",
+      }),
+      {},
+    );
+  });
+
+  it("reports accurate connection status without treating registered server or token presence as connected", () => {
     assert.deepEqual(
       resolveSunoConnectionStatus({ suno_mcp_oauth_connected: true }, {}),
       {
@@ -72,23 +85,82 @@ describe("music-helpers Suno MCP & OAuth", () => {
         color: "teal",
       },
     );
-    assert.equal(
+
+    assert.deepEqual(
       resolveSunoConnectionStatus(
         {
           suno_mcp_url: "https://suno.example/mcp",
           suno_mcp_token_configured: true,
+          suno_mcp_auth_type: "bearer",
         },
         {},
-      ).mode,
-      "bearer",
+      ),
+      {
+        connected: false,
+        mode: "token",
+        label: "Token configurado",
+        color: "blue",
+      },
     );
-    assert.equal(
+
+    assert.deepEqual(
       resolveSunoConnectionStatus(
-        { suno_mcp_url: "https://suno.example/mcp" },
+        {
+          suno_mcp_url: "https://suno.example/mcp",
+          suno_mcp_auth_type: "oauth",
+          suno_mcp_oauth_connected: false,
+        },
         {},
-      ).mode,
-      "configured",
+      ),
+      {
+        connected: false,
+        mode: "oauth_pending",
+        label: "OAuth pendente",
+        color: "yellow",
+      },
     );
-    assert.equal(resolveSunoConnectionStatus({}, {}).mode, "none");
+
+    assert.deepEqual(
+      resolveSunoConnectionStatus(
+        {
+          suno_mcp_url: "https://suno.example/mcp",
+          suno_mcp_command: "npx suno-mcp",
+          suno_mcp_auth_type: "none",
+          suno_mcp_token_configured: false,
+          suno_mcp_oauth_connected: false,
+        },
+        {},
+      ),
+      {
+        connected: false,
+        mode: "none",
+        label: "Não configurado",
+        color: "gray",
+      },
+    );
+
+    // Non-boolean token reference strings must not be coerced to connected/configured.
+    assert.deepEqual(
+      resolveSunoConnectionStatus(
+        {
+          suno_mcp_token_configured: "vault:suno_token",
+          suno_mcp_oauth_connected: "pending",
+        },
+        {},
+      ),
+      {
+        connected: false,
+        mode: "none",
+        label: "Não configurado",
+        color: "gray",
+      },
+    );
+
+    assert.deepEqual(resolveSunoConnectionStatus({}, {}), {
+      connected: false,
+      mode: "none",
+      label: "Não configurado",
+      color: "gray",
+    });
   });
 });

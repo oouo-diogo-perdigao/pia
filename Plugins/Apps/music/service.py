@@ -93,23 +93,28 @@ def _suno_connector_state() -> dict[str, Any]:
 
     accounts = srv.get("accounts") or []
     acc = accounts[0] if accounts else {}
+    acc_id = str(acc.get("id") or "default")
     oauth = acc.get("oauth") or {}
-    has_token = bool(
-        srv.get("has_bearer_token")
-        or acc.get("has_bearer_token")
-        or oauth.get("connected")
+    vault_oauth = bool(
+        mgr._get_secret(_SUNO_MCP_SERVER_ID, acc_id, "oauth_access_token").strip()
     )
+    vault_bearer = bool(
+        mgr._get_secret(_SUNO_MCP_SERVER_ID, "_server", "bearer_token").strip()
+        or mgr._get_secret(_SUNO_MCP_SERVER_ID, acc_id, "bearer_token").strip()
+    )
+    oauth_connected = bool(oauth.get("connected") and vault_oauth)
+    has_token = bool(vault_oauth or vault_bearer)
     state.update(
         {
             "auth_type": str(
                 acc.get("auth_type")
                 or (
                     "oauth"
-                    if oauth.get("client_id") or oauth.get("connected")
+                    if oauth.get("client_id") or oauth_connected
                     else ("bearer" if has_token else "none")
                 )
             ),
-            "oauth_connected": bool(oauth.get("connected")),
+            "oauth_connected": oauth_connected,
             "oauth_client_id": str(oauth.get("client_id") or ""),
             "oauth_auth_url": str(oauth.get("auth_url") or ""),
             "oauth_token_url": str(oauth.get("token_url") or ""),
@@ -227,9 +232,18 @@ def _resolve_suno_mcp_credentials(cfg: dict[str, Any]) -> tuple[str, str, str]:
 
 def suno_oauth_start(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     data = dict(payload or {})
-    from src.mcp_connectors import get_mcp_manager
+    from src.mcp_connectors import SUNO_OAUTH_DEFAULTS, get_mcp_manager
 
-    _ensure_suno_mcp_server(oauth_payload=data)
+    cfg = settings()
+    suno_url = str(cfg.get("MUSIC_SUNO_MCP_URL") or "").strip()
+    suno_cmd = str(cfg.get("MUSIC_SUNO_MCP_COMMAND") or "").strip()
+    if not suno_url and not suno_cmd:
+        suno_url = SUNO_OAUTH_DEFAULTS["mcp_url"]
+        from src.settings_store import get_store
+
+        get_store().save("Apps/music", {"MUSIC_SUNO_MCP_URL": suno_url})
+
+    _ensure_suno_mcp_server(suno_url=suno_url, oauth_payload=data)
     mgr = get_mcp_manager()
     return mgr.start_oauth(
         _SUNO_MCP_SERVER_ID,
@@ -316,7 +330,7 @@ def providers_catalog():
                 "description": "Conexão com servidor MCP do Suno",
                 "url": suno_url,
                 "command": suno_cmd,
-                "credential_state": "configured" if suno_configured else "missing",
+                "credential_state": "configured" if suno_token else "missing",
                 "token_configured": suno_token,
                 "auth_type": suno_state["auth_type"],
                 "oauth_connected": suno_state["oauth_connected"],

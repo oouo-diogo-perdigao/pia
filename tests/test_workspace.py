@@ -303,11 +303,13 @@ class DesktopBackendTests(unittest.TestCase):
                 self.assertEqual(backend.reply(chat, "Olá"), "Resposta")
                 self.assertEqual(len(backend.store.messages(chat)), 2)
                 backend.agent.complete.side_effect = RuntimeError("offline")
-                with self.assertRaises(RuntimeError):
-                    backend.reply(chat, "Outra pergunta")
+                failure = backend.reply(chat, "Outra pergunta")
+                self.assertIn("Modelos de IA indisponíveis", failure)
+                self.assertEqual(len(backend.store.messages(chat)), 4)
+                self.assertEqual(backend.store.messages(chat)[-1]["content"], failure)
                 backend.agent.complete.side_effect = None
                 backend.reply(chat, "Outra pergunta")
-                self.assertEqual(len(backend.store.messages(chat)), 4)
+                self.assertEqual(len(backend.store.messages(chat)), 6)
                 self.assertEqual(
                     backend.agent.complete.call_args.args[0][-1]["content"],
                     "Outra pergunta",

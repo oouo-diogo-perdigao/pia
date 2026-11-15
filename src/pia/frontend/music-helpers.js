@@ -84,16 +84,24 @@ export function resolveSunoConnectionStatus(
   selection = {},
   activeProvider = {},
 ) {
-  const oauthConnected = Boolean(
-    selection?.suno_mcp_oauth_connected ?? activeProvider?.oauth_connected,
-  );
-  const tokenConfigured = Boolean(
-    selection?.suno_mcp_token_configured ?? activeProvider?.token_configured,
-  );
-  const endpointConfigured = Boolean(
-    String(selection?.suno_mcp_url || activeProvider?.url || "").trim() ||
-    String(selection?.suno_mcp_command || activeProvider?.command || "").trim(),
-  );
+  const oauthRaw =
+    selection?.suno_mcp_oauth_connected !== undefined
+      ? selection.suno_mcp_oauth_connected
+      : activeProvider?.oauth_connected;
+  const oauthConnected = oauthRaw === true;
+
+  const tokenRaw =
+    selection?.suno_mcp_token_configured !== undefined
+      ? selection.suno_mcp_token_configured
+      : activeProvider?.token_configured;
+  const tokenConfigured = tokenRaw === true;
+
+  const authType = String(
+    selection?.suno_mcp_auth_type ?? activeProvider?.auth_type ?? "none",
+  )
+    .trim()
+    .toLowerCase();
+
   if (oauthConnected) {
     return {
       connected: true,
@@ -102,26 +110,26 @@ export function resolveSunoConnectionStatus(
       color: "teal",
     };
   }
-  if (tokenConfigured && endpointConfigured) {
-    return {
-      connected: true,
-      mode: "bearer",
-      label: "Conectado via token",
-      color: "blue",
-    };
-  }
-  if (endpointConfigured) {
+  if (authType === "oauth") {
     return {
       connected: false,
-      mode: "configured",
-      label: "Servidor configurado (OAuth pendente)",
+      mode: "oauth_pending",
+      label: "OAuth pendente",
       color: "yellow",
+    };
+  }
+  if (tokenConfigured) {
+    return {
+      connected: false,
+      mode: "token",
+      label: "Token configurado",
+      color: "blue",
     };
   }
   return {
     connected: false,
     mode: "none",
-    label: "Não conectado",
+    label: "Não configurado",
     color: "gray",
   };
 }

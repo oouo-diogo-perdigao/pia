@@ -113,6 +113,8 @@ def call_suno_mcp(
             pass
     arguments = {"prompt": prompt, "lyrics": lyrics, "duration": duration}
     if suno_url:
+        import requests
+
         try:
             rpc_res = _mcp_http_rpc(
                 suno_url,
@@ -127,9 +129,24 @@ def call_suno_mcp(
                 "audio_base64" in rpc_res or "audio_url" in rpc_res
             ):
                 return rpc_res
-        except Exception:
-            pass
-        import requests
+            if isinstance(rpc_res, dict) and rpc_res:
+                return rpc_res
+            raise RuntimeError(
+                "Resposta vazia ou inválida do Suno (MCP); a solicitação não foi repetida."
+            )
+        except requests.Timeout:
+            raise RuntimeError(
+                "Tempo esgotado aguardando resposta do Suno (MCP); a geração pode já estar em andamento."
+            ) from None
+        except requests.HTTPError as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            # Only fall back to plain REST POST if the endpoint rejects JSON-RPC method/path.
+            if status not in (404, 405, 415, 501):
+                raise
+        except ValueError:
+            raise RuntimeError(
+                "Resposta inválida do Suno (MCP); a geração pode já estar em andamento e não foi repetida."
+            ) from None
 
         headers = {"Content-Type": "application/json"}
         if suno_token:
