@@ -295,6 +295,98 @@ def test_kokoro_and_qwen_providers_call_real_tts_manager_generate(monkeypatch):
     assert res_q.mime == "audio/wav"
 
 
+def test_http_preview_audio_speech_and_speak_flow_through_real_tts_manager(
+    api, monkeypatch
+):
+    import queue
+    import time
+    from src.TTSManager import TTSManager
+
+    request, port = api
+    origin = f"http://127.0.0.1:{port}"
+    status_sess, _, headers = request(
+        payload={},
+        path="/api/pia/session",
+        method="POST",
+        headers={"Origin": origin},
+    )
+    assert status_sess == 200
+    cookie = (headers.get("Set-Cookie") or headers.get("set-cookie")).split(";", 1)[0]
+
+    tm = TTSManager()
+    monkeypatch.setattr(tm, "ensure_worker_running", lambda backend: None)
+    for backend in ("kokoro", "qwen"):
+        tm.task_queues[backend] = queue.Queue()
+        tm.result_queues[backend] = queue.Queue()
+        tm.worker_processes[backend] = Mock(is_alive=lambda: True)
+    tts_jobs = []
+    monkeypatch.setattr(tm, "add_tts_job", lambda **kwargs: tts_jobs.append(kwargs))
+    monkeypatch.setattr("src.TTSManager.TTSManager", lambda: tm)
+
+    def feed_once(backend):
+        req = tm.task_queues[backend].get(timeout=3)
+        tm.result_queues[backend].put(
+            {"req_id": req["req_id"], "ok": True, "wav_data": b"RIFFreal"}
+        )
+
+    # 1. /api/pia/tts/preview via real KokoroProvider -> TTSManager.generate(device=...)
+    threading.Thread(target=feed_once, args=("kokoro",), daemon=True).start()
+    st_prev, prev_job, _ = request(
+        payload={
+            "text": "Teste preview real",
+            "profile": {
+                "provider": "kokoro",
+                "model": "kokoro-v1.0",
+                "voice": "pm_santa",
+                "speed": 1.0,
+            },
+        },
+        path="/api/pia/tts/preview",
+        method="POST",
+        headers={"Cookie": cookie, "Origin": origin},
+    )
+    assert st_prev == 202
+    job_id = prev_job["job_id"]
+    audio_bytes = None
+    for _ in range(40):
+        st_aud, data_aud, _ = request(
+            path=f"/api/pia/tts/previews/{job_id}/audio",
+            method="GET",
+            headers={"Cookie": cookie},
+        )
+        if st_aud == 200:
+            audio_bytes = data_aud
+            break
+        time.sleep(0.05)
+    assert audio_bytes == b"RIFFreal"
+
+    # 2. /v1/audio/speech via real QwenTTSProvider -> TTSManager.generate(device=...)
+    threading.Thread(target=feed_once, args=("qwen",), daemon=True).start()
+    st_sp, body_sp, _ = request(
+        payload={
+            "model": "qwen",
+            "voice": "Ryan",
+            "input": "Teste speech real",
+            "response_format": "wav",
+        },
+        path="/v1/audio/speech",
+        method="POST",
+    )
+    assert st_sp == 200
+    assert body_sp == b"RIFFreal"
+
+    # 3. /tts/speak with device kwarg
+    st_spk, data_spk, _ = request(
+        payload={"text": "Teste speak real", "device": "default"},
+        path="/tts/speak",
+        method="POST",
+    )
+    assert st_spk == 200
+    assert data_spk["ok"] is True
+    assert len(tts_jobs) == 1
+    assert tts_jobs[0]["device"] == "default"
+
+
 def test_keys_not_in_logs(caplog):
     from src.tts_providers import openai_tts, elevenlabs
 
