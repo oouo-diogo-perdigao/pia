@@ -243,6 +243,11 @@ def route(handler):
                 subpath in allowed_get
                 or subpath.startswith("/tts/jobs/")
                 or subpath.startswith("/mcp/servers/")
+                or subpath.startswith("/plugins/")
+                or subpath.startswith("/skills/")
+                or subpath.startswith("/apps/")
+                or subpath.startswith("/bots/")
+                or subpath.startswith("/music/")
                 or (subpath.startswith("/speakers/") and subpath.endswith("/voice"))
                 or subpath.startswith("/openbot/bots")
                 or subpath.startswith("/openbot/runs/")
@@ -337,7 +342,7 @@ def route(handler):
                 raise
             status_code = 200
             if (
-                path == "/api/pia/chat/send"
+                path in ("/api/pia/chat/send", "/api/pia/bots/chat")
                 or path
                 in (
                     "/api/pia/tts/install",
@@ -374,16 +379,38 @@ def route(handler):
             match = re.fullmatch(
                 r"/bots/([a-z][a-z0-9_]*)/(avatar\.svg|web/[a-zA-Z0-9_.-]+)", path
             )
-            if not match:
-                respond(handler, 404, {"error": "Arquivo não encontrado."})
-                return True
-            base = ROOT.parent.parent / "Plugins/Bot" / match[1]
-            relative = match[2]
+            if match:
+                base = ROOT.parent.parent / "Plugins/Bot" / match[1]
+                relative = match[2]
+            else:
+                spa_match = re.fullmatch(
+                    r"/bots/([a-z][a-z0-9_]*)(?:/(?:index\.html)?)?", path
+                )
+                if not spa_match:
+                    respond(handler, 404, {"error": "Arquivo não encontrado."})
+                    return True
+                bot_index = (
+                    ROOT.parent.parent
+                    / "Plugins/Bot"
+                    / spa_match[1]
+                    / "web"
+                    / "index.html"
+                )
+                if bot_index.is_file():
+                    base = bot_index.parent
+                    relative = "index.html"
+                else:
+                    base = ROOT
+                    relative = "index.html"
         elif path.startswith("/mini/"):
             base = ROOT.parent / "piamini"
-            relative = path.removeprefix("/mini/")
+            relative = path.removeprefix("/mini/") or "index.html"
         elif path.startswith("/apps/"):
-            _, _, identity, relative = path.split("/", 3)
+            parts_app = path.split("/", 3)
+            identity = parts_app[2] if len(parts_app) > 2 else ""
+            relative = (
+                parts_app[3] if len(parts_app) > 3 and parts_app[3] else "index.html"
+            )
             base = get_service().apps.find(identity)["folder"] / "web"
             # Only the app's web/ directory is published, never .env, Python or config.
         else:

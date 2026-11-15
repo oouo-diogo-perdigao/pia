@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Badge,
   Button,
@@ -6,13 +6,15 @@ import {
   Group,
   Modal,
   Paper,
+  Select,
   SimpleGrid,
   Stack,
   Text,
 } from "@mantine/core";
-import { Bot, Plus, Settings, Sparkles } from "lucide-react";
+import { Bot, MessageSquare, Plus, Settings, Sparkles } from "lucide-react";
 import { usePia } from "./shared";
 import NotificationMenu, { CountBadge } from "./NotificationMenu";
+import BotChatPanel from "./features/bots/BotChatPanel";
 import {
   BotEditor,
   SafeSvgAvatar,
@@ -29,13 +31,37 @@ export default function Bots() {
   const { state, route, navigate } = usePia();
   const [createOpen, setCreateOpen] = useState(false);
 
+  const bots = state.bots || [];
+  const [selectedChatBotId, setSelectedChatBotId] = useState(
+    bots[0]?.id || "secretaria",
+  );
+
   useEffect(() => {
     if (route?.create) {
       setCreateOpen(true);
     }
   }, [route?.create]);
 
-  const bots = state.bots || [];
+  useEffect(() => {
+    if (bots.length && !bots.some((b) => b.id === selectedChatBotId)) {
+      setSelectedChatBotId(bots[0].id);
+    }
+  }, [bots, selectedChatBotId]);
+
+  const activeChatBot = useMemo(
+    () => bots.find((b) => b.id === selectedChatBotId) || bots[0] || null,
+    [bots, selectedChatBotId],
+  );
+  const botSelectOptions = useMemo(
+    () =>
+      bots.map((b) => ({
+        value: b.id,
+        label:
+          b.kind === "dynamic" ? `${b.name} (Dinâmico)` : `${b.name} (Nativo)`,
+      })),
+    [bots],
+  );
+
   const nativeBots = bots.filter((b) => b.kind !== "dynamic");
   const dynamicBots = bots.filter((b) => b.kind === "dynamic");
 
@@ -90,16 +116,78 @@ export default function Bots() {
               <Text size="sm" c="dimmed" my="sm">
                 {bot.description}
               </Text>
-              <Button
-                variant="light"
-                onClick={() => navigate({ view: "bots", bot: bot.id })}
-              >
-                Abrir {bot.name}
-              </Button>
+              <Group gap="xs">
+                <Button
+                  variant="light"
+                  leftSection={<MessageSquare size={14} />}
+                  onClick={() =>
+                    navigate({ view: "bots", bot: bot.id, tab: "chat" })
+                  }
+                >
+                  Conversar
+                </Button>
+                <Button
+                  variant="subtle"
+                  size="xs"
+                  leftSection={<Settings size={14} />}
+                  onClick={() =>
+                    navigate({ view: "bots", bot: bot.id, tab: "config" })
+                  }
+                >
+                  Configurar
+                </Button>
+              </Group>
             </Paper>
           </NotificationMenu>
         ))}
       </SimpleGrid>
+
+      {bots.length > 0 && (
+        <>
+          <Divider label="Conversa Direta com o Bot" labelPosition="left" />
+          <Paper withBorder p="md" radius="md">
+            <Stack gap="md">
+              <Group
+                justify="space-between"
+                align="flex-end"
+                wrap="wrap"
+                gap="sm"
+              >
+                <Select
+                  label="Escolha o bot para conversar"
+                  data={botSelectOptions}
+                  value={activeChatBot?.id || null}
+                  onChange={(value) => {
+                    if (value) setSelectedChatBotId(value);
+                  }}
+                  miw={260}
+                />
+                {activeChatBot && (
+                  <Button
+                    size="xs"
+                    variant="subtle"
+                    onClick={() =>
+                      navigate({ view: "bots", bot: activeChatBot.id })
+                    }
+                  >
+                    Abrir tela completa de {activeChatBot.name}
+                  </Button>
+                )}
+              </Group>
+              {activeChatBot && (
+                <BotChatPanel
+                  key={activeChatBot.id}
+                  botId={activeChatBot.id}
+                  botName={activeChatBot.name}
+                  botSubtitle={activeChatBot.description || ""}
+                  minHeight={240}
+                  maxHeight={380}
+                />
+              )}
+            </Stack>
+          </Paper>
+        </>
+      )}
 
       <Divider label="Bots Dinâmicos · OpenBot" labelPosition="left" />
       {!dynamicBots.length ? (

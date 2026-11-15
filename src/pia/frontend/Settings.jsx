@@ -7,6 +7,7 @@ import SkillsPanel from "./SkillsPanel";
 import { fingerprint } from "./forms";
 import React, { useState, useEffect, useRef } from "react";
 import {
+  Anchor,
   Button,
   Group,
   Paper,

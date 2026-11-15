@@ -232,7 +232,15 @@ class WorkspaceService:
             raise ValueError("Plugin não encontrado.")
         return self.notifications.publish(source, title, text, links)
 
-    def send(self, chat, text, request=None, model=None):
+    def send(
+        self,
+        chat,
+        text,
+        request=None,
+        model=None,
+        bot_id=None,
+        system_prompt=None,
+    ):
         if not isinstance(text, str) or not text.strip():
             raise ValueError("Mensagem vazia.")
         if len(text) > 100000:
@@ -240,6 +248,14 @@ class WorkspaceService:
         with self.lock:
             if request and request in self.requests:
                 return self.requests[request]
+            if not chat and bot_id:
+                key = f"bot_chat:{bot_id}"
+                chat = self.store.get(key)
+                if not chat or not any(
+                    c["id"] == chat for c in self.store.chat_records()
+                ):
+                    chat = self.store.new_chat(f"Bot · {bot_id}")
+                    self.store.set(key, chat)
             if not any(c["id"] == chat for c in self.store.chat_records()):
                 raise ValueError("Conversa não encontrada.")
             if any(
@@ -267,6 +283,10 @@ class WorkspaceService:
                     reply_kwargs = {"on_delta": delta}
                     if model:
                         reply_kwargs["model"] = model
+                    if bot_id:
+                        reply_kwargs["bot_id"] = bot_id
+                    if system_prompt:
+                        reply_kwargs["system_prompt"] = system_prompt
                     self.backend.reply(chat, text.strip(), **reply_kwargs)
                     meta = getattr(self.backend, "_last_reply_meta", None) or {}
                     job.emit("done", **meta)
@@ -654,12 +674,15 @@ class WorkspaceService:
                 "draft": self.store.get("draft:" + chat, ""),
             }
         if path == "/chat/send":
+            bot_id = data.get("bot_id") or data.get("agent_id")
             return {
                 "job": self.send(
-                    data["chat"],
+                    data.get("chat"),
                     data["text"],
                     data.get("request"),
                     model=data.get("model"),
+                    bot_id=bot_id,
+                    system_prompt=data.get("system_prompt"),
                 )
             }
         if path == "/chat/cancel":

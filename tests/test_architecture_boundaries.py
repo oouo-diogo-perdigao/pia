@@ -110,3 +110,73 @@ def test_unified_vault_roundtrip():
     assert vault.get("k1") == {"token": "abc"}
     vault.delete("k1")
     assert vault.get("k1") is None
+
+
+def test_bot_chat_and_plugin_routes_no_404(tmp_path):
+    from types import SimpleNamespace
+    from src.desktop_backend import DesktopBackend
+    from src.pia.service import WorkspaceService
+    from src.workspace_store import WorkspaceStore
+
+    http_text = (ROOT / "src" / "pia" / "http.py").read_text(encoding="utf-8")
+    assert 'subpath.startswith("/plugins/")' in http_text
+    assert 'subpath.startswith("/apps/")' in http_text
+    assert 'subpath.startswith("/bots/")' in http_text
+    assert '"/api/pia/bots/chat"' in http_text
+
+    store = WorkspaceStore(tmp_path / "ws.db")
+    backend = DesktopBackend(lambda *a, **kw: None)
+    backend.store = store
+    captured = {}
+
+    class _FakeAgent:
+        def complete(self, messages, model=None, tools=None):
+            captured["system"] = messages[0]["content"]
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content="Oi, sou a Secretária!")
+                    )
+                ]
+            )
+
+        def complete_stream(self, messages, model=None):
+            captured["system"] = messages[0]["content"]
+            yield SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(content="Oi, sou a Secretária!")
+                    )
+                ]
+            )
+
+        def last_meta(self):
+            return {"model": "fake-m", "provider": "fake-p"}
+
+    backend.agent = _FakeAgent()
+    service = WorkspaceService(backend=backend)
+
+    # Secretária config and plugin routes return valid dicts
+    sec = service._dispatch("GET", "/bots/secretaria", {}, {})
+    assert "config" in sec
+    plug = service._dispatch("GET", "/plugins/secretaria", {}, {})
+    assert plug["plugin"]["id"] == "secretaria"
+
+    # Direct bot chat via /bots/chat
+    res = service._dispatch(
+        "POST",
+        "/bots/chat",
+        {"bot_id": "secretaria", "text": "Qual minha agenda hoje?"},
+        {},
+    )
+    assert res["bot_id"] == "secretaria"
+    assert res["chat"]
+    assert res["job"]
+    import time
+
+    for _ in range(150):
+        if service.jobs[res["job"]].status != "running":
+            break
+        time.sleep(0.02)
+    assert service.jobs[res["job"]].status == "done"
+    assert "Secretária" in captured["system"]
