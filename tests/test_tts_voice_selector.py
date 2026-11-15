@@ -10,6 +10,8 @@ from types import ModuleType
 from unittest.mock import Mock, patch
 
 import pytest
+import numpy as np
+import onnxruntime as ort
 
 from src import config, settings_store
 from src.tts_providers.base import AudioResult
@@ -638,3 +640,124 @@ def test_preview_synthesizes_once_without_local_playback_or_duplicate_events(
     assert (
         done_events[0]["result"]["audio_url"] == f"/api/pia/tts/previews/{job_id}/audio"
     )
+
+
+def test_supertonic3_onnx_pipeline_synthesizes_wav(api, tmp_path, monkeypatch):
+    import time
+    import wave
+    import io
+    from src.tts_providers import supertonic3
+
+    supertonic3._clear_runtime_cache()
+
+    model_root = tmp_path / "tts_models" / "supertonic3" / "supertonic-3"
+    (model_root / "voice_styles").mkdir(parents=True)
+    (model_root / "tts.json").write_text(
+        json.dumps(
+            {
+                "ae": {"sample_rate": 44100, "base_chunk_size": 512},
+                "ttl": {"chunk_compress_factor": 6, "latent_dim": 24},
+            }
+        ),
+        encoding="utf-8",
+    )
+    indexer = [-1] * 256
+    for i, ch in enumerate(" OlasouePIAeminhvz,."):
+        indexer[ord(ch)] = i
+    (model_root / "unicode_indexer.json").write_text(
+        json.dumps(indexer), encoding="utf-8"
+    )
+    (model_root / "voice_styles" / "M1.json").write_text(
+        json.dumps(
+            {
+                "style_dp": {"dims": [1, 8, 16], "data": [0.1] * (8 * 16)},
+                "style_ttl": {"dims": [1, 50, 256], "data": [0.1] * (50 * 256)},
+            }
+        ),
+        encoding="utf-8",
+    )
+    for name in (
+        "duration_predictor.onnx",
+        "text_encoder.onnx",
+        "vector_estimator.onnx",
+        "vocoder.onnx",
+    ):
+        (model_root / name).write_bytes(b"fake-onnx")
+
+    calls = []
+
+    class _FakeSession:
+        def __init__(self, path, providers=None):
+            self.name = path.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
+
+        def run(self, _out, feeds):
+            calls.append((self.name, sorted(feeds.keys())))
+            if self.name == "duration_predictor.onnx":
+                return [np.array([0.2], dtype=np.float32)]
+            if self.name == "text_encoder.onnx":
+                t_len = feeds["text_ids"].shape[1]
+                return [np.zeros((1, 256, t_len), dtype=np.float32)]
+            if self.name == "vector_estimator.onnx":
+                return [feeds["noisy_latent"]]
+            if self.name == "vocoder.onnx":
+                return [np.full((1, 8820), 0.25, dtype=np.float32)]
+            raise AssertionError(self.name)
+
+    monkeypatch.setattr(ort, "InferenceSession", _FakeSession)
+
+    request, port = api
+    origin = f"http://127.0.0.1:{port}"
+    st_s, _, hdrs = request(
+        payload={},
+        path="/api/pia/session",
+        method="POST",
+        headers={"Origin": origin},
+    )
+    assert st_s == 200
+    cookie = (hdrs.get("Set-Cookie") or hdrs.get("set-cookie")).split(";", 1)[0]
+
+    st_prev, prev_data, _ = request(
+        payload={
+            "text": "Olá, eu sou a PIA e esta é a minha voz.",
+            "profile": {
+                "provider": "supertonic3",
+                "model": "supertonic-3",
+                "voice": "M1",
+                "speed": 1.0,
+            },
+        },
+        path="/api/pia/tts/preview",
+        method="POST",
+        headers={"Cookie": cookie, "Origin": origin},
+    )
+    assert st_prev == 202
+    job_id = prev_data["job_id"]
+
+    audio_bytes = None
+    for _ in range(40):
+        st_aud, data_aud, _ = request(
+            path=f"/api/pia/tts/previews/{job_id}/audio",
+            method="GET",
+            headers={"Cookie": cookie},
+        )
+        if st_aud == 200:
+            audio_bytes = data_aud
+            break
+        time.sleep(0.025)
+
+    assert audio_bytes is not None
+    assert audio_bytes[:4] == b"RIFF"
+    with wave.open(io.BytesIO(audio_bytes), "rb") as wf:
+        assert wf.getframerate() == 44100
+        assert wf.getnchannels() == 1
+        assert wf.getnframes() == 8820
+    assert [c[0] for c in calls] == [
+        "duration_predictor.onnx",
+        "text_encoder.onnx",
+        "vector_estimator.onnx",
+        "vector_estimator.onnx",
+        "vector_estimator.onnx",
+        "vector_estimator.onnx",
+        "vector_estimator.onnx",
+        "vocoder.onnx",
+    ]

@@ -2,57 +2,248 @@
 
 from __future__ import annotations
 
+import io
+import json
 import logging
+import threading
+import unicodedata
+import urllib.request
+import wave
+from pathlib import Path
 from typing import Any
 
-from .base import AudioResult, TTSProvider
+from .base import AudioResult, MIME_BY_FORMAT, TTSProvider
 from .local_catalog import (
     install_artifacts,
     is_manifest_installed,
+    model_dir,
     uninstall_artifacts,
 )
 
 logger = logging.getLogger(__name__)
 
 _MODEL_ID = "supertonic-3"
+_HF_BASE = "https://huggingface.co/Supertone/supertonic/resolve/main"
 _SUPERTONIC_VOICES = [
     {"id": "M1", "name": "Masculino 1 (M1)", "lang": "multi", "gender": "male"},
     {"id": "M2", "name": "Masculino 2 (M2)", "lang": "multi", "gender": "male"},
     {"id": "F1", "name": "Feminino 1 (F1)", "lang": "multi", "gender": "female"},
     {"id": "F2", "name": "Feminino 2 (F2)", "lang": "multi", "gender": "female"},
 ]
+_VALID_VOICE_IDS = {v["id"] for v in _SUPERTONIC_VOICES}
 _ARTIFACTS = [
     {
         "filename": "tts.json",
-        "url": "https://huggingface.co/Supertone/supertonic/resolve/main/onnx/tts.json",
+        "url": f"{_HF_BASE}/onnx/tts.json",
         "size_bytes": 8_645,
     },
     {
         "filename": "unicode_indexer.json",
-        "url": "https://huggingface.co/Supertone/supertonic/resolve/main/onnx/unicode_indexer.json",
+        "url": f"{_HF_BASE}/onnx/unicode_indexer.json",
         "size_bytes": 262_134,
     },
     {
         "filename": "duration_predictor.onnx",
-        "url": "https://huggingface.co/Supertone/supertonic/resolve/main/onnx/duration_predictor.onnx",
+        "url": f"{_HF_BASE}/onnx/duration_predictor.onnx",
         "size_bytes": 1_500_789,
     },
     {
         "filename": "text_encoder.onnx",
-        "url": "https://huggingface.co/Supertone/supertonic/resolve/main/onnx/text_encoder.onnx",
+        "url": f"{_HF_BASE}/onnx/text_encoder.onnx",
         "size_bytes": 27_348_373,
     },
     {
         "filename": "vector_estimator.onnx",
-        "url": "https://huggingface.co/Supertone/supertonic/resolve/main/onnx/vector_estimator.onnx",
+        "url": f"{_HF_BASE}/onnx/vector_estimator.onnx",
         "size_bytes": 132_471_364,
     },
     {
         "filename": "vocoder.onnx",
-        "url": "https://huggingface.co/Supertone/supertonic/resolve/main/onnx/vocoder.onnx",
+        "url": f"{_HF_BASE}/onnx/vocoder.onnx",
         "size_bytes": 101_405_066,
     },
+    *[
+        {
+            "filename": f"voice_styles/{vid}.json",
+            "url": f"{_HF_BASE}/voice_styles/{vid}.json",
+            "size_bytes": 420_000,
+        }
+        for vid in ("M1", "M2", "F1", "F2")
+    ],
 ]
+_CORE_FILES = (
+    "tts.json",
+    "unicode_indexer.json",
+    "duration_predictor.onnx",
+    "text_encoder.onnx",
+    "vector_estimator.onnx",
+    "vocoder.onnx",
+)
+
+
+def _encode_wav_int16(samples: Any, sample_rate: int) -> bytes:
+    import numpy as np
+
+    arr = np.asarray(samples, dtype=np.float32).reshape(-1)
+    arr = np.clip(arr, -1.0, 1.0)
+    pcm = (arr * 32767.0).astype("<i2")
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(int(sample_rate))
+        wf.writeframes(pcm.tobytes())
+    return buf.getvalue()
+
+
+def _text_to_ids(text: str, indexer: list[int]) -> list[int]:
+    ids: list[int] = []
+    n_idx = len(indexer)
+    for ch in text:
+        code = ord(ch)
+        if code < n_idx and indexer[code] >= 0:
+            ids.append(int(indexer[code]))
+            continue
+        decomposed = unicodedata.normalize("NFKD", ch)
+        for sub in decomposed:
+            if unicodedata.combining(sub):
+                continue
+            sc = ord(sub)
+            if sc < n_idx and indexer[sc] >= 0:
+                ids.append(int(indexer[sc]))
+    if not ids:
+        space_id = (
+            indexer[ord(" ")] if ord(" ") < n_idx and indexer[ord(" ")] >= 0 else 0
+        )
+        ids.append(int(space_id))
+    return ids
+
+
+class _SupertonicRuntime:
+    """Cache thread-safe das sessões ONNX e estilos de voz do Supertonic 3."""
+
+    def __init__(self, base_dir: Path) -> None:
+        import onnxruntime as ort
+
+        self.base_dir = base_dir
+        self.cfg = json.loads((base_dir / "tts.json").read_text(encoding="utf-8"))
+        self.indexer: list[int] = json.loads(
+            (base_dir / "unicode_indexer.json").read_text(encoding="utf-8")
+        )
+        providers = ["CPUExecutionProvider"]
+        self.dp = ort.InferenceSession(
+            str(base_dir / "duration_predictor.onnx"), providers=providers
+        )
+        self.text_enc = ort.InferenceSession(
+            str(base_dir / "text_encoder.onnx"), providers=providers
+        )
+        self.vec_est = ort.InferenceSession(
+            str(base_dir / "vector_estimator.onnx"), providers=providers
+        )
+        self.vocoder = ort.InferenceSession(
+            str(base_dir / "vocoder.onnx"), providers=providers
+        )
+        self._styles: dict[str, tuple[Any, Any]] = {}
+        self._lock = threading.Lock()
+
+    def get_style(self, voice_id: str) -> tuple[Any, Any]:
+        import numpy as np
+
+        vid = voice_id if voice_id in _VALID_VOICE_IDS else "M1"
+        with self._lock:
+            if vid in self._styles:
+                return self._styles[vid]
+        style_path = self.base_dir / "voice_styles" / f"{vid}.json"
+        if not style_path.is_file():
+            style_path.parent.mkdir(parents=True, exist_ok=True)
+            url = f"{_HF_BASE}/voice_styles/{vid}.json"
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "PIA-TTS-Installer/1.0"}
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                style_path.write_bytes(resp.read())
+        data = json.loads(style_path.read_text(encoding="utf-8"))
+        style_dp = np.array(data["style_dp"]["data"], dtype=np.float32).reshape(
+            data["style_dp"]["dims"]
+        )
+        style_ttl = np.array(data["style_ttl"]["data"], dtype=np.float32).reshape(
+            data["style_ttl"]["dims"]
+        )
+        with self._lock:
+            self._styles[vid] = (style_dp, style_ttl)
+        return style_dp, style_ttl
+
+    def synthesize_wav(
+        self, text: str, voice_id: str, speed: float, total_steps: int = 5
+    ) -> bytes:
+        import numpy as np
+
+        ids = _text_to_ids(text, self.indexer)
+        text_ids = np.array([ids], dtype=np.int64)
+        text_mask = np.ones((1, 1, len(ids)), dtype=np.float32)
+        style_dp, style_ttl = self.get_style(voice_id)
+
+        spd = max(0.5, min(2.0, float(speed or 1.0)))
+        dur_raw = self.dp.run(
+            None,
+            {"text_ids": text_ids, "style_dp": style_dp, "text_mask": text_mask},
+        )[0]
+        duration = max(0.1, float(dur_raw.reshape(-1)[0]) / spd)
+        text_emb = self.text_enc.run(
+            None,
+            {"text_ids": text_ids, "style_ttl": style_ttl, "text_mask": text_mask},
+        )[0]
+
+        sr = int(self.cfg["ae"]["sample_rate"])
+        chunk_size = int(self.cfg["ae"]["base_chunk_size"]) * int(
+            self.cfg["ttl"]["chunk_compress_factor"]
+        )
+        ldim = int(self.cfg["ttl"]["latent_dim"]) * int(
+            self.cfg["ttl"]["chunk_compress_factor"]
+        )
+        wav_len = max(1, int(duration * sr))
+        lat_len = max(1, (wav_len + chunk_size - 1) // chunk_size)
+        lat_mask = np.ones((1, 1, lat_len), dtype=np.float32)
+        latent = np.random.randn(1, ldim, lat_len).astype(np.float32) * lat_mask
+        total_arr = np.array([float(total_steps)], dtype=np.float32)
+
+        with self._lock:
+            for step in range(total_steps):
+                latent = self.vec_est.run(
+                    None,
+                    {
+                        "noisy_latent": latent,
+                        "text_emb": text_emb,
+                        "style_ttl": style_ttl,
+                        "latent_mask": lat_mask,
+                        "text_mask": text_mask,
+                        "current_step": np.array([float(step)], dtype=np.float32),
+                        "total_step": total_arr,
+                    },
+                )[0]
+            wav_out = self.vocoder.run(None, {"latent": latent})[0]
+
+        samples = wav_out.reshape(-1)[:wav_len]
+        return _encode_wav_int16(samples, sr)
+
+
+_runtime_lock = threading.Lock()
+_runtime_cache: dict[Path, _SupertonicRuntime] = {}
+
+
+def _get_runtime(base_dir: Path) -> _SupertonicRuntime:
+    resolved = base_dir.resolve()
+    with _runtime_lock:
+        rt = _runtime_cache.get(resolved)
+        if rt is None:
+            rt = _SupertonicRuntime(resolved)
+            _runtime_cache[resolved] = rt
+        return rt
+
+
+def _clear_runtime_cache() -> None:
+    with _runtime_lock:
+        _runtime_cache.clear()
 
 
 class Supertonic3Provider(TTSProvider):
@@ -71,10 +262,20 @@ class Supertonic3Provider(TTSProvider):
             }
         ]
 
+    def _model_root(self) -> Path | None:
+        managed = model_dir(self.id, _MODEL_ID)
+        if is_manifest_installed(self.id, _MODEL_ID) and all(
+            (managed / f).is_file() for f in _CORE_FILES
+        ):
+            return managed
+        if all((managed / f).is_file() for f in _CORE_FILES):
+            return managed
+        return None
+
     def is_available(self, model_id: str | None = None) -> bool:
         if model_id and model_id != _MODEL_ID:
             return False
-        return is_manifest_installed(self.id, _MODEL_ID)
+        return self._model_root() is not None
 
     def capabilities(self, model_id: str | None = None) -> dict[str, Any]:
         return {
@@ -119,6 +320,7 @@ class Supertonic3Provider(TTSProvider):
         mid = model_id or _MODEL_ID
         if mid != _MODEL_ID:
             raise ValueError(f"Modelo Supertonic desconhecido: {mid}")
+        _clear_runtime_cache()
         return uninstall_artifacts(self.id, mid)
 
     def synthesize(
@@ -132,8 +334,26 @@ class Supertonic3Provider(TTSProvider):
         style: str | None = None,
         device: str | None = None,
     ) -> AudioResult:
-        if not self.is_available(model):
+        base_dir = self._model_root()
+        if base_dir is None:
             raise RuntimeError("Supertonic 3 não está instalado localmente.")
-        raise RuntimeError(
-            "Runtime Supertonic 3 ONNX não carregado para síntese direta neste ambiente."
+        if model and model != _MODEL_ID:
+            raise ValueError(f"Modelo Supertonic desconhecido: {model}")
+        fmt = (response_format or "wav").lower().strip()
+        if fmt not in MIME_BY_FORMAT:
+            fmt = "wav"
+        runtime = _get_runtime(base_dir)
+        wav_bytes = runtime.synthesize_wav(
+            text=text,
+            voice_id=voice or "M1",
+            speed=float(speed),
+        )
+        if fmt != "wav":
+            from src.TTSManager import TTSManager
+
+            wav_bytes = TTSManager()._convert_format(wav_bytes, fmt)
+        return AudioResult(
+            audio=wav_bytes,
+            mime=MIME_BY_FORMAT.get(fmt, "audio/wav"),
+            format=fmt,
         )

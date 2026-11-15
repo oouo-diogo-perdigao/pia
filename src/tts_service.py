@@ -1090,7 +1090,9 @@ class TTSService:
                 else None
             )
             prov = self.registry.get(prof["provider"])
-            if prov is not None and prov.kind == "remote":
+            if prov is not None and (
+                prov.kind == "remote" or prov.id not in ("kokoro", "qwen")
+            ):
                 res = self.synthesize(
                     part,
                     profile=prof,
