@@ -538,7 +538,11 @@ class TTSManager:
         cancelled=None,
         speaker_context=None,
     ):
-        backend = "qwen" if voice in self.qwen_voices() else "kokoro"
+        backend = (
+            "qwen"
+            if str(voice or "").strip().lower() in self.qwen_voices()
+            else "kokoro"
+        )
 
         with self.lock:
             self._stop_event.clear()
@@ -926,8 +930,13 @@ class TTSManager:
         timeout=180,
         job_name=None,
         output_format="wav",
+        device=None,
     ):
-        backend = "qwen" if voice in self.qwen_voices() else "kokoro"
+        backend = (
+            "qwen"
+            if str(voice or "").strip().lower() in self.qwen_voices()
+            else "kokoro"
+        )
 
         with self.generation_locks[backend]:
             self.ensure_worker_running(backend)

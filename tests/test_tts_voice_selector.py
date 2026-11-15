@@ -258,6 +258,43 @@ def test_smoke_synthesis_local(monkeypatch):
     assert res.audio == b"RIFF...."
 
 
+def test_kokoro_and_qwen_providers_call_real_tts_manager_generate(monkeypatch):
+    import inspect
+    import queue
+    from src.TTSManager import TTSManager
+    from src.tts_providers.kokoro import KokoroProvider
+    from src.tts_providers.qwen import QwenTTSProvider
+
+    sig = inspect.signature(TTSManager.generate)
+    assert "device" in sig.parameters
+    assert "output_format" in sig.parameters
+
+    tm = TTSManager()
+    monkeypatch.setattr(tm, "ensure_worker_running", lambda backend: None)
+    for backend in ("kokoro", "qwen"):
+        tm.task_queues[backend] = queue.Queue()
+        tm.result_queues[backend] = queue.Queue()
+        tm.worker_processes[backend] = Mock(is_alive=lambda: True)
+
+    monkeypatch.setattr("src.TTSManager.TTSManager", lambda: tm)
+
+    def feed_result(backend):
+        req = tm.task_queues[backend].get(timeout=2)
+        tm.result_queues[backend].put(
+            {"req_id": req["req_id"], "ok": True, "wav_data": b"RIFFfake"}
+        )
+
+    threading.Thread(target=feed_result, args=("kokoro",), daemon=True).start()
+    res_k = KokoroProvider().synthesize("Olá", "pm_santa", 1.0, "wav", device="default")
+    assert res_k.audio == b"RIFFfake"
+    assert res_k.mime == "audio/wav"
+
+    threading.Thread(target=feed_result, args=("qwen",), daemon=True).start()
+    res_q = QwenTTSProvider().synthesize("Olá", "ryan", 1.0, "wav", device="default")
+    assert res_q.audio == b"RIFFfake"
+    assert res_q.mime == "audio/wav"
+
+
 def test_keys_not_in_logs(caplog):
     from src.tts_providers import openai_tts, elevenlabs
 
