@@ -205,8 +205,7 @@ def complete_with_tools(
             if on_delta:
                 on_delta(text)
             if return_meta:
-                return {
-                    "text": text,
+                return text, {
                     "tools_used": tools_used,
                     "attachments": attachments,
                 }

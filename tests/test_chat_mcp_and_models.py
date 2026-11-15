@@ -314,3 +314,93 @@ def test_tts_stop_endpoint_calls_manager(monkeypatch, tmp_path):
     assert resp == {"ok": True}
     assert stopped == [True]
     assert backend.voice_stop.is_set()
+
+
+def test_complete_with_tools_return_meta_unpacks_in_desktop_backend(
+    monkeypatch, tmp_path
+):
+    from src.tool_registry import complete_with_tools
+
+    store = WorkspaceStore(tmp_path / "workspace.db")
+    chat_id = _create_chat(store, "chat-tools-meta")
+
+    class _FakeToolCall:
+        id = "call-1"
+
+        class function:
+            name = "pia_screenshot"
+            arguments = "{}"
+
+    class _FakeMsg:
+        def __init__(self, content, tool_calls=None):
+            self.content = content
+            self.tool_calls = tool_calls
+
+        def model_dump(self, exclude_none=True):
+            return {"role": "assistant", "content": self.content or ""}
+
+    class _FakeToolAgent:
+        def __init__(self):
+            self.turn = 0
+
+        def last_meta(self):
+            return {"provider": "groq", "model": "groq/openai/gpt-oss-120b"}
+
+        def complete(self, messages, model=None, tools=None):
+            self.turn += 1
+            if self.turn == 1:
+                msg = _FakeMsg("", tool_calls=[_FakeToolCall()])
+            else:
+                msg = _FakeMsg("Print capturado!", tool_calls=None)
+            return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+
+    monkeypatch.setattr(
+        "src.tool_registry.call",
+        lambda name, args: {
+            "image_url": "/api/pia/chat/assets/abc.png",
+            "markdown": "![Captura](/api/pia/chat/assets/abc.png)",
+        },
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "src.skills_runtime",
+        SimpleNamespace(
+            get_runtime=lambda: SimpleNamespace(
+                active=False, dispatch=lambda *a: False, cancel=lambda: None
+            ),
+            is_stop_phrase=lambda *a: False,
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "src.commands_loader",
+        SimpleNamespace(
+            process_command=lambda text, fallback: fallback(text) and False
+        ),
+    )
+
+    agent = _FakeToolAgent()
+    text, meta = complete_with_tools(
+        agent,
+        [{"role": "user", "content": "Tire um print"}],
+        allowed={"pia_screenshot"},
+        return_meta=True,
+    )
+    assert text == "Print capturado!"
+    assert meta["tools_used"] == ["mcp:pia_screenshot"]
+    assert meta["attachments"] == [
+        {"type": "image", "url": "/api/pia/chat/assets/abc.png"}
+    ]
+
+    # Also verify full DesktopBackend.reply flow doesn't raise ValueError on unpack
+    agent.turn = 0
+    backend = DesktopBackend(lambda *a, **kw: None)
+    backend.store = store
+    backend.agent = agent
+    out = backend.reply(chat_id, "Tire um print da tela", model="auto")
+    assert out == "Print capturado!"
+    rec = [r for r in store.message_records(chat_id) if r["role"] == "assistant"][-1]
+    assert rec["tools_used"] == ["mcp:pia_screenshot"]
+    assert rec["attachments"] == [
+        {"type": "image", "url": "/api/pia/chat/assets/abc.png"}
+    ]
