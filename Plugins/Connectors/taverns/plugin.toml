@@ -1,0 +1,4 @@
+id = "taverns"
+name = "Taverns · bot e notificações"
+provider = "taverns"
+setup_url = "https://tav.gg/developers/home"

@@ -1,0 +1,4 @@
+id = "secretaria"
+name = "Secretária"
+type = "bot"
+entrypoint = "Plugins.Bot.secretaria:Secretary"

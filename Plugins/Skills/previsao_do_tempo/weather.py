@@ -78,4 +78,3 @@ def get_weather(location: str = DEFAULT_LOCATION, when: str = "hoje") -> dict:
         "temperature_max_c": int(round(daily["temperature_2m_max"][0])),
         "precipitation_probability_max": daily["precipitation_probability_max"][0],
     }
-

@@ -1,0 +1,7 @@
+{
+  "nome": "Google · Gmail, Agenda e Drive",
+  "app_id": "google",
+  "info": "Conecte contas Google para acessar Gmail, Agenda e Drive.",
+  "type": "connector",
+  "lang": "lang/pt-BR.json"
+}

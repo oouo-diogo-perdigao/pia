@@ -1,0 +1,5 @@
+id = "microsoft"
+provider = "microsoft"
+name = "Microsoft · Outlook, Agenda e OneDrive"
+setup_url = "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
+scopes = ["openid", "profile", "offline_access", "User.Read", "Mail.Read", "Calendars.Read", "Files.Read"]

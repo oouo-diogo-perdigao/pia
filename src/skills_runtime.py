@@ -1,4 +1,5 @@
 """Sessões de skills: APIs injetadas, cancelamento e ciclo de vida sem dependências desktop."""
+
 from concurrent.futures import Future
 import inspect
 import logging
@@ -8,15 +9,32 @@ import unicodedata
 
 
 def normalize(text):
-    return ''.join(c for c in unicodedata.normalize('NFD', text.lower()) if not unicodedata.combining(c))
+    return "".join(
+        c
+        for c in unicodedata.normalize("NFD", text.lower())
+        if not unicodedata.combining(c)
+    )
 
 
 def is_stop_phrase(text):
     words = re.findall(r"\w+", normalize(text))
-    return bool(words and len(words) <= 4 and (
-        words[-1] == 'finalizar' or words[-1].startswith('encerra')
-        or ' '.join(words) in ('parar pia', 'pare pia', 'parar skill', 'cancelar skill',
-                              'encerrar modo ditado', 'desativar modo ditado')))
+    return bool(
+        words
+        and len(words) <= 4
+        and (
+            words[-1] == "finalizar"
+            or words[-1].startswith("encerra")
+            or " ".join(words)
+            in (
+                "parar pia",
+                "pare pia",
+                "parar skill",
+                "cancelar skill",
+                "encerrar modo ditado",
+                "desativar modo ditado",
+            )
+        )
+    )
 
 
 class SkillSession:
@@ -35,16 +53,18 @@ class SkillSession:
 
     def stt(self, listener):
         if not callable(listener):
-            raise TypeError('piaSTT exige uma função que recebe texto.')
+            raise TypeError("piaSTT exige uma função que recebe texto.")
         with self.lock:
             if self.cancelled.is_set():
                 return lambda: None
             self.listener = listener
+
         def unsubscribe():
             with self.lock:
                 if self.listener is listener:
                     self.listener = None
             self.maybe_close()
+
         return unsubscribe
 
     def tts(self, text, **options):
@@ -55,14 +75,18 @@ class SkillSession:
                 return future
             future = self.runtime.services.speak(text, self.cancelled, **options)
             self.pending.add(future)
+
         def done(result):
             with self.lock:
                 self.pending.discard(result)
             if not result.cancelled() and result.exception() is not None:
-                logging.error('[SKILL %s] Falha no TTS: %s', self.name, result.exception())
+                logging.error(
+                    "[SKILL %s] Falha no TTS: %s", self.name, result.exception()
+                )
                 self.close()
             else:
                 self.maybe_close()
+
         future.add_done_callback(done)
         return future
 
@@ -71,7 +95,7 @@ class SkillSession:
             if self.cancelled.is_set():
                 return
             self.runtime.services.interface(action, enabled)
-            if action != 'blink':
+            if action != "blink":
                 self.effects[action] = bool(enabled)
 
     def view(self, image):
@@ -82,27 +106,57 @@ class SkillSession:
         if not self.cancelled.is_set():
             return self.runtime.services.insert(text)
 
+    def plugins(self, plugin, operation, *, account=None, **params):
+        if self.cancelled.is_set():
+            raise RuntimeError("Skill cancelada.")
+        return self.runtime.services.plugins(
+            plugin, operation, account=account, **params
+        )
+
     def key(self, *keys):
         if not self.cancelled.is_set():
             return self.runtime.services.key(*keys)
 
     def maybe_close(self):
         with self.lock:
-            ready = self.finished and not self.listener and not self.pending and not self.running_callback
+            ready = (
+                self.finished
+                and not self.listener
+                and not self.pending
+                and not self.running_callback
+            )
         if ready:
             self.close()
 
     def call(self, execute):
-        apis = dict(piaClose=self.close, piaSTT=self.stt, piaTTS=self.tts,
-                    piaInterface=self.interface, piaView=self.view, piaInsert=self.insert,
-                    piaKey=self.key, piaCancelled=self.cancelled)
+        from src.tool_registry import call as tool_call
+
+        apis = dict(
+            piaTools=lambda name, arguments: tool_call(name, arguments),
+            piaClose=self.close,
+            piaSTT=self.stt,
+            piaTTS=self.tts,
+            piaInterface=self.interface,
+            piaView=self.view,
+            piaInsert=self.insert,
+            piaKey=self.key,
+            piaCancelled=self.cancelled,
+            piaPlugins=self.plugins,
+        )
         try:
             signature = inspect.signature(execute)
-            kwargs = apis if any(p.kind == p.VAR_KEYWORD for p in signature.parameters.values()) else {
-                name: value for name, value in apis.items() if name in signature.parameters}
+            kwargs = (
+                apis
+                if any(p.kind == p.VAR_KEYWORD for p in signature.parameters.values())
+                else {
+                    name: value
+                    for name, value in apis.items()
+                    if name in signature.parameters
+                }
+            )
             execute(**kwargs)
         except Exception:
-            logging.exception('[SKILL %s] Falha em execute', self.name)
+            logging.exception("[SKILL %s] Falha em execute", self.name)
             self.close()
         finally:
             with self.lock:
@@ -126,7 +180,9 @@ class SkillRuntime:
         session = SkillSession(self, name)
         with self.lock:
             self.session = session
-        threading.Thread(target=session.call, args=(execute,), daemon=True, name='skill-' + name).start()
+        threading.Thread(
+            target=session.call, args=(execute,), daemon=True, name="skill-" + name
+        ).start()
         return session
 
     def close(self, session, close_interface=True):
@@ -143,7 +199,7 @@ class SkillRuntime:
                     try:
                         self.services.interface(action, False)
                     except Exception:
-                        logging.exception('Falha ao restaurar interface da skill')
+                        logging.exception("Falha ao restaurar interface da skill")
             if close_interface:
                 self.services.close()
 
@@ -174,7 +230,7 @@ class SkillRuntime:
             if listener:
                 listener(text)
         except Exception:
-            logging.exception('[SKILL %s] Falha no listener', session.name)
+            logging.exception("[SKILL %s] Falha no listener", session.name)
             session.close()
         finally:
             with session.lock:
@@ -185,9 +241,11 @@ class SkillRuntime:
 
 _runtime = None
 
+
 def get_runtime():
     global _runtime
     if _runtime is None:
         from .skill_services import PiaServices
+
         _runtime = SkillRuntime(PiaServices())
     return _runtime

@@ -16,7 +16,9 @@ except Exception:
     logging.warning("pygame mixer couldn't be initialized - audio playback disabled")
 
 
-PROCESSING_SOUND_PATH = os.path.join("..", "sounds", "end.mp3")
+from .config_paths import SOUNDS_DIR
+
+PROCESSING_SOUND_PATH = str(SOUNDS_DIR / "end.mp3")
 
 
 def play_sound(file_path: str) -> None:

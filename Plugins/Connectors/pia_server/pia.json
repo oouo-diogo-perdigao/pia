@@ -1,0 +1,7 @@
+{
+  "nome": "PIA Server",
+  "app_id": "pia_server",
+  "info": "Pareie este computador com a PIA Server.",
+  "type": "connector",
+  "lang": "lang/pt-BR.json"
+}

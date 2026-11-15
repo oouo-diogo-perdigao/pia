@@ -1,10 +1,10 @@
 # PIA
 
-PIA é um assistente pessoal multimodal para Windows que reúne, em um único servidor Python, **Speech-to-Text (STT)**, **Text-to-Speech (TTS)**, **chat/LLM**, **geração e edição de imagens**, **wake word**, comandos locais e uma interface visual de estado.
+PIA é um assistente pessoal multimodal para Windows e Linux que reúne, em um único servidor Python, **Speech-to-Text (STT)**, **Text-to-Speech (TTS)**, **chat/LLM**, **geração e edição de imagens**, **wake word**, comandos locais e uma interface visual de estado.
 
 O projeto expõe APIs compatíveis com partes da API da OpenAI para facilitar integração com clientes como Open WebUI, scripts locais e outras aplicações.
 
-![PIA](./pia.png)
+![PIA](./src/images/pia.png)
 
 ## Principais recursos
 
@@ -27,10 +27,10 @@ O projeto expõe APIs compatíveis com partes da API da OpenAI para facilitar in
   - palavra-chave configurável por arquivo.
 - **Comandos locais dinâmicos**
   - módulos Python carregados de `Plugins/Skills/`.
-- **Overlay/HUD**
+- **Companheira e desktop**
   - estados de listening, thinking, processing, speaking e pulse.
 - **Atalhos globais**
-  - os mesmos comandos no Windows e no Linux, configurados em `shortcuts.yaml`;
+  - os mesmos comandos no Windows e no Linux, configurados em `config/shortcuts.yaml`;
   - inserção de texto no cursor;
   - launcher com ícone na bandeja e visualização dos logs.
 
@@ -50,56 +50,44 @@ O projeto expõe APIs compatíveis com partes da API da OpenAI para facilitar in
 
 ## Instalação
 
-Na raiz do projeto:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\install.ps1
-```
-
-O instalador usa `uv`, cria o ambiente virtual quando necessário, executa `uv sync` e cria `.env` a partir de `.env.example` quando o arquivo ainda não existe.
-
-Também é possível preparar manualmente:
-
-```powershell
-uv venv
-uv sync
-Copy-Item .env.example .env
-```
-
-A bandeja e a API sobem juntas. Não há um atalho que abra só o servidor.
-
-### Executar agora
-
-**Linux**
+Use o mesmo arquivo nos dois sistemas. **No Windows execute pelo Git Bash; no Linux, pelo Bash.**
 
 ```bash
-bash startup/piaSATServer.sh
+bash install.sh
+bash start.sh
 ```
 
-**Windows**
+O instalador detecta o ambiente, prepara dependências nativas, Python 3.12, uv,
+a PIA e as dependências do Podcast Automation. Configura a inicialização no login
+e abre a PIA automaticamente ao concluir. Depois de encerrar, basta `bash start.sh`
+para abrir novamente, sem reinstalar. O terminal pode ser fechado.
+`--no-autostart`, `--no-system`, `--no-podcast`, `--no-start` e `--dry-run` permitem ajustar a instalação.
+Não exige compilar um `.exe` nem instalar PowerShell no Linux.
 
-Abra `dist\PIA Server Python.exe`. Esse executável sobe a bandeja e a API. Se a pasta `dist` ainda não tiver o arquivo, gere-o na raiz do projeto:
+As configurações existentes na raiz são migradas para `config/`, sem sobrescrever
+arquivos já presentes. Conflitos são preservados em `config/legacy/`.
+Configurações de plugins continuam dentro das pastas dos próprios plugins.
 
-```powershell
-uv run pyinstaller --onefile --noconsole --name "PIA Server Python" --icon "pia.ico" --add-data "pia.png;." pia_launcher.py
-```
+### Desktop, bandeja e contas
 
-### Iniciar com o computador
+- A companheira permanece na tela; cliques atravessam sua janela.
+- Passe o mouse para acessar mensagem, microfone, expansão e ocultação.
+- Enter ou a seta à esquerda envia; Shift+Enter quebra linha. Clicar fora guarda o rascunho.
+- Ocultar a companheira não encerra a PIA. Use **Mostrar PIA na tela** na bandeja.
+- A janela expandida usa tema dark roxo/azul: barra de atividades à esquerda, listas de conversas/bots/configurações e conteúdo em abas à direita. Cada aplicativo tem seu próprio botão lateral.
+- Windows e Linux usam o mesmo menu Qt. **Encerrar PIA** encerra o aplicativo.
+- **Inicializar com o sistema** controla o login em ambos os sistemas. No Linux,
+  a entrada fica em `~/.config/autostart/piaSAT.desktop`; no Windows, em `PIA.lnk`
+  na pasta Inicializar, executando o mesmo `start.sh` por meio do Git Bash.
 
-Com a PIA aberta, o menu do ícone tem o item **Inicializar**. Marcado, ela entra no próximo login. Desmarcado, não entra.
-
-Se a PIA não estiver aberta, dá para ligar ou desligar na mão:
-
-**Linux.** O login lê `~/.config/autostart/piaSAT.desktop`. Para ligar, o arquivo precisa existir, apontar para `startup/piaSATServer.sh` e conter `X-GNOME-Autostart-enabled=true`. O `install.ps1` grava isso. Para desligar, apague o arquivo ou mude essa chave para `false`.
-
-**Windows.** A pasta Inicializar do usuário (`shell:startup`) precisa ter um atalho `PIA.lnk` cujo destino é `dist\PIA Server Python.exe`. Crie esse atalho para ligar. Apague o atalho para desligar. O executável tem de existir antes.
+O [guia do desktop](docs/DESKTOP.md) descreve OAuth, várias contas, permissões,
+a secretária local, dependências gráficas e os testes.
 
 ---
 
 # Configuração
 
-Toda a configuração principal fica no arquivo `.env`.
+As configurações são editadas pela interface e ficam no SQLite em **Documentos/pia**. As credenciais dos conectores gerenciados na PIA Server ficam no servidor. As credenciais locais ficam no cofre do sistema. Atalhos, catálogo e palavras de ativação são documentos lógicos no banco. Não há configuração por `.env` ou variáveis de ambiente. Veja [perfil, cofre e migração](docs/PROFILE_MIGRATION.md). Os identificadores abaixo descrevem campos internos da interface, não arquivos de configuração.
 
 ## Servidor
 
@@ -211,7 +199,7 @@ Limites e dependências:
 
 - `OPENAI_COMPAT_MAX_UPLOAD_BYTES=209715200`: 200 MiB para o **corpo HTTP inteiro**,
   incluindo overhead multipart ou Base64; excesso retorna HTTP 413.
-- `OPENAI_COMPAT_TIMEOUT_SECONDS=180`: espera pelo worker local; aumente no `.env`
+- `OPENAI_COMPAT_TIMEOUT_SECONDS=180`: espera pelo worker local; aumente na interface
   para podcasts longos e ajuste também os timeouts do cliente/proxy. A execução
   local usa memória proporcional ao áudio decodificado; o limite de upload não
   garante que qualquer duração caiba na memória disponível.
@@ -560,43 +548,42 @@ O log periódico de RMS do microfone (`[AUDIO DEBUG]`) não é emitido.
 # Estrutura principal
 
 ```text
-PIA
-├── server.py
-├── pia_launcher.py
-├── src/
-│   ├── HTTPServer.py
-│   ├── STTManager.py
-│   ├── LocalActions.py
-│   ├── HybridSTTManager.py
-│   ├── AudioRecorder.py
-│   ├── VoiceAgent.py
-│   ├── TTSManager.py
-│   ├── ICEManager.py
-│   ├── ComfyUIClient.py
-│   ├── WorkflowFactory.py
-│   ├── PiaOverlay.py
-│   ├── thread_wakeword.py
-│   ├── commands_loader.py
-│   ├── commands/
-│   └── agents/
-│       ├── AgentManager.py
-│       └── GenericAgent.py
-├── startup/
-├── sounds/
-├── .env.example
-└── pyproject.toml
+install.sh                  # instalar, configurar login e iniciar
+start.sh                    # abrir novamente sem reinstalar
+pyproject.toml              # dependências de toda a PIA
+src/
+  launcher.py               # entrada do desktop e controle de instância
+  server.py                 # API e serviços
+  autostart.py              # integração com login
+  hotkeys.py                # atalhos
+  images/                   # SVG, PNG, ICO e logo da PIA
+  sounds/                   # sons de interface
+  ui/                       # páginas HTML
+  ...                       # módulos de voz, chat, desktop e plugins
+config/                     # schemas e exemplos imutáveis
+Plugins/
+  Apps/podcast_automation/   # processamento, UI e voice/ no mesmo app
+  Bot/
+  Connectors/
+  Skills/
+  Browser/
+docs/                       # guias e TODO
+deploy/                     # serviços opcionais ComfyUI/Open WebUI
+packaging/                  # receitas antigas de empacotamento
+tests/
 ```
+
 
 ---
 
 # Execução e desenvolvimento
 
-Executar a bandeja e a API: no Linux, `bash startup/piaSATServer.sh`; no Windows, `dist\PIA Server Python.exe`. O item **Inicializar** do ícone liga ou desliga a entrada no login.
+Executar a bandeja, o desktop e a API: `bash start.sh`. O item **Inicializar com o sistema** controla a entrada no login.
 
 Sincronizar dependências:
 
 ```powershell
-uv sync
+uv sync --extra podcast
 ```
 
 A aplicação foi estruturada para manter modelos pesados em workers/processos separados sempre que possível, permitindo liberar RAM/VRAM durante períodos de inatividade.
@@ -606,7 +593,7 @@ A aplicação foi estruturada para manter modelos pesados em workers/processos s
 ## Observações de segurança
 
 - Não coloque chaves reais no repositório.
-- Mantenha `.env` fora do Git.
+- Dados e configurações pessoais ficam em Documentos/pia; credenciais, no cofre do sistema. Não os inclua no Git.
 - Se expuser `HOST=0.0.0.0`, configure `OPENAI_COMPAT_API_KEY` e proteja a rede.
 - O fallback local permite continuar usando STT e chat sem depender exclusivamente de APIs externas, desde que os modelos locais necessários estejam instalados.
 
@@ -616,8 +603,22 @@ A aba `stt` do visualizador mostra preparação e progresso de arquivos transcri
 
 ### Whisper local na GPU
 
-Para uma NVIDIA com bibliotecas CUDA/cuDNN compatíveis, use `STT_DEVICE=cuda` e `STT_COMPUTE_TYPE=float16` no `.env`. A instalação local com RTX 3080 de 10 GB foi validada com inferência CUDA real usando o modelo em cache. O log informa dispositivo e precisão efetivos. O ajuste vale para todas as transcrições do Whisper local, mantendo a ordem dos provedores e uma tarefa por worker. Reinicie a PIA para carregar a configuração; não é necessário interromper uma transcrição em andamento. Para economizar VRAM, pode-se avaliar `int8_float16`; para retornar à CPU, use `cpu` e `int8`.
+Para uma NVIDIA com bibliotecas CUDA/cuDNN compatíveis, use `STT_DEVICE=cuda` e `STT_COMPUTE_TYPE=float16` em Configurações. A instalação local com RTX 3080 de 10 GB foi validada com inferência CUDA real usando o modelo em cache. O log informa dispositivo e precisão efetivos. O ajuste vale para todas as transcrições do Whisper local, mantendo a ordem dos provedores e uma tarefa por worker. Reinicie a PIA para carregar a configuração; não é necessário interromper uma transcrição em andamento. Para economizar VRAM, pode-se avaliar `int8_float16`; para retornar à CPU, use `cpu` e `int8`.
 
 ## Skills de voz e plugins
 
 Os comandos agora são projetos em `Plugins/Skills`, com `plugin.toml` e uma função `execute` que recebe APIs da PIA. Leia [o guia das skills](docs/SKILLS.md) e veja [o projeto de exemplo](Plugins/Skills/exemplo/README.md). As integrações de navegador ficam em `Plugins/Browser`, incluindo o userscript IsekaiZero.
+
+
+[Interface, tipos de configuração, manifestos e internacionalização](docs/EXTENSIONS.md).
+
+
+A interface atual usa React/Mantine. Consulte [Workspace React e progresso do podcast](docs/REACT_WORKSPACE.md) para o build, navegação, cache, reinício e transcrição local medium.
+
+Consulte [câmera, interrupção por voz, protocolos de agentes e música](INTEROPERABILITY.md) para os novos endpoints autenticados, integração com Codex/Gemini e preparação opcional do motor musical local.
+
+Para contribuir com agentes de programação, comece por [AGENTS.md](AGENTS.md). O guia aponta para arquitetura, desenvolvimento, interface, configurações, testes e decisões arquiteturais. Instruções específicas ficam nas pastas correspondentes; `GEMINI.md` e `.github/copilot-instructions.md` encaminham para as mesmas regras.
+
+[Notificações, reprodução musical, logs e capturas](docs/PLATFORM_SERVICES.md) descreve os serviços compartilhados disponíveis aos apps e bots.
+
+Para disponibilizar as ferramentas da PIA ao Codex, veja [PIA como servidor MCP: conexão, autenticação e login](docs/MCP_CODEX.md).

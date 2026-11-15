@@ -1,10 +1,13 @@
 """Atalhos: conversão de teclas e registro no GNOME, sem servidor e sem teclado."""
+
 import importlib.util
 from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("hotkeys_under_test", ROOT / "hotkeys.py")
+spec = importlib.util.spec_from_file_location(
+    "hotkeys_under_test", ROOT / "src/hotkeys.py"
+)
 hotkeys = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hotkeys)
 
@@ -19,7 +22,7 @@ class ShortcutFormatTests(unittest.TestCase):
         self.assertEqual(hotkeys.to_pynput("super+shift+f1"), "<cmd>+<shift>+<f1>")
 
     def test_example_keeps_windows_keys_and_avoids_gnome_reserved_ones(self):
-        config = hotkeys.load_config(ROOT / "shortcuts.example.yaml")
+        config = hotkeys.load_config(ROOT / "config/shortcuts.example.yaml")
         self.assertEqual(config["shortcuts"]["speak"]["windows"], "ctrl+alt+t")
         self.assertEqual(config["shortcuts"]["speak"]["linux"], "ctrl+alt+shift+t")
         self.assertEqual(config["shortcuts"]["dictation"]["linux"], "ctrl+alt+shift+d")
@@ -36,7 +39,9 @@ class ShortcutFormatTests(unittest.TestCase):
         self.assertEqual(config["shortcuts"]["speak"]["linux"], "")
 
     def test_server_without_scheme_gets_http(self):
-        self.assertEqual(hotkeys.normalize_server("127.0.0.1:8762"), "http://127.0.0.1:8762")
+        self.assertEqual(
+            hotkeys.normalize_server("127.0.0.1:8762"), "http://127.0.0.1:8762"
+        )
 
 
 class GnomeRegistrationTests(unittest.TestCase):
@@ -71,7 +76,7 @@ class GnomeRegistrationTests(unittest.TestCase):
     def test_command_quotes_paths_with_spaces(self):
         command = hotkeys.action_command("voice")
         self.assertIn(" voice", command)
-        self.assertIn("hotkeys.py", command)
+        self.assertIn("-m src.hotkeys", command)
 
 
 if __name__ == "__main__":

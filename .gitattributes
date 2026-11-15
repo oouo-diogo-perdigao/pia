@@ -1,0 +1,5 @@
+*.sh text eol=lf
+
+# Hooks must run under Git Bash and Linux.
+*.sh text eol=lf
+scripts/pre-commit text eol=lf

@@ -44,8 +44,9 @@ class LocalActions:
         self._immediate_channels: dict[str, pygame.mixer.Channel] = {}
         self._immediate_sounds: dict[str, pygame.mixer.Sound] = {}
 
-        self._ensure_audio_mixer()
-        self._queue_channel = pygame.mixer.Channel(0)
+        self._queue_channel: pygame.mixer.Channel | None = None
+        if self._ensure_audio_mixer():
+            self._queue_channel = pygame.mixer.Channel(0)
 
         self._queued_audio_thread = threading.Thread(
             target=self._queued_audio_worker_loop,
@@ -54,7 +55,9 @@ class LocalActions:
         )
         self._queued_audio_thread.start()
 
-        self._output_dir = BASE_DIR / "cache" / "local_actions"
+        from src.user_paths import user_path
+
+        self._output_dir = user_path("images")
         self._output_dir.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -213,15 +216,22 @@ class LocalActions:
     # Audio playback
     # ------------------------------------------------------------------
     @staticmethod
-    def _ensure_audio_mixer() -> None:
-        if not pygame.mixer.get_init():
-            pygame.mixer.init(buffer=512)
+    def _ensure_audio_mixer() -> bool:
+        try:
+            if not pygame.mixer.get_init():
+                pygame.mixer.init(buffer=512)
 
-        # Channel 0 is reserved for the ordered queue. Other channels are
-        # exclusively available to immediate/overlapping audio.
-        if pygame.mixer.get_num_channels() < 16:
-            pygame.mixer.set_num_channels(16)
-        pygame.mixer.set_reserved(1)
+            # Channel 0 is reserved for the ordered queue. Other channels are
+            # exclusively available to immediate/overlapping audio.
+            if pygame.mixer.get_num_channels() < 16:
+                pygame.mixer.set_num_channels(16)
+            pygame.mixer.set_reserved(1)
+            return True
+        except Exception:
+            logging.warning(
+                "pygame mixer couldn't be initialized - audio playback disabled"
+            )
+            return False
 
     @staticmethod
     def _validate_audio_path(path: str) -> Path:
@@ -251,8 +261,7 @@ class LocalActions:
             raise ValueError("Áudio vazio.")
 
         suffix = (
-            mimetypes.guess_extension((content_type or "").split(";", 1)[0])
-            or ".audio"
+            mimetypes.guess_extension((content_type or "").split(";", 1)[0]) or ".audio"
         )
         return {
             "id": uuid.uuid4().hex,
@@ -464,7 +473,8 @@ class LocalActions:
 
             if was_playing:
                 self._queued_audio_cancel_current.set()
-                self._queue_channel.stop()
+                if self._queue_channel is not None:
+                    self._queue_channel.stop()
 
             self._queued_audio_condition.notify_all()
 

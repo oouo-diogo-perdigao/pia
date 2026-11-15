@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(git rev-parse --show-toplevel)"
+if [[ -x .venv/Scripts/python.exe ]]; then
+  PYTHON=.venv/Scripts/python.exe
+elif [[ -x .venv/bin/python ]]; then
+  PYTHON=.venv/bin/python
+else
+  printf 'PIA: execute bash install.sh para instalar o ambiente de lint.\n' >&2
+  exit 1
+fi
+exec "$PYTHON" scripts/lint.py --hook

@@ -1,0 +1,9 @@
+{
+  "nome": "Podcast Automation",
+  "app_id": "podcast_automation",
+  "info": "Das gravações às legendas e à publicação.",
+  "type": "app",
+  "lang": "lang/pt-BR.json",
+  "home": "index.html",
+  "about": "about.html"
+}

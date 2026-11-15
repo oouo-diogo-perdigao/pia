@@ -1,0 +1,9 @@
+[
+  {
+    "name": "OBJECT_STORAGE_ACCOUNT_COLORS",
+    "type": "string",
+    "default": "{}",
+    "label": "Object Storage Account Colors",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  }
+]

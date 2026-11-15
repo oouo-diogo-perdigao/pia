@@ -1,0 +1,12 @@
+id = "screenshots"
+name = "Capturas de tela"
+type = "app"
+icon = "screen"
+
+[web]
+entrypoint = "index.html"
+api = "web_api.py"
+native = "native.py"
+
+[tools]
+module = "tools.py"

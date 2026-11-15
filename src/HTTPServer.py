@@ -1,6 +1,8 @@
+from src.settings_store import get as setting
 from .transcription import timed_result, render_subtitles
 import hmac
 import base64
+import binascii
 import json
 import os
 import sys
@@ -10,7 +12,7 @@ import re
 from email.parser import BytesParser
 from email.policy import default as email_policy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from .TTSManager import TTSManager
 from .STTManager import STTManager
@@ -85,7 +87,7 @@ class HTTPServer(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
         self.send_header(
             "Access-Control-Allow-Headers",
-            "Content-Type, Authorization, X-Requested-With",
+            "Content-Type, Authorization, X-Requested-With, X-PIA-Transcription-ID",
         )
 
     def _send(
@@ -116,6 +118,10 @@ class HTTPServer(BaseHTTPRequestHandler):
         disabled. This is convenient for a local-only service and lets Open WebUI
         use any non-empty placeholder key it requires in its settings UI.
         """
+        from src.app_access import authorized
+
+        if authorized(self):
+            return True
         if not OPENAI_COMPAT_API_KEY:
             return True
 
@@ -148,7 +154,7 @@ class HTTPServer(BaseHTTPRequestHandler):
         # The stdlib email parser understands MIME multipart boundaries well and,
         # unlike the deprecated cgi module, remains available on modern Python.
         mime_message = BytesParser(policy=email_policy).parsebytes(
-            (f"Content-Type: {content_type}\r\n" "MIME-Version: 1.0\r\n" "\r\n").encode(
+            (f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n").encode(
                 "utf-8"
             )
             + body
@@ -459,7 +465,27 @@ class HTTPServer(BaseHTTPRequestHandler):
     def do_OPTIONS(self) -> None:
         self._send(204, b"", "text/plain; charset=utf-8")
 
+    def _route_workspace_mutation(self) -> None:
+        from src.pia.http import route as workspace_route
+
+        if not workspace_route(self):
+            self.send_json(405, {"ok": False, "error": "Método não permitido."})
+
+    def do_PUT(self) -> None:
+        self._route_workspace_mutation()
+
+    def do_PATCH(self) -> None:
+        self._route_workspace_mutation()
+
     def do_GET(self) -> None:
+        from src.interop import route as interop_route
+
+        if interop_route(self):
+            return
+        from src.pia.http import route as web_route
+
+        if web_route(self):
+            return
         path = self._path()
 
         # ======================================================================
@@ -470,11 +496,32 @@ class HTTPServer(BaseHTTPRequestHandler):
             if not self._authorize_openai_request():
                 return
             # endregion
+            if path.startswith("/v1/audio/transcriptions/progress/"):
+                import hashlib
+                from src.transcription_jobs import get
+
+                owner = hashlib.sha256(
+                    (
+                        self.headers.get("Authorization", "")
+                        + "|"
+                        + self.headers.get("X-PIA-App-Token", "")
+                    ).encode()
+                ).hexdigest()
+                record = get(path.rsplit("/", 1)[-1], owner)
+                self.send_json(
+                    200 if record else 404,
+                    record
+                    or {"error": "Transcrição não encontrada para este cliente."},
+                )
+                return
             if path == "/v1/models":
                 logging.info("[IMAGE] Requisição de listagem de modelos recebida.")
                 models = (
-                    TTS_MANAGER.models() + STT_MANAGER.models() + ICE_MANAGER.models()
-                    + tuple(TIERS) + tuple(dict.fromkeys(m.model for m in catalog()))
+                    TTS_MANAGER.models()
+                    + STT_MANAGER.models()
+                    + ICE_MANAGER.models()
+                    + tuple(TIERS)
+                    + tuple(dict.fromkeys(m.model for m in catalog()))
                 )
                 self.send_json(
                     200,
@@ -493,9 +540,71 @@ class HTTPServer(BaseHTTPRequestHandler):
                 )
                 return
 
-            if path == "/v1/audio/voices":
-                voices = TTS_MANAGER.get_voices()
-                self.send_json(200, voices)
+            if path == "/v1/tts/providers":
+                if not self._authorize_openai_request():
+                    return
+                from src.tts_service import get_tts_service
+
+                self.send_json(200, get_tts_service().catalog())
+                return
+
+            if path == "/v1/tts/voices":
+                if not self._authorize_openai_request():
+                    return
+                from src.tts_service import TTSServiceError, get_tts_service
+
+                qs = parse_qs(urlsplit(self.path).query)
+                provider_id = (qs.get("provider") or [""])[0].strip()
+                model_id = (qs.get("model") or [None])[0]
+                refresh = (qs.get("refresh") or [""])[0].lower() in ("1", "true", "yes")
+                try:
+                    self.send_json(
+                        200,
+                        get_tts_service().voices(
+                            provider_id, model_id=model_id, refresh=refresh
+                        ),
+                    )
+                except TTSServiceError as exc:
+                    self.send_openai_error(
+                        exc.status, exc.message, param=exc.param, error_code=exc.code
+                    )
+                return
+
+            if path == "/v1/tts/selection":
+                if not self._authorize_openai_request():
+                    return
+                from src.tts_service import get_tts_service
+
+                self.send_json(200, get_tts_service().selection())
+                return
+
+            if path.startswith("/v1/tts/jobs/"):
+                if not self._authorize_openai_request():
+                    return
+                from src.tts_service import TTSServiceError, get_tts_service
+
+                job_id = path.removeprefix("/v1/tts/jobs/").strip("/")
+                try:
+                    self.send_json(200, get_tts_service().get_job(job_id))
+                except TTSServiceError as exc:
+                    self.send_openai_error(exc.status, exc.message, error_code=exc.code)
+                return
+
+            if path.startswith("/v1/tts/previews/") and path.endswith("/audio"):
+                if not self._authorize_openai_request():
+                    return
+                from src.tts_service import TTSServiceError, get_tts_service
+
+                job_id = (
+                    path.removeprefix("/v1/tts/previews/")
+                    .removesuffix("/audio")
+                    .strip("/")
+                )
+                try:
+                    res = get_tts_service().get_preview_audio(job_id)
+                    self._send(200, res.audio, res.mime)
+                except TTSServiceError as exc:
+                    self.send_openai_error(exc.status, exc.message, error_code=exc.code)
                 return
 
             if path.startswith("/v1/images/files/"):
@@ -537,6 +646,14 @@ class HTTPServer(BaseHTTPRequestHandler):
 
             if path == "/action/screen-all":
                 png = LOCAL_ACTIONS.screenshot_all()
+                try:
+                    LOCAL_ACTIONS.play_audio(
+                        path=os.path.join(
+                            os.path.dirname(__file__), "sounds", "print.mp3"
+                        )
+                    )
+                except Exception:
+                    logging.exception("Não foi possível tocar o som da captura.")
                 self._send(200, png, "image/png")
                 return
 
@@ -592,15 +709,7 @@ class HTTPServer(BaseHTTPRequestHandler):
 
         if path == "/tts/status":
             logging.info("[GET /tts/status] Verificando status do Worker TTS...")
-            with TTS_MANAGER.lock:
-                status = TTS_MANAGER.status
-            self.send_json(
-                200,
-                {
-                    "status": status,
-                    "model_loaded": TTS_MANAGER.is_loaded(),
-                },
-            )
+            self.send_json(200, TTS_MANAGER.get_speech_status())
             return
 
         if path == "/tts/status/stream":
@@ -618,26 +727,31 @@ class HTTPServer(BaseHTTPRequestHandler):
             )
             self.end_headers()
 
-            last_status = None
+            last_key = None
             try:
                 while True:
-                    with TTS_MANAGER.lock:
-                        current_status = TTS_MANAGER.status
-
-                    if current_status != last_status:
-                        payload = json.dumps({"status": current_status})
+                    snap = TTS_MANAGER.get_speech_status()
+                    cur_key = (
+                        snap.get("seq"),
+                        snap.get("status"),
+                        snap.get("speaker_id"),
+                    )
+                    if cur_key != last_key:
+                        payload = json.dumps(snap, ensure_ascii=False)
                         self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
                         self.wfile.flush()
-                        last_status = current_status
+                        last_key = cur_key
 
-                    time.sleep(0.1)
+                    time.sleep(0.05)
             except Exception:
                 pass
             return
 
         if path == "/tts/help":
             logging.info("[GET /tts/help] Exibindo página de ajuda do TTS...")
-            help_file_path = os.path.join(os.path.dirname(__file__), "help.html")
+            from .config_paths import UI_DIR
+
+            help_file_path = str(UI_DIR / "help.html")
 
             if os.path.exists(help_file_path):
                 with open(help_file_path, "rb") as f:
@@ -678,24 +792,48 @@ class HTTPServer(BaseHTTPRequestHandler):
             if not isinstance(data, dict):
                 raise ValueError("O corpo JSON deve ser um objeto.")
             messages = data.get("messages")
-            if not isinstance(messages, list) or not messages or any(
-                not isinstance(message, dict) or not isinstance(message.get("role"), str)
-                for message in messages
+            if (
+                not isinstance(messages, list)
+                or not messages
+                or any(
+                    not isinstance(message, dict)
+                    or not isinstance(message.get("role"), str)
+                    for message in messages
+                )
             ):
-                raise ValueError("messages deve ser uma lista não vazia de mensagens com role.")
+                raise ValueError(
+                    "messages deve ser uma lista não vazia de mensagens com role."
+                )
             model = data.get("model")
             if model is not None and not isinstance(model, str):
                 raise ValueError("model deve ser texto.")
             if not select_models(model):
-                raise ValueError("O seletor LLM não selecionou nenhum modelo configurado.")
+                raise ValueError(
+                    "O seletor LLM não selecionou nenhum modelo configurado."
+                )
             stream = data.get("stream", False)
             if not isinstance(stream, bool):
                 raise ValueError("stream deve ser booleano.")
             # Routing and credentials are owned by PIA, never request parameters.
-            allowed = ("temperature", "top_p", "max_tokens", "max_completion_tokens",
-                       "stop", "presence_penalty", "frequency_penalty", "seed", "n",
-                       "tools", "tool_choice", "parallel_tool_calls", "response_format",
-                       "stream_options", "user", "logprobs", "top_logprobs")
+            allowed = (
+                "temperature",
+                "top_p",
+                "max_tokens",
+                "max_completion_tokens",
+                "stop",
+                "presence_penalty",
+                "frequency_penalty",
+                "seed",
+                "n",
+                "tools",
+                "tool_choice",
+                "parallel_tool_calls",
+                "response_format",
+                "stream_options",
+                "user",
+                "logprobs",
+                "top_logprobs",
+            )
             options = {key: data[key] for key in allowed if key in data}
         except (UnicodeDecodeError, ValueError, TypeError) as exc:
             self.send_openai_error(400, str(exc))
@@ -708,7 +846,11 @@ class HTTPServer(BaseHTTPRequestHandler):
                 self.send_json(200, response.model_dump(exclude_none=True))
             except Exception:
                 logging.exception("[LLM] Todos os candidatos falharam.")
-                self.send_openai_error(503, "Nenhum modelo LLM selecionado está disponível.", error_type="server_error")
+                self.send_openai_error(
+                    503,
+                    "Nenhum modelo LLM selecionado está disponível.",
+                    error_type="server_error",
+                )
             return
 
         iterator = manager.complete_stream(messages, model=model, **options)
@@ -723,10 +865,14 @@ class HTTPServer(BaseHTTPRequestHandler):
             self.end_headers()
             self.close_connection = True
             started = True
+
             def send_chunk(chunk):
-                payload = json.dumps(chunk.model_dump(exclude_none=True), ensure_ascii=False)
+                payload = json.dumps(
+                    chunk.model_dump(exclude_none=True), ensure_ascii=False
+                )
                 self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
                 self.wfile.flush()
+
             send_chunk(first)
             for chunk in iterator:
                 send_chunk(chunk)
@@ -737,15 +883,34 @@ class HTTPServer(BaseHTTPRequestHandler):
         except Exception:
             logging.exception("[LLM] Falha no stream.")
             if started:
-                error = {"error": {"message": "Falha no modelo durante o stream.", "type": "server_error"}}
-                self.wfile.write(f"data: {json.dumps(error)}\n\ndata: [DONE]\n\n".encode("utf-8"))
+                error = {
+                    "error": {
+                        "message": "Falha no modelo durante o stream.",
+                        "type": "server_error",
+                    }
+                }
+                self.wfile.write(
+                    f"data: {json.dumps(error)}\n\ndata: [DONE]\n\n".encode("utf-8")
+                )
                 self.wfile.flush()
             else:
-                self.send_openai_error(503, "Nenhum modelo LLM selecionado está disponível.", error_type="server_error")
+                self.send_openai_error(
+                    503,
+                    "Nenhum modelo LLM selecionado está disponível.",
+                    error_type="server_error",
+                )
         finally:
             iterator.close()
 
     def do_POST(self) -> None:
+        from src.interop import route as interop_route
+
+        if interop_route(self):
+            return
+        from src.pia.http import route as web_route
+
+        if web_route(self):
+            return
         try:
             path = self._path()
 
@@ -823,7 +988,9 @@ class HTTPServer(BaseHTTPRequestHandler):
                     audio_path = None
 
                     if content_type.startswith("application/json"):
-                        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+                        payload = (
+                            json.loads(raw_body.decode("utf-8")) if raw_body else {}
+                        )
                         if not isinstance(payload, dict):
                             raise ValueError("O corpo JSON deve ser um objeto.")
                         audio_path = payload.get("path")
@@ -890,7 +1057,9 @@ class HTTPServer(BaseHTTPRequestHandler):
 
             raw_audio_upload = (
                 path == "/v1/audio/transcriptions"
-                and not self.headers.get("Content-Type", "").lower().startswith("application/json")
+                and not self.headers.get("Content-Type", "")
+                .lower()
+                .startswith("application/json")
             )
             body = self._read_body(raw=raw_audio_upload)
             if body is None:
@@ -908,6 +1077,120 @@ class HTTPServer(BaseHTTPRequestHandler):
                 # ======================================================================
                 # Audio
                 # ======================================================================
+                if path == "/v1/tts/select":
+                    if not self._authorize_openai_request():
+                        return
+                    from src.tts_service import TTSServiceError, get_tts_service
+
+                    try:
+                        res = get_tts_service().select(
+                            provider=body.get("provider"),
+                            model=body.get("model"),
+                            voice=body.get("voice"),
+                            speed=body.get("speed"),
+                            revision=body.get("revision"),
+                        )
+                        self.send_json(200, res)
+                    except TTSServiceError as exc:
+                        self.send_openai_error(
+                            exc.status,
+                            exc.message,
+                            param=exc.param,
+                            error_code=exc.code,
+                        )
+                    return
+
+                if path == "/v1/tts/install":
+                    if not self._authorize_openai_request():
+                        return
+                    from src.tts_service import TTSServiceError, get_tts_service
+
+                    try:
+                        res = get_tts_service().install(
+                            str(body.get("provider") or ""),
+                            body.get("model"),
+                            request_id=body.get("request_id"),
+                        )
+                        self.send_json(202, res)
+                    except TTSServiceError as exc:
+                        self.send_openai_error(
+                            exc.status,
+                            exc.message,
+                            param=exc.param,
+                            error_code=exc.code,
+                        )
+                    return
+
+                if path == "/v1/tts/uninstall":
+                    if not self._authorize_openai_request():
+                        return
+                    from src.tts_service import TTSServiceError, get_tts_service
+
+                    try:
+                        res = get_tts_service().uninstall(
+                            str(body.get("provider") or ""),
+                            body.get("model"),
+                            request_id=body.get("request_id"),
+                        )
+                        self.send_json(202, res)
+                    except TTSServiceError as exc:
+                        if exc.status == 409:
+                            self.send_json(
+                                409,
+                                {
+                                    "error": {
+                                        "message": exc.message,
+                                        "type": "conflict_error",
+                                        "param": exc.param,
+                                        "code": exc.code,
+                                        **exc.details,
+                                    }
+                                },
+                            )
+                        else:
+                            self.send_openai_error(
+                                exc.status, exc.message, param=exc.param, code=exc.code
+                            )
+                    return
+
+                if path.startswith("/v1/tts/jobs/") and path.endswith("/cancel"):
+                    if not self._authorize_openai_request():
+                        return
+                    from src.tts_service import TTSServiceError, get_tts_service
+
+                    job_id = (
+                        path.removeprefix("/v1/tts/jobs/")
+                        .removesuffix("/cancel")
+                        .strip("/")
+                    )
+                    try:
+                        self.send_json(202, get_tts_service().cancel_job(job_id))
+                    except TTSServiceError as exc:
+                        self.send_openai_error(
+                            exc.status, exc.message, error_code=exc.code
+                        )
+                    return
+
+                if path == "/v1/tts/preview":
+                    if not self._authorize_openai_request():
+                        return
+                    from src.tts_service import TTSServiceError, get_tts_service
+
+                    try:
+                        res = get_tts_service().preview(
+                            profile=body.get("profile"),
+                            text=body.get("text"),
+                        )
+                        self.send_json(202, res)
+                    except TTSServiceError as exc:
+                        self.send_openai_error(
+                            exc.status,
+                            exc.message,
+                            param=exc.param,
+                            error_code=exc.code,
+                        )
+                    return
+
                 if path == "/v1/audio/speech":
                     # region (collapsed) text (input)
                     text = body.get("input", "")
@@ -1017,20 +1300,43 @@ class HTTPServer(BaseHTTPRequestHandler):
                         bool(style),
                     )
 
-                    audio_data = TTS_MANAGER.generate(
-                        text,
-                        voice,
-                        speed,
-                        style=style,
-                        job_name="OpenAI-compatible /v1/audio/speech",
-                        output_format=response_format,
-                    )
+                    from src.tts_service import TTSServiceError, get_tts_service
 
-                    mime = TTS_MANAGER.formats()[response_format]
+                    svc = get_tts_service()
+                    base_profile = svc.resolve_profile("pia")
+                    override_profile = dict(base_profile)
+                    if body.get("voice") is not None:
+                        override_profile["voice"] = str(voice)
+                    if "speed" in body and body.get("speed") is not None:
+                        override_profile["speed"] = float(speed)
+                    if (
+                        body.get("model")
+                        and body.get("model")
+                        not in ("tts-1", "tts-1-hd", "gpt-4o-mini-tts")
+                        and body.get("model") in svc.registry.keys()
+                    ):
+                        override_profile["provider"] = str(body.get("model"))
+                        override_profile["model"] = svc.registry.get(
+                            override_profile["provider"]
+                        ).default_model()
+
+                    try:
+                        res = svc.synthesize(
+                            text,
+                            profile=override_profile,
+                            response_format=response_format,
+                            style=style,
+                        )
+                    except TTSServiceError as exc:
+                        self.send_openai_error(
+                            exc.status, exc.message, error_code=exc.code
+                        )
+                        return
+
                     extra = {
-                        "Content-Disposition": f'inline; filename="speech.{response_format}"'
+                        "Content-Disposition": f'inline; filename="speech.{res.format}"'
                     }
-                    self._send(200, audio_data, mime, extra_headers=extra)
+                    self._send(200, res.audio, res.mime, extra_headers=extra)
 
                     return
 
@@ -1126,7 +1432,13 @@ class HTTPServer(BaseHTTPRequestHandler):
                             )
                             return
 
-                    if response_format not in {"json", "text", "verbose_json", "srt", "vtt"}:
+                    if response_format not in {
+                        "json",
+                        "text",
+                        "verbose_json",
+                        "srt",
+                        "vtt",
+                    }:
                         self.send_openai_error(
                             400,
                             "Supported response_format values: json, text, verbose_json, srt, vtt.",
@@ -1144,12 +1456,54 @@ class HTTPServer(BaseHTTPRequestHandler):
                     )
 
                     requires_timing = response_format in {"verbose_json", "srt", "vtt"}
+                    local_model = None
+                    if requested_model.startswith("local/"):
+                        local_model = requested_model.split("/", 1)[1]
+                        if local_model not in {
+                            "tiny",
+                            "base",
+                            "small",
+                            "medium",
+                            "large-v2",
+                            "large-v3",
+                            "large-v3-turbo",
+                        }:
+                            self.send_openai_error(
+                                400, "Modelo local não suportado.", param="model"
+                            )
+                            return
+                    import hashlib
+                    from src.transcription_jobs import create, update
+
+                    progress_id = self.headers.get("X-PIA-Transcription-ID", "")
+                    if progress_id:
+                        owner = hashlib.sha256(
+                            (
+                                self.headers.get("Authorization", "")
+                                + "|"
+                                + self.headers.get("X-PIA-App-Token", "")
+                            ).encode()
+                        ).hexdigest()
+                        try:
+                            create(progress_id, owner)
+                        except ValueError as exc:
+                            self.send_openai_error(400, str(exc))
+                            return
+                    options = {}
+                    if local_model:
+                        options["local_model"] = local_model
+                    if progress_id:
+                        options["progress"] = lambda event: update(progress_id, **event)
+                    options["request_timeout"] = int(
+                        setting("STT_FILE_TIMEOUT_SECONDS") or "86400"
+                    )
                     result = STT_MANAGER.transcribe_request(
                         audio_bytes,
                         language=language,
                         prompt=prompt,
                         temperature=temperature,
                         require_timestamps=requires_timing,
+                        **options,
                     )
                     if result.get("ok") and requires_timing:
                         try:
@@ -1158,6 +1512,7 @@ class HTTPServer(BaseHTTPRequestHandler):
                             result = {"ok": False, "error": str(exc)}
 
                     if not result.get("ok"):
+                        update(progress_id, state="error", error=result.get("error"))
                         logging.error("[OPENAI STT] Falha: %s", result.get("error"))
                         self.send_openai_error(
                             500,
@@ -1167,11 +1522,23 @@ class HTTPServer(BaseHTTPRequestHandler):
                         return
 
                     text = result.get("text") or ""
+                    update(
+                        progress_id,
+                        state="completed",
+                        percent=100,
+                        provider=result.get("provider"),
+                    )
 
                     if response_format in {"srt", "vtt"}:
-                        self._send(200, render_subtitles(result["segments"], response_format).encode("utf-8"),
-                                   "text/vtt; charset=utf-8" if response_format == "vtt"
-                                   else "application/x-subrip; charset=utf-8")
+                        self._send(
+                            200,
+                            render_subtitles(
+                                result["segments"], response_format
+                            ).encode("utf-8"),
+                            "text/vtt; charset=utf-8"
+                            if response_format == "vtt"
+                            else "application/x-subrip; charset=utf-8",
+                        )
                         return
 
                     if response_format == "text":
@@ -1185,10 +1552,21 @@ class HTTPServer(BaseHTTPRequestHandler):
                             200,
                             {
                                 "task": "transcribe",
-                                "language": result.get("language") or language or "auto",
+                                "language": result.get("language")
+                                or language
+                                or "auto",
                                 "duration": result["duration"],
                                 "text": text,
                                 "segments": result["segments"],
+                                **(
+                                    {
+                                        "timestamp_adjustments": result[
+                                            "timestamp_adjustments"
+                                        ]
+                                    }
+                                    if result.get("timestamp_adjustments")
+                                    else {}
+                                ),
                             },
                         )
                         return
@@ -1287,21 +1665,14 @@ class HTTPServer(BaseHTTPRequestHandler):
             # ======================================================================
             if path == "/tts/speak":
                 text = body.get("text", "")
-                speed = float(body.get("speed", TTS_DEFAULT_SPEED))
+                raw_speed = body.get("speed")
                 device = body.get("device", None)
                 style = body.get("style", None)
-
-                # region (collapsed) voice
-                voice = body.get("voice")
-                voice = TTS_MANAGER.resolve_voice(voice, style)
-                # endregion
+                raw_voice = body.get("voice")
+                speaker_id = str(body.get("speaker_id") or "pia").strip() or "pia"
 
                 # Remove o bloco de metadados <t>...</t> quando estiver
                 # no início do texto, com ou sem ** de Markdown.
-                # Exemplos removidos:
-                # <t>Hora: 10:11 | Data: Jun 17</t>
-                # **<t>Hora: 10:11 | Data: Jun 17</t>**
-                # Espaços e quebras de linha anteriores também são ignorados.
                 text = re.sub(
                     r"^\s*(?:\*\*\s*)?<t>.*?</t>\s*(?:\*\*)?\s*",
                     "",
@@ -1315,22 +1686,34 @@ class HTTPServer(BaseHTTPRequestHandler):
                     return
 
                 text = clean_text(text)
-                textCuteName = text[:30] + "..." if len(text) > 30 else text
-                parts = [p.strip() for p in text.split("\n\n") if p.strip()]
+                if not text.strip():
+                    self.send_json(400, {"ok": False, "error": "Texto vazio."})
+                    return
 
-                for i, part in enumerate(parts, start=1):
-                    logger_tts.info(part)
-                    TTS_MANAGER.add_tts_job(
-                        text=part.strip(),
-                        voice=voice,
-                        speed=speed,
+                from src.tts_service import TTSServiceError, get_tts_service
+
+                try:
+                    get_tts_service().speak(
+                        text,
+                        speaker_id=speaker_id,
+                        conversation_epoch=body.get("conversation_epoch"),
+                        speed=raw_speed,
+                        voice=raw_voice if isinstance(raw_voice, str) else None,
                         style=style,
                         device=device,
-                        job_name=f" ({i} de {len(parts)}) {textCuteName}",
+                        bot_name=body.get("bot_name"),
+                        avatar_url=body.get("avatar_url"),
+                        avatar_colors=body.get("avatar_colors"),
                     )
+                except TTSServiceError as exc:
+                    self.send_json(
+                        exc.status,
+                        {"ok": False, "error": exc.message, "code": exc.code},
+                    )
+                    return
 
                 logging.info(
-                    "[SPEAK] %d parte(s) enfileirada(s) para o TTSManager.", len(parts)
+                    "[SPEAK] Fala enfileirada via TTSService (speaker=%s).", speaker_id
                 )
                 self.send_json(200, {"ok": True, "status": "queued"})
                 return
@@ -1582,7 +1965,7 @@ class HTTPServer(BaseHTTPRequestHandler):
                     return
 
                 if path == "/ove/blink":
-                    state_machine.trigger_blink()
+                    get_state_machine().trigger_blink()
                     self.send_json(200, {"ok": True, "state": path})
                     return
 
@@ -1608,6 +1991,10 @@ class HTTPServer(BaseHTTPRequestHandler):
             self.send_json(500, {"ok": False, "error": str(exc)})
 
     def do_DELETE(self):
+        from src.pia.http import route as workspace_route
+
+        if workspace_route(self):
+            return
         try:
             path = self._path()
 

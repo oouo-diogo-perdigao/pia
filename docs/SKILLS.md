@@ -64,7 +64,7 @@ A PIA injeta funções por **nome do parâmetro**. Declare somente as necessári
 
 Uma skill simples encerra automaticamente quando `execute` retorna. Se há falas pendentes, a interação fica aberta até a **última reprodução** terminar. Um listener mantém a sessão aberta para novas frases. Não chame `piaClose` imediatamente depois de `piaTTS` se deseja ouvir a fala inteira: `piaClose` é cancelamento imediato.
 
-Exemplo: previsão consulta a API, enfileira a fala e retorna; a PIA só fecha a interação quando a fala termina. Ditado registra um listener e insere os textos subsequentes no cursor. `finalizar`, `encerrar` e as variantes de encerramento são interceptados antes do listener; nunca são digitados. A wake word de cancelamento e o clique de encerramento na interface continuam finalizando a sessão. Ao falar, a skill não recebe as transcrições enquanto seu próprio TTS está pendente, evitando autoalimentação; o encerramento continua tendo prioridade.
+Exemplo: previsão consulta a API, enfileira a fala e retorna; a PIA só fecha a interação quando a fala termina. Ditado registra um listener e insere os textos subsequentes no cursor. `finalizar`, `encerrar` e as variantes de encerramento são interceptados antes do listener; nunca são digitados. A wake word de cancelamento e a frase de encerramento continuam finalizando a sessão. A companheira é transparente aos cliques; ocultá-la no menu não cancela serviços. Ao falar, a skill não recebe as transcrições enquanto seu próprio TTS está pendente, evitando autoalimentação; o encerramento continua tendo prioridade.
 
 Somente uma skill fica ativa por interação. Operações de rede de uma skill devem ter timeout e tarefas longas devem verificar `piaCancelled`. A PIA não mata threads Python à força: o cancelamento impede novas ações pelas APIs, mas código externo já iniciado pode precisar de cleanup próprio. Executáveis abertos por uma skill não são fechados automaticamente.
 
@@ -89,3 +89,59 @@ uv run python -m pytest tests/test_skills.py -q
 ```
 
 Os testes usam stubs para programas, teclado, rede e reprodução. Não executam ações reais no desktop.
+
+## Plugins de recursos e múltiplas contas
+
+As integrações de recursos ficam em `Plugins/Connectors/` e são configuradas na
+janela **Plugins** do desktop. São independentes das skills e dos userscripts.
+Uma skill pode declarar `piaPlugins`, que expõe apenas operações de leitura:
+
+```python
+def execute(*, piaPlugins, piaTTS):
+    accounts = piaPlugins('google', 'accounts.list')
+    work = next(a for a in accounts if a['label'] == 'Trabalho')
+    result = piaPlugins('google', 'mail.list', account=work['id'], q='is:unread is:important')
+    piaTTS(f"Há {len(result.get('messages', []))} mensagens nesta página.")
+```
+
+É obrigatório selecionar a conta para operações de recursos. Não há conta padrão
+implícita: pessoal e trabalho têm tokens isolados. `accounts.list` retorna os IDs,
+nomes locais e e-mails, sem tokens. A skill deve respeitar paginação dos providers.
+
+| Operação | Google | Microsoft |
+| --- | --- | --- |
+| `mail.list` | `q`, `labelIds`, `pageToken`, `maxResults` | `$filter`, `$select`, `$top`, `$skip`, `$orderby` |
+| `mail.get` | `id`, `format`, `metadataHeaders` | `id`, `$select` |
+| `calendar.list` | `calendar`, `timeMin`, `timeMax`, `singleEvents`, `orderBy`, `pageToken` | `startDateTime`, `endDateTime`, `$top`, `$skip` |
+| `files.list` | `q`, `fields`, `pageToken`, `pageSize` | `$select`, `$top`, `$skip` |
+| `files.get` | `file_id`, `fields` | `file_id`, `$select` |
+| `files.read` | `file_id`, `max_bytes` | `file_id`, `max_bytes` |
+
+`files.read` retorna `mime_type` e `data_base64`, com limite padrão de 1 MiB e
+máximo de 10 MiB. Google Docs é exportado como texto simples. Outros formatos são
+retornados em bytes Base64 para a skill interpretar. Outros documentos Google
+nativos podem exigir exportação específica ainda não implementada.
+
+Não há envio de e-mail, edição de eventos ou exclusão de arquivos neste contrato.
+As skills Python continuam código confiável sem sandbox: a interface de leitura
+não impede que uma skill maliciosa importe outros módulos do processo.
+
+## Voz dentro de aplicativos
+
+Um app pode registrar comandos sem criar outra pasta em `Plugins/Skills`:
+
+```toml
+id = "meu_app"
+name = "Meu aplicativo"
+type = "app"
+
+[voice]
+enabled = true
+commands = ["meu aplicativo"]
+entrypoint = "voice/plugin.py"
+```
+
+O entrypoint deve ficar dentro da pasta do app e expor `execute` com as mesmas
+APIs das skills. Imports relativos usam a pasta do entrypoint. A configuração
+`enabled=false` no app inteiro ou na seção `[voice]` desativa esses comandos.
+O podcast usa esse modelo; seu código de voz vive somente no próprio app.

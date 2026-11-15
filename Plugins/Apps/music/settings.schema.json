@@ -1,0 +1,47 @@
+[
+  {
+    "name": "MUSIC_PROVIDER",
+    "type": "string",
+    "default": "local",
+    "label": "Music Provider"
+  },
+  {
+    "name": "MUSIC_LOCAL_URL",
+    "type": "string",
+    "default": "http://127.0.0.1:8015",
+    "label": "Music Local Url",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "MUSIC_LOCAL_KEY",
+    "type": "secret",
+    "default": "",
+    "label": "Music Local Key",
+    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
+  },
+  {
+    "name": "MUSIC_GEMINI_MODEL",
+    "type": "string",
+    "default": "lyria-3.5",
+    "label": "Music Gemini Model",
+    "link": "https://aistudio.google.com/apikey"
+  },
+  {
+    "name": "MUSIC_SUNO_MCP_URL",
+    "type": "string",
+    "default": "",
+    "label": "Suno MCP URL"
+  },
+  {
+    "name": "MUSIC_SUNO_MCP_COMMAND",
+    "type": "string",
+    "default": "",
+    "label": "Suno MCP Command"
+  },
+  {
+    "name": "MUSIC_SUNO_MCP_TOKEN",
+    "type": "secret",
+    "default": "",
+    "label": "Suno MCP Token"
+  }
+]

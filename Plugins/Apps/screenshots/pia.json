@@ -1,0 +1,9 @@
+{
+  "nome": "Capturas de tela",
+  "app_id": "screenshots",
+  "info": "Selecione, anote, recorte e salve. Sem uploads e sem e-mail.",
+  "type": "app",
+  "lang": "lang/pt-BR.json",
+  "home": "index.html",
+  "about": "about.html"
+}

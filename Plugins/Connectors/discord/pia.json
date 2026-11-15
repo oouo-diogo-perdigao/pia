@@ -1,0 +1,7 @@
+{
+  "nome": "Discord · bot e notificações",
+  "app_id": "discord",
+  "info": "Integração com bots e canais do Discord.",
+  "type": "connector",
+  "lang": "lang/pt-BR.json"
+}

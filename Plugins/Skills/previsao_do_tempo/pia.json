@@ -1,0 +1,7 @@
+{
+  "nome": "Previsao Do Tempo",
+  "app_id": "previsao_do_tempo",
+  "info": "Recursos e comandos de Previsao Do Tempo.",
+  "type": "skill",
+  "lang": "lang/pt-BR.json"
+}

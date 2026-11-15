@@ -1,0 +1,72 @@
+[
+  {
+    "name": "DISCORD_BOT_ID",
+    "type": "string",
+    "default": "",
+    "label": "Discord Bot Id",
+    "link": "https://discord.com/developers/applications"
+  },
+  {
+    "name": "DISCORD_BOT_PUBLIC_KEY",
+    "type": "string",
+    "default": "",
+    "label": "Discord Bot Public Key",
+    "link": "https://discord.com/developers/applications"
+  },
+  {
+    "name": "DISCORD_BOT_TOKEN",
+    "type": "secret",
+    "default": "",
+    "label": "Discord Bot Token",
+    "link": "https://discord.com/developers/applications"
+  },
+  {
+    "name": "DISCORD_BOT_PERMISSIONS",
+    "type": "string",
+    "default": "",
+    "label": "Discord Bot Permissions",
+    "link": "https://discord.com/developers/applications"
+  },
+  {
+    "name": "DISCORD_BOT_URL",
+    "type": "string",
+    "default": "",
+    "label": "Discord Bot Url",
+    "link": "https://discord.com/developers/applications"
+  },
+  {
+    "name": "DISCORD_LINK",
+    "type": "string",
+    "default": "",
+    "label": "Discord Link",
+    "link": "https://discord.com/developers/applications"
+  },
+  {
+    "name": "DISCORD_CHANNEL_ID",
+    "type": "string",
+    "default": "",
+    "label": "Discord Channel Id",
+    "link": "https://discord.com/developers/applications"
+  },
+  {
+    "name": "DISCORD_LINK_ENABLED",
+    "type": "bool",
+    "default": "false",
+    "label": "Discord Link Enabled",
+    "link": "https://discord.com/developers/applications"
+  },
+  {
+    "name": "DISCORD_GUILD_ID",
+    "type": "string",
+    "default": "",
+    "label": "Discord Guild Id",
+    "link": "https://discord.com/developers/applications"
+  },
+  {
+    "name": "DISCORD_ADMIN_USER_IDS",
+    "type": "string",
+    "default": "",
+    "label": "Discord Admin User Ids",
+    "link": "https://discord.com/developers/applications"
+  }
+]

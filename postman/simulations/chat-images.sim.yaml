@@ -1,0 +1,5 @@
+simulation: pia-chat-images
+routing: path
+mocks:
+  - routeKey: pia
+    path: ../mocks/pia-images/default.js

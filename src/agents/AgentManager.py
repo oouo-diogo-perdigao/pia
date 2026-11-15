@@ -7,11 +7,15 @@ class AgentManager:
             "generic": GenericAgent(),
         }
 
-    def process(self, prompt: str, agent_type: str = "generic", model: str | None = None) -> str:
+    def process(
+        self, prompt: str, agent_type: str = "generic", model: str | None = None
+    ) -> str:
         agent = self.agents.get(agent_type, self.agents["generic"])
         return agent.run(prompt, model=model)
 
-    def process_stream(self, prompt: str, agent_type: str = "generic", model: str | None = None):
+    def process_stream(
+        self, prompt: str, agent_type: str = "generic", model: str | None = None
+    ):
         agent = self.agents.get(agent_type, self.agents["generic"])
         if hasattr(agent, "run_stream"):
             yield from agent.run_stream(prompt, model=model)

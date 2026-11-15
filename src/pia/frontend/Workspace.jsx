@@ -1,0 +1,1289 @@
+import Bots from "./Bots";
+import NotificationMenu, { CountBadge } from "./NotificationMenu";
+import Notifications from "./Notifications";
+import MediaPlayer from "./MediaPlayer";
+import { Bell } from "lucide-react";
+import { Music2 } from "lucide-react";
+import { notify } from "./toasts";
+import Connectors, { connectors } from "./Connectors";
+import ToastCenter from "./ToastCenter";
+import { Plug } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import {
+  Button,
+  Group,
+  Text,
+  TextInput,
+  Paper,
+  Menu,
+  Select,
+  Modal,
+  Stack,
+  Checkbox,
+  Loader,
+  Overlay,
+  Avatar as AccountAvatar,
+  ActionIcon,
+} from "@mantine/core";
+import {
+  MessageCircle,
+  Bot,
+  Settings,
+  AudioLines,
+  Camera,
+  HardDrive,
+  Grid2X2,
+  Plus,
+  FolderPlus,
+  MoreHorizontal,
+  Search,
+  PanelLeftClose,
+  PanelLeftOpen,
+  ArrowLeft,
+  ArrowRight,
+  Pin,
+  Archive,
+  Trash2,
+  Pencil,
+  FolderInput,
+  ExternalLink,
+  ChevronDown,
+  ChevronRight,
+  LogOut,
+  Puzzle,
+  Sparkles,
+  UserRound,
+} from "lucide-react";
+import { api, session, safe, report } from "./api";
+import { Context, Icon, Nav, ErrorAlert } from "./shared";
+import { ScreenHistory } from "./navigation";
+import Chat from "./Chat";
+import SettingsPanel from "./Settings";
+import ServerLogin from "./ServerLogin";
+import PluginHost from "./features/plugins/PluginHost";
+import { resolvePluginPanel } from "./plugins/registry";
+
+const openbotExports = resolvePluginPanel("openbot")?.exports || {};
+const BotRunPanel = openbotExports.BotRunPanel;
+const SafeSvgAvatar = openbotExports.SafeSvgAvatar;
+const appIcons = {
+  podcast_automation: AudioLines,
+  music: Music2,
+  screenshots: Camera,
+  object_storage: HardDrive,
+};
+function normalizeRoute(route) {
+  if (
+    route.view === "connectors" ||
+    (route.view === "settings" &&
+      (["accounts", "connectors"].includes(route.section) ||
+        route.section?.startsWith("Connectors/")))
+  ) {
+    const connector = route.connector || route.section?.split("/")[1];
+    return {
+      view: "settings",
+      section: "connectors",
+      connector: connectors.some((item) => item.id === connector)
+        ? connector
+        : "pia_server",
+    };
+  }
+  return route;
+}
+function parseRoute() {
+  try {
+    return (
+      JSON.parse(decodeURIComponent(location.hash.slice(1))) || { view: "chat" }
+    );
+  } catch {
+    return { view: "chat" };
+  }
+}
+function Avatar() {
+  const [svg, setSvg] = useState(""),
+    [colors, setColors] = useState({});
+  useEffect(() => {
+    fetch("/bots/secretaria/avatar.svg")
+      .then((response) => response.text())
+      .then(setSvg)
+      .catch(() => {});
+    api("/bots/secretaria")
+      .then((data) => setColors(data.config))
+      .catch(() => {});
+  }, []);
+  return (
+    <span
+      className="bot-avatar"
+      style={{
+        "--bot-primary": colors.avatar_primary,
+        "--bot-accent": colors.avatar_accent,
+        "--bot-eyes": colors.avatar_eyes,
+      }}
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
+  );
+}
+
+export default function Workspace({ standalone = null }) {
+  const [account, setAccount] = useState(null);
+  const [state, setState] = useState({
+      chats: [],
+      folders: [],
+      apps: [],
+      jobs: [],
+      bots: [],
+    }),
+    [route, setRoute] = useState(() =>
+      normalizeRoute(standalone || parseRoute()),
+    ),
+    [ready, setReady] = useState(false),
+    [language, setLanguage] = useState("pt-BR"),
+    [catalog, setCatalog] = useState({}),
+    [collapsed, setCollapsed] = useState(false),
+    [search, setSearch] = useState(""),
+    [popup, setPopup] = useState(null),
+    [rename, setRename] = useState(null),
+    [renameText, setRenameText] = useState(""),
+    [bulk, setBulk] = useState(null),
+    [move, setMove] = useState(null),
+    [moveFolder, setMoveFolder] = useState(""),
+    [drop, setDrop] = useState(null),
+    [restarting, setRestarting] = useState(false),
+    [folded, setFolded] = useState({}),
+    [connectorsOpen, setConnectorsOpen] = useState(false);
+  const historyRef = useRef(new ScreenHistory(50)),
+    latestState = useRef(state),
+    routeRef = useRef(route),
+    [historyVersion, setHistoryVersion] = useState(0);
+  const t = (text) => catalog[text] || text;
+  latestState.current = state;
+  async function refresh() {
+    const value = await api("/state");
+    setState(value);
+    return value;
+  }
+  function openServerConnector(connector) {
+    const server = account?.server || "https://pia.travelrpg.com";
+    const url = new URL(server);
+    if (url.protocol !== "https:") return;
+    url.hash = connector ? "connectors/" + connector : "connectors";
+    window.open(url.href, "_blank", "noopener,noreferrer");
+  }
+  function navigate(next) {
+    next = normalizeRoute(next);
+    if (JSON.stringify(next) === JSON.stringify(routeRef.current)) return;
+    const entry = historyRef.current.push(next);
+    window.history.pushState(
+      { pia: entry.key },
+      "",
+      location.pathname + "#" + encodeURIComponent(JSON.stringify(next)),
+    );
+    routeRef.current = next;
+    setRoute(next);
+    setHistoryVersion((old) => old + 1);
+    setPopup(null);
+  }
+  useEffect(() => {
+    let active = true;
+    session()
+      .then(async () => {
+        const profile = await api("/integrations/pia_server/account");
+        if (!active) return;
+        setAccount(profile);
+        if (!profile.authenticated) return;
+        const [data, prefs] = await Promise.all([
+          api("/state"),
+          api("/preferences"),
+        ]);
+        if (!active) return;
+        setState(data);
+        setLanguage(prefs.language);
+        setReady(true);
+        const entry = historyRef.current.push(routeRef.current);
+        window.history.replaceState(
+          { pia: entry.key },
+          "",
+          location.pathname +
+            "#" +
+            encodeURIComponent(JSON.stringify(routeRef.current)),
+        );
+      })
+      .catch(report);
+    const pop = (event) => {
+      const entry = historyRef.current.select(event.state?.pia);
+      const next = entry?.route || { view: "chat" };
+      routeRef.current = next;
+      setRoute(next);
+      setPopup(null);
+      setHistoryVersion((old) => old + 1);
+    };
+    const mouse = (event) => {
+      if (event.button === 3 || event.button === 4) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.button === 3 ? back() : forward();
+      }
+    };
+    window.addEventListener("popstate", pop);
+    window.addEventListener("pointerup", mouse);
+    return () => {
+      active = false;
+      window.removeEventListener("popstate", pop);
+      window.removeEventListener("pointerup", mouse);
+    };
+  }, []);
+  useEffect(() => {
+    if (!ready) return;
+    let active = true;
+    const timer = setInterval(
+      () =>
+        api("/notifications/counts")
+          .then((value) => {
+            if (
+              active &&
+              ((value.profile_revision &&
+                value.profile_revision !==
+                  latestState.current.notifications?.profile_revision) ||
+                Object.keys(value.chat_counts || {}).some(
+                  (id) =>
+                    !latestState.current.chats.some((chat) => chat.id === id),
+                ))
+            ) {
+              refresh().catch(report);
+              return;
+            }
+            if (active)
+              setState((old) =>
+                JSON.stringify(old.notifications) === JSON.stringify(value)
+                  ? old
+                  : { ...old, notifications: value },
+              );
+          })
+          .catch(() => {}),
+      3000,
+    );
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [ready]);
+  useEffect(() => {
+    if (!ready) return;
+    const source =
+      route.view === "app"
+        ? "Apps/" + route.app
+        : route.view === "bots" && route.bot
+          ? "Bot/" + route.bot
+          : null;
+    const mark = () => {
+      if (
+        source &&
+        state.notifications?.counts?.[source] > 0 &&
+        document.visibilityState === "visible" &&
+        document.hasFocus()
+      )
+        api("/notifications/read", { source })
+          .then(() => refresh())
+          .catch(report);
+    };
+    mark();
+    document.addEventListener("visibilitychange", mark);
+    window.addEventListener("focus", mark);
+    return () => {
+      document.removeEventListener("visibilitychange", mark);
+      window.removeEventListener("focus", mark);
+    };
+  }, [ready, route.view, route.app, route.bot, state.notifications?.counts]);
+  useEffect(() => {
+    if (route.view === "settings" && route.section === "connectors")
+      setConnectorsOpen(true);
+  }, [route.view, route.section]);
+  useEffect(() => {
+    fetch("/pia/lang/" + language + ".json")
+      .then((response) => response.json())
+      .then(setCatalog)
+      .catch(report);
+    document.documentElement.lang = language;
+  }, [language]);
+  useEffect(() => {
+    const close = (event) => {
+      if (!event.target.closest(".conversation-menu")) setPopup(null);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, []);
+  const currentApp = state.apps.find((app) => app.id === route.app),
+    currentBot = (state.bots || []).find((bot) => bot.id === route.bot),
+    currentChat = state.chats.find((chat) => chat.id === route.chat),
+    title =
+      route.view === "chat"
+        ? currentChat?.title || "PIA"
+        : route.view === "settings"
+          ? t("Configurações") +
+            (route.section === "connectors"
+              ? " / Conectores / " +
+                (connectors.find((item) => item.id === route.connector)?.name ||
+                  "Google")
+              : route.section === "mcp"
+                ? " / Conectores MCP"
+                : route.section === "plugins"
+                  ? " / Plugins"
+                  : route.section === "skills"
+                    ? " / Skills"
+                    : "")
+          : route.view === "connectors"
+            ? "Conectores / " +
+              (connectors.find((c) => c.id === route.connector)?.name ||
+                "Google")
+            : route.view === "bots"
+              ? currentBot
+                ? "Bots / " + currentBot.name
+                : "Bots"
+              : route.view === "notifications"
+                ? "Notificações"
+                : currentApp?.name || "PIA";
+  useEffect(() => {
+    document.title = title + " · PIA";
+  }, [title]);
+  function back() {
+    if (historyRef.current.index > 0) window.history.back();
+  }
+  function forward() {
+    if (historyRef.current.index < historyRef.current.entries.length - 1)
+      window.history.forward();
+  }
+  async function newChat(folder) {
+    const result = await api("/chat/new", folder ? { folder } : {});
+    await refresh();
+    navigate({ view: "chat", chat: result.id });
+  }
+  function menu(chat, event) {
+    event.preventDefault();
+    event.stopPropagation();
+    setPopup({
+      chat,
+      x: Math.min(event.clientX, innerWidth - 240),
+      y: Math.min(event.clientY, innerHeight - 70),
+    });
+  }
+  async function updateChat(chat, fields) {
+    await api("/chat/update", { chat: chat.id, ...fields });
+    await refresh();
+  }
+  async function dropChat(event, folder) {
+    event.preventDefault();
+    setDrop(null);
+    const chat = event.dataTransfer.getData("application/x-pia-chat");
+    if (chat) {
+      await api("/chat/update", { chat, folder });
+      await refresh();
+    }
+  }
+  function dropProps(folder) {
+    return {
+      onDragOver: (event) => {
+        if (event.dataTransfer.types.includes("application/x-pia-chat")) {
+          event.preventDefault();
+          setDrop(folder ?? "unfiled");
+        }
+      },
+      onDragLeave: () => setDrop(null),
+      onDrop: safe((event) => dropChat(event, folder)),
+    };
+  }
+  function beginRename(type, item) {
+    setRename({ type, id: item.id });
+    setRenameText(item.title || item.name);
+    setPopup(null);
+  }
+  function renameInput(type, item) {
+    return (
+      <TextInput
+        autoFocus
+        value={renameText}
+        onChange={(event) => setRenameText(event.target.value)}
+        onBlur={() => setRename(null)}
+        onKeyDown={safe(async (event) => {
+          if (event.key === "Escape") setRename(null);
+          if (event.key === "Enter") {
+            event.preventDefault();
+            if (type === "chat") await updateChat(item, { title: renameText });
+            else {
+              await api("/folder/save", { id: item.id, name: renameText });
+              await refresh();
+            }
+            setRename(null);
+          }
+        })}
+      />
+    );
+  }
+  function chatRow(chat) {
+    return (
+      <div
+        className={"chat-row" + (route.chat === chat.id ? " active" : "")}
+        key={chat.id}
+        draggable={!bulk}
+        onDragStart={(event) =>
+          event.dataTransfer.setData("application/x-pia-chat", chat.id)
+        }
+        onContextMenu={(event) => menu(chat, event)}
+      >
+        {bulk && (
+          <Checkbox
+            aria-label={"Selecionar " + chat.title}
+            checked={bulk.includes(chat.id)}
+            onChange={() =>
+              setBulk((old) =>
+                old.includes(chat.id)
+                  ? old.filter((id) => id !== chat.id)
+                  : [...old, chat.id],
+              )
+            }
+          />
+        )}{" "}
+        {rename?.type === "chat" && rename.id === chat.id ? (
+          renameInput("chat", chat)
+        ) : (
+          <button
+            className="chat-name"
+            onClick={() =>
+              bulk
+                ? setBulk((old) =>
+                    old.includes(chat.id)
+                      ? old.filter((id) => id !== chat.id)
+                      : [...old, chat.id],
+                  )
+                : navigate({
+                    view: "chat",
+                    chat: chat.id,
+                    archived: !!route.archived,
+                  })
+            }
+          >
+            {chat.pinned && <Pin size={12} />} {chat.title}
+            <CountBadge count={state.notifications?.chat_counts?.[chat.id]} />
+          </button>
+        )}
+        <Icon
+          icon={MoreHorizontal}
+          label="Opções da conversa"
+          onClick={(event) => menu(chat, event)}
+        />
+      </div>
+    );
+  }
+  const matches = (chat) =>
+    !!chat.archived === !!route.archived &&
+    chat.title.toLocaleLowerCase().includes(search.toLocaleLowerCase());
+  async function reorder(event, target) {
+    event.preventDefault();
+    setDrop(null);
+    const dragged = event.dataTransfer.getData("application/x-pia-app");
+    if (!dragged || dragged === target) return;
+    const order = state.apps
+      .map((app) => app.id)
+      .filter((id) => id !== dragged);
+    order.splice(order.indexOf(target), 0, dragged);
+    await api("/apps/order", { order });
+    await refresh();
+  }
+  let content =
+    route.view === "chat" ? (
+      <Chat key={route.chat || "blank"} chat={route.chat} />
+    ) : route.view === "settings" ? (
+      ["accounts", "connectors"].includes(route.section) ? (
+        <Connectors connector={route.connector || "pia_server"} />
+      ) : route.section?.startsWith("Connectors/") ? (
+        <Connectors connector={route.section.split("/")[1]} />
+      ) : (
+        <SettingsPanel key={route.section} section={route.section} />
+      )
+    ) : route.view === "connectors" ? (
+      <Connectors connector={route.connector} />
+    ) : route.view === "notifications" ? (
+      <Notifications />
+    ) : route.view === "bots" ? (
+      !route.bot ? (
+        <Bots />
+      ) : currentBot?.kind === "dynamic" && BotRunPanel ? (
+        <BotRunPanel botId={currentBot.id} />
+      ) : (
+        <PluginHost
+          pluginId={route.bot}
+          fallbackUrl={currentBot?.url}
+          title={currentBot?.name || "Bot"}
+        />
+      )
+    ) : (
+      <PluginHost
+        pluginId={route.app}
+        props={{ sub: route.sub }}
+        fallbackUrl={currentApp?.url}
+        title={currentApp?.name || "Aplicativo"}
+      />
+    );
+  if (account && !account.authenticated)
+    return <ServerLogin server={account.server} />;
+  if (!ready)
+    return (
+      <>
+        <ErrorAlert />
+        <div className="loading-screen">
+          <Loader />
+          <Text>Carregando PIA…</Text>
+        </div>
+      </>
+    );
+  return (
+    <Context.Provider
+      value={{
+        state,
+        route,
+        navigate,
+        openServerConnector,
+        refresh,
+        language,
+        setLanguage,
+        t,
+        boot: state.boot,
+        setRestarting,
+      }}
+    >
+      <ErrorAlert />
+      <ToastCenter />
+      <MediaPlayer />
+      {!standalone && (
+        <nav className="page-menu">
+          <Menu>
+            <Menu.Target>
+              <Button variant="subtle" size="compact-xs">
+                {t("Arquivo")}
+              </Button>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item onClick={safe(() => newChat())}>
+                {t("Nova conversa")}
+              </Menu.Item>
+              <Menu.Item
+                onClick={() =>
+                  navigate({ view: "settings", section: "general" })
+                }
+              >
+                {t("Configurações")}
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
+          <Menu>
+            <Menu.Target>
+              <Button variant="subtle" size="compact-xs">
+                {t("Exibir")}
+              </Button>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item
+                onClick={() =>
+                  window.dispatchEvent(new Event("pia:toast-history"))
+                }
+              >
+                Histórico de notificações
+              </Menu.Item>
+              <Menu.Item onClick={() => location.reload()}>
+                {t("Recarregar")}
+              </Menu.Item>
+              <Menu.Item
+                onClick={safe(async () => {
+                  if (state.native) await api("/native", { action: "inspect" });
+                  else alert("Pressione F12 ou Ctrl+Shift+I no navegador.");
+                })}
+              >
+                Inspecionar HTML / CSS / JS · F12
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
+          <Button
+            variant="subtle"
+            size="compact-xs"
+            component="a"
+            href="https://github.com/oouo-diogo-perdigao/pia"
+            target="_blank"
+          >
+            {t("Ajuda")}
+          </Button>
+        </nav>
+      )}
+      <div className={"workspace" + (standalone ? " standalone" : "")}>
+        {!standalone && (
+          <>
+            <nav className="activity-rail">
+              <div className="notification-activity">
+                <Icon
+                  icon={MessageCircle}
+                  label={t("Conversas")}
+                  variant={route.view === "chat" ? "light" : "subtle"}
+                  onClick={() => navigate({ view: "chat", chat: route.chat })}
+                />
+                <CountBadge count={state.notifications?.chat_unread} />
+              </div>
+              <div className="notification-activity">
+                <Icon
+                  icon={Bot}
+                  label="Bots"
+                  variant={route.view === "bots" ? "light" : "subtle"}
+                  onClick={() => navigate({ view: "bots" })}
+                />
+                {Object.entries(state.notifications?.counts || {})
+                  .filter(([key]) => key.startsWith("Bot/"))
+                  .reduce((sum, [, count]) => sum + count, 0) > 0 && (
+                  <span className="notification-count">
+                    {Object.entries(state.notifications.counts)
+                      .filter(([key]) => key.startsWith("Bot/"))
+                      .reduce((sum, [, count]) => sum + count, 0)}
+                  </span>
+                )}
+              </div>
+              <div className="app-activities">
+                {state.apps.map((app) => (
+                  <div
+                    key={app.id}
+                    style={{ position: "relative" }}
+                    draggable
+                    onDragStart={(event) =>
+                      event.dataTransfer.setData(
+                        "application/x-pia-app",
+                        app.id,
+                      )
+                    }
+                    onDragOver={(event) => {
+                      if (
+                        event.dataTransfer.types.includes(
+                          "application/x-pia-app",
+                        )
+                      ) {
+                        event.preventDefault();
+                        setDrop(app.id);
+                      }
+                    }}
+                    onDragLeave={() => setDrop(null)}
+                    onDrop={safe((event) => reorder(event, app.id))}
+                    className={drop === app.id ? "app-drop" : ""}
+                  >
+                    <NotificationMenu source={"Apps/" + app.id}>
+                      <Icon
+                        icon={appIcons[app.id] || Grid2X2}
+                        label={app.name}
+                        variant={
+                          route.app === app.id && route.view === "app"
+                            ? "light"
+                            : "subtle"
+                        }
+                        onClick={() =>
+                          navigate({
+                            view: "app",
+                            app: app.id,
+                            sub: "principal",
+                          })
+                        }
+                      />
+                    </NotificationMenu>
+                    {state.notifications?.counts?.["Apps/" + app.id] > 0 && (
+                      <span className="notification-count">
+                        {state.notifications.counts["Apps/" + app.id]}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="rail-bottom">
+                <NotificationMenu className="notification-activity">
+                  <Icon
+                    icon={Bell}
+                    label="Notificações"
+                    variant={
+                      route.view === "notifications" ? "light" : "subtle"
+                    }
+                    onClick={() => navigate({ view: "notifications" })}
+                  />
+                  {state.notifications?.unread > 0 && (
+                    <span className="notification-count">
+                      {state.notifications.unread}
+                    </span>
+                  )}
+                </NotificationMenu>
+                {!standalone && account?.authenticated && (
+                  <Menu position="right-end" shadow="md">
+                    <Menu.Target>
+                      <ActionIcon
+                        variant="subtle"
+                        size={38}
+                        aria-label="Minha conta"
+                        title={account.email || "Minha conta"}
+                      >
+                        {account.email ? (
+                          <AccountAvatar
+                            size={30}
+                            color="violet"
+                            src={account.picture || null}
+                            alt=""
+                            imageProps={{ referrerPolicy: "no-referrer" }}
+                          >
+                            {account.email[0].toUpperCase()}
+                          </AccountAvatar>
+                        ) : (
+                          <UserRound size={19} />
+                        )}
+                      </ActionIcon>
+                    </Menu.Target>
+                    <Menu.Dropdown>
+                      <Menu.Label>{account.email || "Minha conta"}</Menu.Label>
+                      <Menu.Item
+                        color="red"
+                        leftSection={<LogOut size={16} />}
+                        onClick={safe(async () => {
+                          await api("/integrations/pia_server/logout", {});
+                          location.reload();
+                        })}
+                      >
+                        Sair
+                      </Menu.Item>
+                    </Menu.Dropdown>
+                  </Menu>
+                )}
+                <Icon
+                  icon={Settings}
+                  label={t("Configurações")}
+                  onClick={() =>
+                    navigate({ view: "settings", section: "general" })
+                  }
+                />
+              </div>
+            </nav>
+            {!collapsed && (
+              <aside className="sidebar">
+                <Group justify="space-between" wrap="nowrap" mb="md">
+                  <Text fw={600} size="sm">
+                    {route.view === "chat"
+                      ? t("Conversas")
+                      : route.view === "bots"
+                        ? "Bots"
+                        : route.view === "connectors"
+                          ? "Conectores"
+                          : route.view === "settings"
+                            ? t("Configurações")
+                            : currentApp?.name}
+                  </Text>
+                  <Group gap={2}>
+                    {route.view === "chat" && (
+                      <Icon
+                        icon={Plus}
+                        label={t("Nova conversa")}
+                        variant="filled"
+                        radius="xl"
+                        color="violet"
+                        onClick={() => newChat()}
+                      />
+                    )}
+                    {route.view === "bots" && (
+                      <Icon
+                        icon={Plus}
+                        label="Criar Bot Dinâmico"
+                        variant="filled"
+                        radius="xl"
+                        color="violet"
+                        onClick={() =>
+                          navigate({ view: "bots", create: Date.now() })
+                        }
+                      />
+                    )}
+                    <Icon
+                      icon={PanelLeftClose}
+                      label={t("Recolher lista")}
+                      onClick={() => setCollapsed(true)}
+                    />
+                  </Group>
+                </Group>
+                {route.view === "chat" ? (
+                  <>
+                    <Group wrap="nowrap" gap={5}>
+                      <TextInput
+                        className="grow"
+                        leftSection={<Search size={14} />}
+                        placeholder={t("Buscar conversas")}
+                        value={search}
+                        onChange={(event) => setSearch(event.target.value)}
+                      />
+                      <Icon
+                        icon={FolderPlus}
+                        label={t("Nova pasta")}
+                        onClick={async () => {
+                          const name = prompt(t("Nome da pasta"));
+                          if (name) {
+                            await api("/folder/save", { name });
+                            await refresh();
+                          }
+                        }}
+                      />
+                    </Group>
+                    <div className="chat-list">
+                      {state.folders.map((folder) => (
+                        <section key={folder.id}>
+                          <Group
+                            wrap="nowrap"
+                            className={
+                              "folder-heading" +
+                              (drop === folder.id ? " drop-target" : "")
+                            }
+                            {...dropProps(folder.id)}
+                          >
+                            {rename?.type === "folder" &&
+                            rename.id === folder.id ? (
+                              renameInput("folder", folder)
+                            ) : (
+                              <button
+                                onClick={() =>
+                                  setFolded({
+                                    ...folded,
+                                    [folder.id]: !folded[folder.id],
+                                  })
+                                }
+                              >
+                                {folded[folder.id] ? (
+                                  <ChevronRight size={14} />
+                                ) : (
+                                  <ChevronDown size={14} />
+                                )}{" "}
+                                {folder.name}
+                              </button>
+                            )}
+                            <Icon
+                              icon={Pencil}
+                              label={t("Renomear pasta")}
+                              onClick={() => beginRename("folder", folder)}
+                            />
+                            <Icon
+                              icon={Trash2}
+                              label={t("Remover pasta preservando conversas")}
+                              confirm
+                              onClick={async () => {
+                                await api("/folder/delete", { id: folder.id });
+                                await refresh();
+                              }}
+                            />
+                          </Group>
+                          {!folded[folder.id] &&
+                            state.chats
+                              .filter(
+                                (chat) =>
+                                  chat.folder === folder.id && matches(chat),
+                              )
+                              .map(chatRow)}
+                        </section>
+                      ))}
+                      <Text
+                        size="xs"
+                        c="dimmed"
+                        className={drop === "unfiled" ? "drop-target" : ""}
+                        mt="md"
+                        {...dropProps(null)}
+                      >
+                        {t("Conversas · sem pasta")}
+                      </Text>
+                      {state.chats
+                        .filter((chat) => !chat.folder && matches(chat))
+                        .map(chatRow)}
+                    </div>
+                    <div className="sidebar-footer">
+                      {bulk ? (
+                        <Group>
+                          <Button
+                            variant="subtle"
+                            onClick={() => setBulk(null)}
+                          >
+                            {t("CANCELAR")}
+                          </Button>
+                          <Icon
+                            icon={Trash2}
+                            label={t("Excluir conversas selecionadas")}
+                            danger
+                            onClick={async () => {
+                              await api("/chat/delete-many", { chats: bulk });
+                              setBulk(null);
+                              await refresh();
+                              if (bulk.includes(route.chat))
+                                navigate({ view: "chat" });
+                            }}
+                          />
+                        </Group>
+                      ) : (
+                        <Nav
+                          onClick={() =>
+                            navigate({
+                              view: "chat",
+                              chat: route.chat,
+                              archived: !route.archived,
+                            })
+                          }
+                        >
+                          {route.archived
+                            ? t("← Conversas")
+                            : t("Chats arquivados")}
+                        </Nav>
+                      )}
+                    </div>
+                  </>
+                ) : route.view === "settings" ? (
+                  <Stack gap={2} role="tree" aria-label="Configurações">
+                    <Nav
+                      active={route.section === "general"}
+                      onClick={() =>
+                        navigate({ view: "settings", section: "general" })
+                      }
+                    >
+                      {t("Geral")}
+                    </Nav>
+                    <button
+                      className="settings-tree-folder"
+                      role="treeitem"
+                      aria-expanded={connectorsOpen}
+                      onClick={() => setConnectorsOpen((value) => !value)}
+                    >
+                      {connectorsOpen ? (
+                        <ChevronDown size={15} />
+                      ) : (
+                        <ChevronRight size={15} />
+                      )}
+                      <FolderInput size={16} />
+                      {t("Conectores")}
+                    </button>
+                    {connectorsOpen && (
+                      <div className="settings-tree-children" role="group">
+                        {connectors.map((item) => (
+                          <Nav
+                            key={item.id}
+                            active={
+                              route.section === "connectors" &&
+                              route.connector === item.id
+                            }
+                            onClick={() =>
+                              navigate({
+                                view: "settings",
+                                section: "connectors",
+                                connector: item.id,
+                              })
+                            }
+                          >
+                            <Plug size={15} />
+                            {item.name}
+                          </Nav>
+                        ))}
+                      </div>
+                    )}
+                    <Nav
+                      active={
+                        route.section === "mcp" ||
+                        (route.section === "connectors" &&
+                          route.connector === "mcp")
+                      }
+                      onClick={() =>
+                        navigate({ view: "settings", section: "mcp" })
+                      }
+                    >
+                      <Plug size={15} />
+                      {t("Conectores MCP")}
+                    </Nav>
+                    <Nav
+                      active={route.section === "plugins"}
+                      onClick={() =>
+                        navigate({ view: "settings", section: "plugins" })
+                      }
+                    >
+                      <Puzzle size={15} />
+                      {t("Plugins")}
+                    </Nav>
+                    <Nav
+                      active={route.section === "skills"}
+                      onClick={() =>
+                        navigate({ view: "settings", section: "skills" })
+                      }
+                    >
+                      <Sparkles size={15} />
+                      {t("Skills")}
+                    </Nav>
+                    <Nav
+                      active={route.section === "documents"}
+                      onClick={() =>
+                        navigate({ view: "settings", section: "documents" })
+                      }
+                    >
+                      Ativação e atalhos
+                    </Nav>
+                    <Nav
+                      active={route.section === "credentials"}
+                      onClick={() =>
+                        navigate({ view: "settings", section: "credentials" })
+                      }
+                    >
+                      Cofre
+                    </Nav>
+                    <Nav
+                      active={route.section === "logs"}
+                      onClick={() =>
+                        navigate({ view: "settings", section: "logs" })
+                      }
+                    >
+                      {t("Inspeção e logs")}
+                    </Nav>
+                  </Stack>
+                ) : route.view === "connectors" ? (
+                  <Stack gap={4}>
+                    {connectors.map((item) => (
+                      <Nav
+                        key={item.id}
+                        active={(route.connector || "pia_server") === item.id}
+                        onClick={() =>
+                          navigate({ view: "connectors", connector: item.id })
+                        }
+                      >
+                        <Plug size={17} />
+                        {item.name}
+                      </Nav>
+                    ))}
+                  </Stack>
+                ) : route.view === "bots" ? (
+                  <Stack gap={4}>
+                    {(state.bots || []).map((bot) => (
+                      <NotificationMenu key={bot.id} source={"Bot/" + bot.id}>
+                        <div className="notification-activity">
+                          <Nav
+                            active={route.bot === bot.id}
+                            onClick={() =>
+                              navigate({ view: "bots", bot: bot.id })
+                            }
+                          >
+                            {bot.id === "secretaria" ? (
+                              <Avatar />
+                            ) : bot.kind === "dynamic" && SafeSvgAvatar ? (
+                              <SafeSvgAvatar
+                                src={bot.avatar_url || bot.avatar}
+                                colors={bot.avatar_colors}
+                                size={18}
+                                alt={bot.name}
+                              />
+                            ) : (
+                              <Bot size={18} />
+                            )}{" "}
+                            {bot.name}
+                          </Nav>
+                          <CountBadge
+                            count={
+                              state.notifications?.counts?.["Bot/" + bot.id]
+                            }
+                          />
+                        </div>
+                      </NotificationMenu>
+                    ))}
+                  </Stack>
+                ) : (
+                  <Stack gap={4}>
+                    {[
+                      ["principal", "Principal"],
+                      ...(route.app === "music"
+                        ? [["history", "Histórico"]]
+                        : []),
+                      ...(route.app === "podcast_automation"
+                        ? [["campaigns", "Campanhas"]]
+                        : []),
+                      ["about", "Sobre"],
+                    ].map(([sub, label]) => (
+                      <Nav
+                        key={sub}
+                        active={(route.sub || "principal") === sub}
+                        onClick={() => navigate({ ...route, sub })}
+                      >
+                        {t(label)}
+                      </Nav>
+                    ))}
+                  </Stack>
+                )}
+              </aside>
+            )}
+          </>
+        )}
+        <main className="main-area">
+          {!standalone && (
+            <header className="topbar">
+              <Group wrap="nowrap" gap={5}>
+                <Icon
+                  icon={ArrowLeft}
+                  label="Voltar"
+                  disabled={historyRef.current.index <= 0}
+                  onClick={back}
+                />
+                <Icon
+                  icon={ArrowRight}
+                  label="Avançar"
+                  disabled={
+                    historyRef.current.index >=
+                    historyRef.current.entries.length - 1
+                  }
+                  onClick={forward}
+                />
+                {collapsed && (
+                  <Icon
+                    icon={PanelLeftOpen}
+                    label={t("Exibir lista")}
+                    onClick={() => setCollapsed(false)}
+                  />
+                )}
+                <Text className="view-title" fw={600}>
+                  {route.view === "bots" && route.bot === "secretaria" && (
+                    <Avatar />
+                  )}
+                  {route.view === "bots" &&
+                    currentBot?.kind === "dynamic" &&
+                    SafeSvgAvatar && (
+                      <SafeSvgAvatar
+                        src={currentBot.avatar_url || currentBot.avatar}
+                        colors={currentBot.avatar_colors}
+                        size={24}
+                        alt={currentBot.name}
+                      />
+                    )}
+                  {title}
+                </Text>
+              </Group>
+              <Group wrap="nowrap">
+                <Text size="xs" c="dimmed" ta="right">
+                  {route.view === "app"
+                    ? currentApp?.info
+                    : route.view === "connectors"
+                      ? connectors.find(
+                          (item) =>
+                            item.id === (route.connector || "pia_server"),
+                        )?.info
+                      : route.view === "chat"
+                        ? t("Converse com a PIA ou dê um comando.")
+                        : route.view === "bots"
+                          ? "Agenda, lembretes e e-mails importantes."
+                          : t("Personalize a PIA e suas integrações.")}
+                </Text>
+                {route.view === "app" && (
+                  <Icon
+                    icon={Settings}
+                    label={t("Configurações do aplicativo")}
+                    onClick={() =>
+                      ["podcast_automation", "music"].includes(route.app)
+                        ? navigate({
+                            view: "settings",
+                            section: "Apps/" + route.app,
+                          })
+                        : route.app === "object_storage"
+                          ? openServerConnector("object_storage")
+                          : navigate({ ...route, sub: "settings" })
+                    }
+                  />
+                )}
+              </Group>
+            </header>
+          )}
+          <div className={route.view === "chat" ? "chat-container" : "content"}>
+            {content}
+          </div>
+        </main>
+      </div>
+      {popup && (
+        <Paper
+          className="conversation-menu"
+          shadow="xl"
+          p="xs"
+          style={{ left: popup.x, top: popup.y }}
+        >
+          <Group gap={2}>
+            <Icon
+              icon={Pencil}
+              label={t("Renomear")}
+              onClick={() => beginRename("chat", popup.chat)}
+            />
+            <Icon
+              icon={FolderInput}
+              label={t("Mover para pasta")}
+              onClick={() => {
+                setMove(popup.chat);
+                setMoveFolder(popup.chat.folder || "");
+                setPopup(null);
+              }}
+            />
+            <Icon
+              icon={Pin}
+              label={t(popup.chat.pinned ? "Desafixar" : "Fixar")}
+              onClick={async () => {
+                await updateChat(popup.chat, { pinned: !popup.chat.pinned });
+                setPopup(null);
+              }}
+            />
+            <Icon
+              icon={Archive}
+              label={t(popup.chat.archived ? "Desarquivar" : "Arquivar")}
+              onClick={async () => {
+                await updateChat(popup.chat, {
+                  archived: !popup.chat.archived,
+                });
+                setPopup(null);
+              }}
+            />
+            <Icon
+              icon={Trash2}
+              label={t("Excluir conversas")}
+              onClick={() => {
+                setBulk([popup.chat.id]);
+                setPopup(null);
+              }}
+            />
+          </Group>
+        </Paper>
+      )}
+      <Modal
+        opened={!!move}
+        onClose={() => setMove(null)}
+        title={t("Mover conversa")}
+      >
+        <Stack>
+          <Select
+            label={t("Pasta")}
+            value={moveFolder}
+            data={[
+              { value: "", label: t("Sem pasta") },
+              ...state.folders.map((folder) => ({
+                value: folder.id,
+                label: folder.name,
+              })),
+            ]}
+            onChange={(value) => setMoveFolder(value || "")}
+          />
+          <Button
+            disabled={
+              moveFolder ===
+              (state.chats.find((chat) => chat.id === move)?.folder || "")
+            }
+            onClick={safe(async () => {
+              await updateChat(move, { folder: moveFolder || null });
+              setMove(null);
+              notify("Salvo com sucesso.");
+            })}
+          >
+            {t("Salvar")}
+          </Button>
+        </Stack>
+      </Modal>
+      {restarting && (
+        <div className="restart-screen">
+          <Loader />
+          <Text>
+            Configurações salvas. Reiniciando a PIA assim que as tarefas em
+            execução terminarem…
+          </Text>
+        </div>
+      )}
+    </Context.Provider>
+  );
+}

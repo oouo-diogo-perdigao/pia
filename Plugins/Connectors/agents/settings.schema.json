@@ -1,0 +1,16 @@
+[
+  {
+    "name": "AGENTS_CODEX_EXECUTABLE",
+    "type": "string",
+    "default": "",
+    "label": "Agents Codex Executable",
+    "link": "https://developers.openai.com/codex/cli/"
+  },
+  {
+    "name": "AGENTS_AGY_EXECUTABLE",
+    "type": "string",
+    "default": "",
+    "label": "Agents Agy Executable",
+    "link": "https://antigravity.google/docs/getting-started?tab=cli"
+  }
+]

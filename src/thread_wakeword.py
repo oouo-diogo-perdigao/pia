@@ -43,7 +43,6 @@ try:
 except ImportError:
     sherpa_onnx = None
 
-import logging
 import shutil
 import time
 import urllib.request
@@ -71,7 +70,7 @@ from .commands_loader import process_command
 # Modelo KWS
 # ---------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent.parent
-KWS_ROOT = BASE_DIR / "cache"
+KWS_ROOT = BASE_DIR / "cache/main/wakeword"
 # MODEL_NAME = "sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile" # chinese model
 MODEL_NAME = "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01"  # english model
 MODEL_URL = (
@@ -85,7 +84,9 @@ KWS_TOKENS = MODEL_DIR / "tokens.txt"
 KWS_ENCODER = MODEL_DIR / "encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx"
 KWS_DECODER = MODEL_DIR / "decoder-epoch-12-avg-2-chunk-16-left-64.onnx"
 KWS_JOINER = MODEL_DIR / "joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx"
-KWS_KEYWORDS = BASE_DIR / "keywords.txt"
+from .config_paths import CONFIG_DIR
+
+KWS_KEYWORDS = Path(__file__).resolve().parents[1] / "cache/main/wakeword/keywords.txt"
 KWS_REQUIRED_FILES = (
     KWS_TOKENS,
     KWS_ENCODER,
@@ -123,11 +124,11 @@ def _download_file(url: str, destination: Path) -> None:
                     if total_size:
                         percent = downloaded * 100 / total_size
 
-                        logging.info(f"[KWS] Download: " f"{percent:.1f}%")
+                        logging.info(f"[KWS] Download: {percent:.1f}%")
 
                     else:
                         logging.info(
-                            f"[KWS] Download: " f"{downloaded / 1024 / 1024:.1f} MB"
+                            f"[KWS] Download: {downloaded / 1024 / 1024:.1f} MB"
                         )
 
         temporary_file.replace(destination)
@@ -164,8 +165,7 @@ def _extract_model_archive(archive: Path) -> None:
 
             if len(candidates) != 1:
                 raise RuntimeError(
-                    "Não foi possível identificar "
-                    "o diretório do modelo KWS extraído."
+                    "Não foi possível identificar o diretório do modelo KWS extraído."
                 )
 
             extracted_model = candidates[0]
@@ -204,13 +204,14 @@ def _ensure_keyword_model() -> None:
     # else:
     #     logging.info("[KWS] Modelo Sherpa-ONNX já está instalado.")
 
-    if not KWS_KEYWORDS.is_file():
-        logging.info("[KWS] Criando arquivo de palavras-chave.")
+    from .settings_store import document
 
-        KWS_KEYWORDS.write_text(
-            "hey mycroft\n",
-            encoding="utf-8",
-        )
+    text = document(
+        "main/keywords.txt",
+        (CONFIG_DIR / "keywords.example.txt").read_text(encoding="utf-8"),
+    )
+    KWS_KEYWORDS.parent.mkdir(parents=True, exist_ok=True)
+    KWS_KEYWORDS.write_text(text, encoding="utf-8")
 
     missing_files = [path for path in KWS_REQUIRED_FILES if not path.is_file()]
 
@@ -237,6 +238,7 @@ def _start_continuous_session(stream, keyword_spotter) -> None:
     logging.info(">>> SESSÃO DE COMANDOS INICIADA <<<")
 
     from .skills_runtime import get_runtime, is_stop_phrase
+
     skills = get_runtime()
     skills.cancel(close_interface=False)
 
@@ -269,7 +271,9 @@ def _start_continuous_session(stream, keyword_spotter) -> None:
 
     def sse_worker():
         try:
-            with requests.get(f"{PUBLIC_BASE_URL}/action/local-record/stream", stream=True) as r:
+            with requests.get(
+                f"{PUBLIC_BASE_URL}/action/local-record/stream", stream=True
+            ) as r:
                 for line in r.iter_lines():
                     with _state.LOCK:
                         if not _state.SESSION_ACTIVE:
@@ -293,6 +297,13 @@ def _start_continuous_session(stream, keyword_spotter) -> None:
             time.sleep(0.05)
             now = time.time()
 
+            from .HTTPServer import STT_MANAGER
+
+            if STT_MANAGER.recorder.speech_started.is_set():
+                STT_MANAGER.recorder.speech_started.clear()
+                from .voice_interrupt import interrupt
+
+                interrupt()
             while not event_queue.empty():
                 try:
                     data = event_queue.get_nowait()
@@ -453,12 +464,27 @@ def audio_listening_loop() -> None:
             detected_by_http = TRIGGER_EVENT.is_set()
 
             if detected_by_voice:
-                logging.info(f"[WAKE WORD DETECTADA]: " f"{detected_keyword}")
+                logging.info(f"[WAKE WORD DETECTADA]: {detected_keyword}")
 
                 keyword_spotter.reset_stream(kws_stream)
 
             if detected_by_http:
                 TRIGGER_EVENT.clear()
+
+            # The desktop may own a voice session while this wake-word loop is idle.
+            # A second wake/shortcut cancels it instead of creating another dispatcher.
+            from . import state as _state
+
+            with _state.LOCK:
+                already_active = _state.SESSION_ACTIVE
+                if already_active and (detected_by_voice or detected_by_http):
+                    _state.SESSION_ACTIVE = False
+            if already_active and (detected_by_voice or detected_by_http):
+                from .skills_runtime import get_runtime
+
+                get_runtime().cancel()
+                keyword_spotter.reset_stream(kws_stream)
+                continue
 
             now = time.time()
 

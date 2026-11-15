@@ -1,0 +1,12 @@
+{
+  "enabled": false,
+  "accounts": [],
+  "reminders": true,
+  "remind_minutes": 10,
+  "open_meetings": false,
+  "important_email": true,
+  "email_query": "is:unread is:important",
+  "speak": false,
+  "poll_seconds": 30,
+  "calendar": "primary"
+}

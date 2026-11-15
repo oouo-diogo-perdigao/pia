@@ -1,0 +1,7 @@
+{
+  "nome": "Microsoft · Outlook, Agenda e OneDrive",
+  "app_id": "microsoft",
+  "info": "Conecte contas Microsoft para acessar arquivos e mensagens.",
+  "type": "connector",
+  "lang": "lang/pt-BR.json"
+}

@@ -1,0 +1,7 @@
+id="object_storage"
+name="Object Storage · S3, R2 e compatíveis"
+provider="s3"
+setup_url="https://docs.aws.amazon.com/AmazonS3/latest/userguide/security-iam.html"
+
+[tools]
+module = "tools.py"
