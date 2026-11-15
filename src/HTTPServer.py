@@ -509,7 +509,14 @@ class HTTPServer(BaseHTTPRequestHandler):
                 )
                 return
 
-            if path == "/v1/audio/voices":
+            if path == "/v1/tts/providers":
+                if not self._authorize_openai_request():
+                    return
+                from src.tts_providers.registry import TTSProviderRegistry
+                reg = TTSProviderRegistry()
+                self.send_json(200, {"providers": reg.available()})
+                return
+
                 voices = TTS_MANAGER.get_voices()
                 self.send_json(200, voices)
                 return
@@ -934,6 +941,39 @@ class HTTPServer(BaseHTTPRequestHandler):
                 # ======================================================================
                 # Audio
                 # ======================================================================
+                if path == "/v1/tts/select":
+                    if not self._authorize_openai_request():
+                        return
+                    provider = body.get("provider")
+                    voice = body.get("voice")
+                    speed = body.get("speed")
+                    from src.tts_providers.registry import TTSProviderRegistry
+                    reg = TTSProviderRegistry()
+                    if provider is not None and provider not in reg.keys():
+                        self.send_openai_error(400, "Provider de TTS inválido.", param="provider")
+                        return
+                    if speed is not None:
+                        try:
+                            speed = float(speed)
+                        except (TypeError, ValueError):
+                            self.send_openai_error(400, "speed inválido.", param="speed")
+                            return
+                        if not 0.25 <= speed <= 4.0:
+                            self.send_openai_error(400, "speed deve estar entre 0.25 e 4.0.", param="speed")
+                            return
+                    from src import settings_store
+                    vals = {}
+                    if provider is not None:
+                        vals["TTS_PROVIDER"] = str(provider)
+                    if voice is not None:
+                        vals["TTS_DEFAULT_VOICE"] = str(voice)
+                    if speed is not None:
+                        vals["TTS_DEFAULT_SPEED"] = str(speed)
+                    if vals:
+                        settings_store.get_store().save("general", vals)
+                    self.send_json(200, {"ok": True, "provider": provider, "voice": voice})
+                    return
+
                 if path == "/v1/audio/speech":
                     # region (collapsed) text (input)
                     text = body.get("input", "")
@@ -1043,16 +1083,34 @@ class HTTPServer(BaseHTTPRequestHandler):
                         bool(style),
                     )
 
-                    audio_data = TTS_MANAGER.generate(
-                        text,
-                        voice,
-                        speed,
-                        style=style,
-                        job_name="OpenAI-compatible /v1/audio/speech",
-                        output_format=response_format,
-                    )
+                    selected_provider = None
+                    try:
+                        from src import settings_store
+                        selected_provider = settings_store.get("TTS_PROVIDER", section="general")
+                    except Exception:
+                        selected_provider = None
+                    if not selected_provider:
+                        selected_provider = "supertonic3"
 
-                    mime = TTS_MANAGER.formats()[response_format]
+                    from src.tts_providers.registry import TTSProviderRegistry
+                    reg = TTSProviderRegistry()
+                    provider = reg.get(selected_provider)
+                    if provider is None or not provider.is_available():
+                        provider = reg.get("supertonic3")
+
+                    try:
+                        audio_data = provider.synthesize(text, voice, speed, response_format)
+                    except Exception:
+                        fallback = reg.get("supertonic3")
+                        audio_data = fallback.synthesize(text, voice, speed, response_format)
+
+                    mime = None
+                    try:
+                        mime = TTS_MANAGER.formats()[response_format]
+                    except Exception:
+                        mime = "audio/wav"
+                    if mime is None:
+                        mime = TTS_MANAGER.formats().get(response_format, "audio/wav")
                     extra = {
                         "Content-Disposition": f'inline; filename="speech.{response_format}"'
                     }
