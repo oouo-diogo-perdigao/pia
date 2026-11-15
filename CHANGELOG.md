@@ -1,5 +1,11 @@
 # PIA Changelog
 
+## [Etapa 2 — Presets de Cores, 12 Rostos Dinâmicos e OAuth Suno MCP] - 2026-11-15
+
+### Added
+- **Bots Dinâmicos (`Plugins/OpenBot`)**: grade visual com **18 presets de cores** harmônicos + botão `+` (**Personalizar**) mantendo os seletores manuais ocultos por padrão, além de **12 rostos originais animados** (`orb`, `visor`, `owl`, `spark`, `fox`, `astro`, `neko`, `knight`, `lotus`, `pixel`, `flame`, `sonar`) com validação de `FACE_TYPES` em `Plugins/OpenBot/models.py` e compatibilidade com `sanitize_svg`.
+- **Suno MCP OAuth + Cofre Único (`Plugins/Apps/music`, `src/mcp_connectors.py`, `src/pia/service.py`)**: suporte a autenticação OAuth no provedor `suno_mcp` persistida no `UnifiedVault` via `MCPConnectorManager`, troca de `authorization_code` em `token_url` no `complete_oauth`, rotas `/api/pia/music/suno/oauth/{start,callback,disconnect}`, exposição de status OAuth em `/api/pia/music/providers` e resolução automática de token em `call_suno_mcp`.
+
 ## [Hotfix de integração — Bots e painéis] - 2026-11-15
 
 ### Fixed
