@@ -144,6 +144,144 @@ class ChatToolTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 bot.configure({"avatar_primary": "url(javascript:alert(1))"})
 
+    def test_music_intent_parsing_and_fast_path_execution(self):
+        from src.chat_tools import music_intent, parse_music_request
+
+        self.assertTrue(music_intent("crie no suno uma musica sobre um dia alegre"))
+        self.assertTrue(music_intent("criar musica no suno rock espacial"))
+        self.assertTrue(music_intent("gerar musica instrumental calma"))
+        self.assertFalse(music_intent("como gerar musica no suno?"))
+        self.assertFalse(music_intent("explique o que e suno"))
+
+        parsed = parse_music_request("crie no suno uma musica sobre um dia alegre")
+        self.assertEqual(parsed["provider"], "suno_mcp")
+        self.assertEqual(parsed["prompt"], "um dia alegre")
+        self.assertIn("Alegre", parsed["style"])
+
+        with TemporaryDirectory() as temporary:
+            tools = ChatTools(root=temporary, session=Mock())
+            with patch(
+                "Plugins.Apps.music.service.generate",
+                return_value={
+                    "file": "alegre.mp3",
+                    "url": "/api/pia/apps/music/files/alegre.mp3",
+                    "provider": "suno_mcp",
+                },
+            ) as gen:
+                out = tools.execute("crie no suno uma musica sobre um dia alegre")
+            gen.assert_called_once_with(prompt="um dia alegre", provider="suno_mcp")
+            self.assertIn("Música criada:", out)
+            self.assertIn("/api/pia/apps/music/files/alegre.mp3", out)
+            self.assertEqual(tools.last_meta["tools_used"], ["pia_music"])
+            self.assertEqual(
+                tools.last_meta["attachments"][0]["url"],
+                "/api/pia/apps/music/files/alegre.mp3",
+            )
+
+            with patch(
+                "Plugins.Apps.music.service.generate",
+                side_effect=RuntimeError("Suno (MCP) não configurado."),
+            ):
+                err_out = tools.execute("crie no suno uma musica sobre um dia alegre")
+            self.assertIn("Não foi possível concluir a geração musical", err_out)
+            self.assertIn("Suno (MCP) não configurado", err_out)
+            self.assertEqual(tools.last_meta, {"tools_used": ["pia_music"]})
+
+    def test_desktop_backend_propagates_fast_path_meta_and_handles_llm_fallback_error(
+        self,
+    ):
+        import threading
+        from src.desktop_backend import DesktopBackend
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = WorkspaceStore(root / "chat.sqlite")
+            chat_id = store.new_chat()
+            backend = DesktopBackend.__new__(DesktopBackend)
+            backend.store = store
+            backend.chat_lock = threading.Lock()
+            backend.agent = None
+            backend.voice_stop = threading.Event()
+
+            # Fast path propagates attachments/tools_used without touching LLM
+            with patch(
+                "Plugins.Apps.music.service.generate",
+                return_value={
+                    "file": "alegre.mp3",
+                    "url": "/api/pia/apps/music/files/alegre.mp3",
+                    "provider": "suno_mcp",
+                },
+            ):
+                deltas = []
+                res = backend.reply(
+                    chat_id,
+                    "crie no suno uma musica sobre um dia alegre",
+                    on_delta=deltas.append,
+                )
+            self.assertIn("/api/pia/apps/music/files/alegre.mp3", res)
+            self.assertEqual(backend._last_reply_meta["tools_used"], ["pia_music"])
+            self.assertEqual(
+                backend._last_reply_meta["attachments"][0]["type"], "audio"
+            )
+            self.assertTrue(deltas)
+
+            # LLM failure in fallback returns friendly message instead of raising
+            failing_agent = Mock()
+            failing_agent.complete_stream.side_effect = RuntimeError(
+                "Todos os modelos LLM selecionados falharam, estão em cooldown ou não possuem credenciais."
+            )
+            failing_agent.last_meta.return_value = {}
+            backend.agent = failing_agent
+            deltas2 = []
+            res2 = backend.reply(
+                chat_id,
+                "ola tudo bem",
+                on_delta=deltas2.append,
+            )
+            self.assertIn("Modelos de IA indisponíveis", res2)
+            self.assertIn("Configurações", res2)
+            self.assertEqual(deltas2, [res2])
+
+    def test_suno_mcp_does_not_duplicate_on_invalid_response(self):
+        from Plugins.Apps.music.tools import call_suno_mcp
+
+        for outcome in (ValueError("invalid JSON"), {}, []):
+            with (
+                self.subTest(outcome=outcome),
+                patch("Plugins.Apps.music.tools._mcp_http_rpc") as rpc,
+                patch("requests.post") as post,
+            ):
+                if isinstance(outcome, Exception):
+                    rpc.side_effect = outcome
+                else:
+                    rpc.return_value = outcome
+                with self.assertRaisesRegex(RuntimeError, "não foi repetida"):
+                    call_suno_mcp(
+                        "um dia alegre",
+                        suno_url="https://suno.example.com/mcp",
+                        suno_token="tok",
+                    )
+                post.assert_not_called()
+
+    def test_suno_mcp_does_not_duplicate_on_timeout(self):
+        import requests as req_mod
+        from Plugins.Apps.music.tools import call_suno_mcp
+
+        with (
+            patch(
+                "Plugins.Apps.music.tools._mcp_http_rpc",
+                side_effect=req_mod.ReadTimeout("timed out"),
+            ),
+            patch("requests.post") as post_mock,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Tempo esgotado"):
+                call_suno_mcp(
+                    "um dia alegre",
+                    suno_url="https://suno.example.com/mcp",
+                    suno_token="tok",
+                )
+            post_mock.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

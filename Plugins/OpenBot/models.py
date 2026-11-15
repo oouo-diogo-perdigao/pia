@@ -10,6 +10,21 @@ MAX_SVG_BYTES = 256 * 1024
 MAX_SVG_NODES = 1000
 MAX_SVG_DEPTH = 32
 
+FACE_TYPES = (
+    "orb",
+    "visor",
+    "owl",
+    "spark",
+    "fox",
+    "astro",
+    "neko",
+    "knight",
+    "lotus",
+    "pixel",
+    "flame",
+    "sonar",
+)
+
 _ALLOWED_SVG_TAGS = {
     "svg",
     "g",
@@ -149,6 +164,15 @@ def validate_bot_fields(
                 raise OpenBotError("avatar_id inválido.")
         out["avatar_id"] = aid
 
+    if "face_type" in data:
+        face_type = data.get("face_type")
+        if face_type is not None:
+            if not isinstance(face_type, str) or face_type.strip() not in FACE_TYPES:
+                raise OpenBotError("face_type inválido.")
+            out["face_type"] = face_type.strip()
+        else:
+            out["face_type"] = None
+
     if not partial or "avatar_colors" in data:
         colors = data.get("avatar_colors")
         if colors is not None:
@@ -164,9 +188,9 @@ def validate_bot_fields(
             out["avatar_colors"] = clean_colors
         elif not partial:
             out["avatar_colors"] = {
-                "primary": "#ad83ff",
-                "accent": "#65d9ff",
-                "eyes": "#faf4ff",
+                "primary": "#8B5CF6",
+                "accent": "#65D9FF",
+                "eyes": "#FAF4FF",
             }
 
     if not partial or "tool_ids" in data:

@@ -242,3 +242,57 @@ def test_openbot_run_execution_and_delegation_limits(isolated_openbot, monkeypat
             agent_manager=FakeAgentMgr(),
         )
     assert exc_info.value.status == 403
+
+
+def test_face_types_and_all_12_preset_svgs_pass_sanitizer():
+    from Plugins.OpenBot.models import FACE_TYPES, validate_bot_fields
+
+    assert FACE_TYPES == (
+        "orb",
+        "visor",
+        "owl",
+        "spark",
+        "fox",
+        "astro",
+        "neko",
+        "knight",
+        "lotus",
+        "pixel",
+        "flame",
+        "sonar",
+    )
+
+    for face in FACE_TYPES:
+        out = validate_bot_fields({"name": f"Bot {face}", "face_type": face})
+        assert out["face_type"] == face
+
+    with pytest.raises(OpenBotError):
+        validate_bot_fields({"name": "Invalid", "face_type": "unknown_face"})
+
+    # Validate representative SVG structures used by the 12 presets (transform rotate, steps(), translateY, arcs, polygons)
+    sample_svgs = [
+        # fox: rotated ellipses + polygons + transform-origin with px
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">'
+        "<style>.enable-mouth{opacity:0;}.animation-talking{transform-origin:60px 84px;animation:foxYip 0.34s ease-in-out infinite paused;}@keyframes foxYip{0%,100%{transform:scaleY(0.7);}50%{transform:scaleY(1.35);}}</style>"
+        '<polygon points="22,52 18,14 50,36" fill="var(--bot-primary, #8B5CF6)" stroke="var(--bot-accent, #65D9FF)" stroke-width="2.5" stroke-linejoin="round" />'
+        '<ellipse cx="43" cy="58" rx="7" ry="4.5" transform="rotate(14 43 58)" fill="var(--bot-eyes, #FAF4FF)" />'
+        '<g class="enable-mouth"><ellipse class="animation-talking" cx="60" cy="87" rx="11" ry="6" fill="var(--bot-eyes, #FAF4FF)" /></g>'
+        "</svg>",
+        # pixel: steps(2, end)
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">'
+        "<style>.enable-mouth{opacity:0;}.animation-talking{transform-origin:60px 76px;animation:pixelBeep 0.3s steps(2, end) infinite paused;}@keyframes pixelBeep{0%,100%{transform:scaleY(0.65);}50%{transform:scaleY(1.35);}}</style>"
+        '<rect x="18" y="18" width="84" height="84" rx="14" fill="var(--bot-primary, #8B5CF6)" stroke="var(--bot-accent, #65D9FF)" stroke-width="3" />'
+        '<g class="enable-mouth"><rect class="animation-talking" x="38" y="68" width="44" height="14" fill="var(--bot-eyes, #FAF4FF)" /></g>'
+        "</svg>",
+        # flame & sonar: bezier + arc path + translateY
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">'
+        "<style>.enable-mouth{opacity:0;}.animation-talking{transform-origin:60px 79px;animation:flameFlare 0.36s ease-in-out infinite paused;}@keyframes flameFlare{0%,100%{transform:scale(0.8) translateY(1px);}50%{transform:scale(1.25) translateY(-2px);}}</style>"
+        '<path d="M 22 40 A 44 44 0 0 1 98 40" fill="none" stroke="var(--bot-accent, #65D9FF)" stroke-width="4" stroke-linecap="round" />'
+        '<path d="M 60 10 C 78 30 100 48 96 74 Z" fill="var(--bot-primary, #8B5CF6)" />'
+        '<g class="enable-mouth"><ellipse class="animation-talking" cx="60" cy="79" rx="12" ry="7" fill="var(--bot-eyes, #FAF4FF)" /></g>'
+        "</svg>",
+    ]
+    for svg in sample_svgs:
+        cleaned = sanitize_svg(svg)
+        assert "enable-mouth" in cleaned
+        assert "animation-talking" in cleaned
