@@ -24,8 +24,10 @@ with patch.dict("sys.modules", {"src.LocalActions": _desktop}):
 
 @pytest.fixture
 def isolated_store(tmp_path, monkeypatch):
+    from tests.conftest import MemoryVault
+
     db_path = tmp_path / "settings.sqlite3"
-    store = settings_store.SettingsStore(path=db_path)
+    store = settings_store.SettingsStore(path=db_path, vault=MemoryVault())
     monkeypatch.setattr(settings_store, "_store", store)
     monkeypatch.setattr(
         "src.user_paths.user_path", lambda *parts: tmp_path.joinpath(*parts)

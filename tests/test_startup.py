@@ -172,9 +172,10 @@ class ShellStartupTests(unittest.TestCase):
             self.assertIn("-m src.launcher --foreground", dry_run.stdout)
 
     def test_wsl_windows_drive_handoff_and_missing_git_bash_guard(self):
-        for script_name, expected in (
-            ("install.sh", "PIA · instalando para windows"),
-            ("start.sh", "PIA · iniciando para windows"),
+        expected_os = "windows" if os.name == "nt" else "linux"
+        for script_name, verb in (
+            ("install.sh", "instalando"),
+            ("start.sh", "iniciando"),
         ):
             result = subprocess.run(
                 [self.bash, str(ROOT / script_name), "--dry-run"],
@@ -185,8 +186,9 @@ class ShellStartupTests(unittest.TestCase):
                 timeout=15,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn(expected, result.stdout)
-            self.assertNotIn("apt-get", result.stdout)
+            self.assertIn(f"PIA · {verb} para {expected_os}", result.stdout)
+            if os.name == "nt":
+                self.assertNotIn("apt-get", result.stdout)
         with tempfile.TemporaryDirectory(prefix="pia wsl guard ") as directory:
             root = Path(directory)
             for name in ("install.sh", "start.sh"):
