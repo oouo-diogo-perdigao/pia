@@ -3,6 +3,7 @@ import {
   Alert,
   Badge,
   Button,
+  Collapse,
   ColorInput,
   Divider,
   Group,
@@ -16,8 +17,17 @@ import {
   Textarea,
   TextInput,
   Tooltip,
+  UnstyledButton,
 } from "@mantine/core";
-import { RefreshCw, Save, Sparkles, Upload, Volume2, X } from "lucide-react";
+import {
+  Plus,
+  RefreshCw,
+  Save,
+  Sparkles,
+  Upload,
+  Volume2,
+  X,
+} from "lucide-react";
 import { api, report, safe } from "../../../src/pia/frontend/api";
 import { usePia } from "../../../src/pia/frontend/shared";
 import { notify } from "../../../src/pia/frontend/toasts";
@@ -30,9 +40,11 @@ import {
   AVATAR_PRESETS,
   BOT_TEMPLATES,
   BOT_TOOL_OPTIONS,
+  COLOR_PRESETS,
   DEFAULT_BOT_COLORS,
   LLM_TIER_OPTIONS,
   buildBotPayload,
+  findMatchingColorPreset,
   validateClientSvg,
 } from "./avatarPresets";
 
@@ -92,15 +104,24 @@ export default function BotEditor({
   const [pendingSvg, setPendingSvg] = useState(() =>
     !isEdit ? AVATAR_PRESETS[0].svg : "",
   );
+  const [customColorsOpen, setCustomColorsOpen] = useState(() =>
+    Boolean(
+      bot?.id && !findMatchingColorPreset(makeInitialState(bot).avatar_colors),
+    ),
+  );
   const [svgError, setSvgError] = useState("");
   const [previewSpeak, setPreviewSpeak] = useState(false);
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
 
   useEffect(() => {
-    setForm(makeInitialState(bot));
+    const initial = makeInitialState(bot);
+    setForm(initial);
     setSelectedPresetId(bot?.avatar_id ? "" : AVATAR_PRESETS[0].id);
     setPendingSvg(!bot?.id ? AVATAR_PRESETS[0].svg : "");
+    setCustomColorsOpen(
+      Boolean(bot?.id && !findMatchingColorPreset(initial.avatar_colors)),
+    );
     setSvgError("");
     setConflict(false);
   }, [bot]);
@@ -120,6 +141,7 @@ export default function BotEditor({
       tool_ids: [...tpl.tool_ids],
       avatar_colors: { ...tpl.avatar_colors },
     }));
+    setCustomColorsOpen(!findMatchingColorPreset(tpl.avatar_colors));
     setSelectedPresetId(preset.id);
     setPendingSvg(preset.svg);
     setSvgError("");
@@ -402,69 +424,181 @@ export default function BotEditor({
             </Alert>
           )}
 
-          <Group gap="xs" wrap="wrap">
-            {AVATAR_PRESETS.map((preset) => {
-              const active = selectedPresetId === preset.id;
-              return (
-                <Tooltip key={preset.id} label={preset.name}>
-                  <Paper
-                    withBorder
-                    p={6}
-                    radius="md"
-                    onClick={() => {
-                      setSelectedPresetId(preset.id);
-                      setPendingSvg(preset.svg);
-                      setSvgError("");
-                    }}
-                    style={{
-                      cursor: "pointer",
-                      borderColor: active
-                        ? "var(--mantine-color-violet-5)"
-                        : undefined,
-                    }}
-                  >
-                    <Group gap={6} wrap="nowrap">
-                      <SafeSvgAvatar
-                        svg={preset.svg}
-                        colors={form.avatar_colors}
-                        size={32}
-                        alt={preset.name}
-                      />
-                      <Text size="xs" fw={active ? 600 : 400}>
-                        {preset.name}
-                      </Text>
-                    </Group>
-                  </Paper>
-                </Tooltip>
-              );
-            })}
-            {selectedPresetId === "custom" && (
-              <Badge color="teal" variant="light">
-                SVG personalizado carregado
-              </Badge>
-            )}
-          </Group>
+          <Stack gap={8}>
+            <Group justify="space-between" align="center">
+              <Text size="sm" fw={500}>
+                Cor do Bot
+              </Text>
+              {(() => {
+                const activePreset = findMatchingColorPreset(
+                  form.avatar_colors,
+                );
+                return (
+                  <Text size="xs" c="dimmed">
+                    {activePreset && !customColorsOpen
+                      ? activePreset.name
+                      : "Paleta personalizada"}
+                  </Text>
+                );
+              })()}
+            </Group>
 
-          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
-            {[
-              ["primary", "Cor principal"],
-              ["accent", "Cor de destaque"],
-              ["eyes", "Cor dos olhos/boca"],
-            ].map(([key, label]) => (
-              <ColorInput
-                key={key}
-                label={label}
-                format="hex"
-                value={form.avatar_colors[key]}
-                onChange={(val) =>
-                  setField("avatar_colors", {
-                    ...form.avatar_colors,
-                    [key]: val || DEFAULT_BOT_COLORS[key],
-                  })
-                }
-              />
-            ))}
-          </SimpleGrid>
+            {[COLOR_PRESETS.slice(0, 9), COLOR_PRESETS.slice(9, 18)].map(
+              (row, rowIdx) => {
+                const matchedColorPreset = findMatchingColorPreset(
+                  form.avatar_colors,
+                );
+                return (
+                  <Group key={rowIdx} gap="sm" wrap="wrap" align="center">
+                    {row.map((preset) => {
+                      const selected =
+                        !customColorsOpen &&
+                        matchedColorPreset?.id === preset.id;
+                      return (
+                        <Tooltip key={preset.id} label={preset.name}>
+                          <UnstyledButton
+                            type="button"
+                            aria-label={preset.name}
+                            aria-pressed={selected}
+                            onClick={() => {
+                              setField("avatar_colors", { ...preset.colors });
+                              setCustomColorsOpen(false);
+                            }}
+                            style={{
+                              width: 28,
+                              height: 28,
+                              borderRadius: "50%",
+                              backgroundColor: preset.colors.primary,
+                              outline: selected
+                                ? "2px solid #419EFC"
+                                : "1px solid rgba(255,255,255,0.14)",
+                              outlineOffset: selected ? 3 : 0,
+                              cursor: "pointer",
+                              transition: "transform 120ms ease",
+                            }}
+                          />
+                        </Tooltip>
+                      );
+                    })}
+                    {rowIdx === 1 && (
+                      <Tooltip label="Personalizar cores manualmente">
+                        <UnstyledButton
+                          type="button"
+                          aria-label="Personalizar"
+                          aria-expanded={customColorsOpen}
+                          onClick={() => setCustomColorsOpen((open) => !open)}
+                          style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: "50%",
+                            border: customColorsOpen
+                              ? "2px solid #419EFC"
+                              : "1px dashed var(--mantine-color-default-border)",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            cursor: "pointer",
+                            color: "var(--mantine-color-text)",
+                          }}
+                        >
+                          <Plus size={14} />
+                        </UnstyledButton>
+                      </Tooltip>
+                    )}
+                  </Group>
+                );
+              },
+            )}
+
+            <Collapse in={customColorsOpen}>
+              <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm" pt="xs">
+                {[
+                  ["primary", "Cor principal"],
+                  ["accent", "Cor de destaque"],
+                  ["eyes", "Cor dos olhos/boca"],
+                ].map(([key, label]) => (
+                  <ColorInput
+                    key={key}
+                    label={label}
+                    format="hex"
+                    value={form.avatar_colors[key]}
+                    onChange={(val) =>
+                      setField("avatar_colors", {
+                        ...form.avatar_colors,
+                        [key]: val || DEFAULT_BOT_COLORS[key],
+                      })
+                    }
+                  />
+                ))}
+              </SimpleGrid>
+            </Collapse>
+          </Stack>
+
+          <Stack gap={8}>
+            <Group justify="space-between" align="center">
+              <Text size="sm" fw={500}>
+                Escolha o Rosto ({AVATAR_PRESETS.length} opções)
+              </Text>
+              {selectedPresetId === "custom" && (
+                <Badge color="teal" variant="light">
+                  SVG personalizado carregado
+                </Badge>
+              )}
+            </Group>
+            <SimpleGrid cols={{ base: 3, xs: 4, sm: 6 }} spacing="xs">
+              {AVATAR_PRESETS.map((preset) => {
+                const active = selectedPresetId === preset.id;
+                return (
+                  <Tooltip key={preset.id} label={preset.name}>
+                    <Paper
+                      withBorder
+                      p={8}
+                      radius="md"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={preset.name}
+                      aria-pressed={active}
+                      onClick={() => {
+                        setSelectedPresetId(preset.id);
+                        setPendingSvg(preset.svg);
+                        setSvgError("");
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelectedPresetId(preset.id);
+                          setPendingSvg(preset.svg);
+                          setSvgError("");
+                        }
+                      }}
+                      style={{
+                        cursor: "pointer",
+                        borderColor: active ? "#419EFC" : undefined,
+                        boxShadow: active ? "0 0 0 1px #419EFC" : undefined,
+                      }}
+                    >
+                      <Stack gap={4} align="center">
+                        <SafeSvgAvatar
+                          svg={preset.svg}
+                          colors={form.avatar_colors}
+                          size={44}
+                          alt={preset.name}
+                        />
+                        <Text
+                          size="xs"
+                          fw={active ? 600 : 400}
+                          ta="center"
+                          lineClamp={1}
+                        >
+                          {preset.name}
+                        </Text>
+                      </Stack>
+                    </Paper>
+                  </Tooltip>
+                );
+              })}
+            </SimpleGrid>
+          </Stack>
         </Stack>
       </Paper>
 

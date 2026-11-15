@@ -1065,19 +1065,52 @@ class MCPConnectorManager:
         if acc is None:
             raise KeyError(f"Conta '{account_id}' não encontrada.")
 
-        token = str(payload.get("access_token") or payload.get("code") or "").strip()
+        token = str(payload.get("access_token") or "").strip()
+        refresh_token = str(payload.get("refresh_token") or "").strip()
+        code = str(payload.get("code") or "").strip()
+        oauth_cfg = acc.setdefault("oauth", {})
+
+        if not token and code and oauth_cfg.get("token_url"):
+            token_url = str(oauth_cfg["token_url"]).strip()
+            client_secret = self._get_secret(
+                server_id, account_id, "oauth_client_secret"
+            )
+            form_data = {
+                "grant_type": "authorization_code",
+                "code": code,
+                "client_id": str(oauth_cfg.get("client_id") or ""),
+            }
+            if client_secret:
+                form_data["client_secret"] = client_secret
+            if oauth_cfg.get("redirect_uri"):
+                form_data["redirect_uri"] = str(oauth_cfg["redirect_uri"])
+            resp = requests.post(
+                token_url,
+                data=form_data,
+                headers={"Accept": "application/json"},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            token_data = resp.json() if resp.content else {}
+            if isinstance(token_data, dict):
+                token = str(token_data.get("access_token") or "").strip()
+                if not refresh_token and token_data.get("refresh_token"):
+                    refresh_token = str(token_data["refresh_token"]).strip()
+
+        if not token:
+            token = code
         if not token:
             raise ValueError("Token ou código OAuth ausente.")
         self._set_secret(server_id, account_id, "oauth_access_token", token)
-        if payload.get("refresh_token"):
+        if refresh_token:
             self._set_secret(
                 server_id,
                 account_id,
                 "oauth_refresh_token",
-                str(payload["refresh_token"]).strip(),
+                refresh_token,
             )
-        acc.setdefault("oauth", {})["connected"] = True
-        acc["oauth"]["token_masked"] = _mask_secret(token)
+        oauth_cfg["connected"] = True
+        oauth_cfg["token_masked"] = _mask_secret(token)
         acc["auth_type"] = "oauth"
         self._save_raw_servers(servers)
         return {"ok": True, "account": acc}

@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+from typing import Any
 from urllib.parse import urlsplit
 import uuid
 import requests
@@ -69,6 +70,185 @@ def settings():
 
 
 MUSIC_PROVIDERS = ("local", "gemini", "suno_mcp")
+_SUNO_MCP_SERVER_ID = "suno_mcp"
+
+
+def _suno_connector_state() -> dict[str, Any]:
+    state = {
+        "auth_type": "none",
+        "oauth_connected": False,
+        "oauth_client_id": "",
+        "oauth_auth_url": "",
+        "oauth_token_url": "",
+        "oauth_scopes": "",
+        "has_token": False,
+    }
+    try:
+        from src.mcp_connectors import get_mcp_manager
+
+        mgr = get_mcp_manager()
+        srv = mgr.get_server(_SUNO_MCP_SERVER_ID)
+    except Exception:
+        return state
+
+    accounts = srv.get("accounts") or []
+    acc = accounts[0] if accounts else {}
+    oauth = acc.get("oauth") or {}
+    has_token = bool(
+        srv.get("has_bearer_token")
+        or acc.get("has_bearer_token")
+        or oauth.get("connected")
+    )
+    state.update(
+        {
+            "auth_type": str(
+                acc.get("auth_type")
+                or (
+                    "oauth"
+                    if oauth.get("client_id") or oauth.get("connected")
+                    else ("bearer" if has_token else "none")
+                )
+            ),
+            "oauth_connected": bool(oauth.get("connected")),
+            "oauth_client_id": str(oauth.get("client_id") or ""),
+            "oauth_auth_url": str(oauth.get("auth_url") or ""),
+            "oauth_token_url": str(oauth.get("token_url") or ""),
+            "oauth_scopes": str(oauth.get("scopes") or ""),
+            "has_token": has_token,
+        }
+    )
+    return state
+
+
+def _ensure_suno_mcp_server(
+    *,
+    suno_url: str | None = None,
+    suno_cmd: str | None = None,
+    suno_token: str | None = None,
+    oauth_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    from src.mcp_connectors import get_mcp_manager
+
+    cfg = settings()
+    url = (
+        str(suno_url).strip()
+        if suno_url is not None
+        else str(cfg.get("MUSIC_SUNO_MCP_URL") or "").strip()
+    )
+    cmd = (
+        str(suno_cmd).strip()
+        if suno_cmd is not None
+        else str(cfg.get("MUSIC_SUNO_MCP_COMMAND") or "").strip()
+    )
+    mgr = get_mcp_manager()
+    try:
+        existing = mgr.get_server(_SUNO_MCP_SERVER_ID)
+    except KeyError:
+        existing = None
+
+    transport = "stdio" if (cmd and not url) else "http_streaming"
+    payload: dict[str, Any] = {
+        "id": _SUNO_MCP_SERVER_ID,
+        "name": "Suno (MCP)",
+        "transport": transport,
+        "url": url,
+        "command": cmd,
+        "enabled": True,
+    }
+    if suno_token is not None and str(suno_token).strip():
+        payload["bearer_token"] = str(suno_token).strip()
+
+    if oauth_payload:
+        existing_accounts = list((existing or {}).get("accounts") or [])
+        acc = (
+            dict(existing_accounts[0])
+            if existing_accounts
+            else {"id": "default", "name": "Suno OAuth"}
+        )
+        oauth = dict(acc.get("oauth") or {})
+        for key in ("client_id", "auth_url", "token_url", "scopes", "redirect_uri"):
+            if key in oauth_payload and oauth_payload[key] is not None:
+                oauth[key] = str(oauth_payload[key]).strip()
+        if oauth_payload.get("client_secret"):
+            oauth["client_secret"] = str(oauth_payload["client_secret"]).strip()
+        acc["oauth"] = oauth
+        if oauth_payload.get("auth_type"):
+            acc["auth_type"] = str(oauth_payload["auth_type"]).strip()
+        elif oauth.get("client_id") or oauth.get("auth_url"):
+            acc["auth_type"] = "oauth"
+        payload["accounts"] = [acc]
+
+    return mgr.save_server(payload, server_id=_SUNO_MCP_SERVER_ID)
+
+
+def _resolve_suno_mcp_credentials(cfg: dict[str, Any]) -> tuple[str, str, str]:
+    suno_url = str(cfg.get("MUSIC_SUNO_MCP_URL") or "").strip()
+    suno_cmd = str(cfg.get("MUSIC_SUNO_MCP_COMMAND") or "").strip()
+    suno_tok = str(cfg.get("MUSIC_SUNO_MCP_TOKEN") or "").strip()
+    try:
+        from src.mcp_connectors import get_mcp_manager
+
+        mgr = get_mcp_manager()
+        raw = mgr._find_raw(_SUNO_MCP_SERVER_ID)
+        suno_url = suno_url or str(raw.get("url") or "").strip()
+        suno_cmd = suno_cmd or str(raw.get("command") or "").strip()
+        accounts = [a for a in (raw.get("accounts") or []) if a.get("enabled", True)]
+        acc = accounts[0] if accounts else None
+        headers, _ = mgr._resolve_credentials(raw, acc)
+        auth_header = headers.get("Authorization") or ""
+        if auth_header.startswith("Bearer "):
+            vault_tok = auth_header[len("Bearer ") :].strip()
+            if vault_tok:
+                suno_tok = vault_tok
+    except Exception:
+        pass
+    return suno_url, suno_cmd, suno_tok
+
+
+def suno_oauth_start(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    data = dict(payload or {})
+    from src.mcp_connectors import get_mcp_manager
+
+    _ensure_suno_mcp_server(oauth_payload=data)
+    mgr = get_mcp_manager()
+    return mgr.start_oauth(
+        _SUNO_MCP_SERVER_ID,
+        account_id=data.get("account_id"),
+        payload=data,
+    )
+
+
+def suno_oauth_callback(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    data = dict(payload or {})
+    from src.mcp_connectors import get_mcp_manager
+
+    _ensure_suno_mcp_server()
+    mgr = get_mcp_manager()
+    return mgr.complete_oauth(_SUNO_MCP_SERVER_ID, payload=data)
+
+
+def suno_oauth_disconnect() -> dict[str, Any]:
+    from src.mcp_connectors import get_mcp_manager
+
+    mgr = get_mcp_manager()
+    try:
+        servers = mgr._raw_servers()
+        srv = next((s for s in servers if s.get("id") == _SUNO_MCP_SERVER_ID), None)
+        if srv:
+            for acc in srv.get("accounts") or []:
+                mgr._set_secret(
+                    _SUNO_MCP_SERVER_ID, acc["id"], "oauth_access_token", ""
+                )
+                mgr._set_secret(
+                    _SUNO_MCP_SERVER_ID, acc["id"], "oauth_refresh_token", ""
+                )
+                oauth = acc.setdefault("oauth", {})
+                oauth["connected"] = False
+                oauth["token_masked"] = ""
+            mgr._save_raw_servers(servers)
+    except Exception:
+        pass
+    return {"ok": True, **providers_catalog()}
 
 
 def providers_catalog():
@@ -84,7 +264,11 @@ def providers_catalog():
     )
     suno_url = str(cfg.get("MUSIC_SUNO_MCP_URL") or "").strip()
     suno_cmd = str(cfg.get("MUSIC_SUNO_MCP_COMMAND") or "").strip()
-    suno_token = bool(str(cfg.get("MUSIC_SUNO_MCP_TOKEN") or "").strip())
+    suno_state = _suno_connector_state()
+    suno_token = (
+        bool(str(cfg.get("MUSIC_SUNO_MCP_TOKEN") or "").strip())
+        or suno_state["has_token"]
+    )
     suno_configured = bool(suno_url or suno_cmd)
     return {
         "providers": [
@@ -114,6 +298,12 @@ def providers_catalog():
                 "command": suno_cmd,
                 "credential_state": "configured" if suno_configured else "missing",
                 "token_configured": suno_token,
+                "auth_type": suno_state["auth_type"],
+                "oauth_connected": suno_state["oauth_connected"],
+                "oauth_client_id": suno_state["oauth_client_id"],
+                "oauth_auth_url": suno_state["oauth_auth_url"],
+                "oauth_token_url": suno_state["oauth_token_url"],
+                "oauth_scopes": suno_state["oauth_scopes"],
                 "available": suno_configured,
             },
         ],
@@ -123,6 +313,12 @@ def providers_catalog():
             "suno_mcp_url": suno_url,
             "suno_mcp_command": suno_cmd,
             "suno_mcp_token_configured": suno_token,
+            "suno_mcp_auth_type": suno_state["auth_type"],
+            "suno_mcp_oauth_connected": suno_state["oauth_connected"],
+            "suno_mcp_oauth_client_id": suno_state["oauth_client_id"],
+            "suno_mcp_oauth_auth_url": suno_state["oauth_auth_url"],
+            "suno_mcp_oauth_token_url": suno_state["oauth_token_url"],
+            "suno_mcp_oauth_scopes": suno_state["oauth_scopes"],
         },
     }
 
@@ -134,6 +330,13 @@ def select_provider(
     suno_mcp_url: str | None = None,
     suno_mcp_command: str | None = None,
     suno_mcp_token: str | None = None,
+    suno_mcp_auth_type: str | None = None,
+    suno_mcp_client_id: str | None = None,
+    suno_mcp_client_secret: str | None = None,
+    suno_mcp_auth_url: str | None = None,
+    suno_mcp_token_url: str | None = None,
+    suno_mcp_scopes: str | None = None,
+    suno_mcp_redirect_uri: str | None = None,
 ):
     from src.settings_store import get_store
 
@@ -160,6 +363,32 @@ def select_provider(
         updates["MUSIC_SUNO_MCP_TOKEN"] = str(suno_mcp_token).strip()
     if updates:
         get_store().save("Apps/music", updates)
+
+    oauth_fields = {
+        k: v
+        for k, v in {
+            "auth_type": suno_mcp_auth_type,
+            "client_id": suno_mcp_client_id,
+            "client_secret": suno_mcp_client_secret,
+            "auth_url": suno_mcp_auth_url,
+            "token_url": suno_mcp_token_url,
+            "scopes": suno_mcp_scopes,
+            "redirect_uri": suno_mcp_redirect_uri,
+        }.items()
+        if v is not None
+    }
+    if (
+        suno_mcp_url is not None
+        or suno_mcp_command is not None
+        or suno_mcp_token is not None
+        or oauth_fields
+    ):
+        _ensure_suno_mcp_server(
+            suno_url=suno_mcp_url,
+            suno_cmd=suno_mcp_command,
+            suno_token=suno_mcp_token,
+            oauth_payload=oauth_fields or None,
+        )
     return providers_catalog()
 
 
@@ -476,9 +705,7 @@ def generate(
                 from src.mcp_chat_tools import call_suno_mcp
 
                 cfg = settings()
-                suno_url = str(cfg.get("MUSIC_SUNO_MCP_URL") or "").strip()
-                suno_cmd = str(cfg.get("MUSIC_SUNO_MCP_COMMAND") or "").strip()
-                suno_tok = str(cfg.get("MUSIC_SUNO_MCP_TOKEN") or "").strip()
+                suno_url, suno_cmd, suno_tok = _resolve_suno_mcp_credentials(cfg)
                 progress("Gerando música via Suno (MCP)…")
                 data = call_suno_mcp(
                     prompt,

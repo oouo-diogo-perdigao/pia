@@ -288,3 +288,101 @@ def test_plugins_and_skills_catalog_and_dispatch(tmp_path, monkeypatch):
     assert updated["description"] == "Abre PowerShell 7"
     assert skills_cat.delete_skill(created["id"])["ok"] is True
     assert len(ACCOUNT_MODES) == 3
+
+
+def test_suno_mcp_oauth_persistence_and_usage(tmp_path, monkeypatch):
+    from Plugins.Apps.music import service as music_service
+    from Plugins.Apps.music.tools import call_suno_mcp
+    from src import mcp_connectors, settings_store
+    from src.core.secrets.vault import MemoryVault
+    from src.workspace_store import WorkspaceStore
+
+    db_path = tmp_path / "settings.sqlite3"
+    sstore = settings_store.SettingsStore(path=db_path)
+    monkeypatch.setattr(settings_store, "_store", sstore)
+
+    vault = MemoryVault()
+    wstore = WorkspaceStore(tmp_path / "ws.sqlite3")
+    mgr = mcp_connectors.MCPConnectorManager(store=wstore, vault=vault)
+    monkeypatch.setattr(mcp_connectors, "_manager", mgr)
+
+    cat = music_service.select_provider(
+        provider="suno_mcp",
+        suno_mcp_url="https://suno.example.com/mcp",
+        suno_mcp_auth_type="oauth",
+        suno_mcp_client_id="suno-cid",
+        suno_mcp_client_secret="suno-csecret",
+        suno_mcp_auth_url="https://suno.example.com/oauth/authorize",
+        suno_mcp_token_url="https://suno.example.com/oauth/token",
+        suno_mcp_scopes="music.generate",
+    )
+    assert cat["selection"]["provider"] == "suno_mcp"
+    assert cat["selection"]["suno_mcp_auth_type"] == "oauth"
+    assert cat["selection"]["suno_mcp_oauth_client_id"] == "suno-cid"
+
+    start = music_service.suno_oauth_start(
+        {"redirect_uri": "http://127.0.0.1:8762/oauth/cb"}
+    )
+    assert start["ok"] is True
+    assert "client_id=suno-cid" in start["auth_url"]
+
+    seen_token_post = {}
+
+    class FakeResp:
+        def __init__(self, payload):
+            self._payload = payload
+            self.content = b"{}"
+            self.headers = {"Content-Type": "application/json"}
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    def fake_post(url, **kwargs):
+        if url == "https://suno.example.com/oauth/token":
+            seen_token_post["url"] = url
+            seen_token_post["data"] = kwargs.get("data")
+            return FakeResp(
+                {
+                    "access_token": "suno-oauth-access-9999",
+                    "refresh_token": "suno-oauth-refresh-1111",
+                }
+            )
+        seen_token_post["mcp_headers"] = kwargs.get("headers")
+        return FakeResp(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "result": {"audio_url": "https://cdn.example.com/a.mp3"},
+            }
+        )
+
+    monkeypatch.setattr("requests.post", fake_post)
+
+    cb = music_service.suno_oauth_callback(
+        {"state": start["state"], "code": "auth-code-xyz"}
+    )
+    assert cb["ok"] is True
+    assert cb["account"]["oauth"]["connected"] is True
+    assert seen_token_post["data"]["grant_type"] == "authorization_code"
+    assert seen_token_post["data"]["code"] == "auth-code-xyz"
+    assert seen_token_post["data"]["client_secret"] == "suno-csecret"
+
+    # Stored in UnifiedVault and exposed in catalog
+    assert (
+        vault.get("mcp:connector:suno_mcp:default:oauth_access_token")
+        == "suno-oauth-access-9999"
+    )
+    cat2 = music_service.providers_catalog()
+    assert cat2["selection"]["suno_mcp_oauth_connected"] is True
+    assert cat2["selection"]["suno_mcp_token_configured"] is True
+
+    # call_suno_mcp automatically resolves OAuth token from UnifiedVault
+    res = call_suno_mcp("Lo-fi chill beat", suno_url="https://suno.example.com/mcp")
+    assert res["audio_url"] == "https://cdn.example.com/a.mp3"
+    assert (
+        seen_token_post["mcp_headers"]["Authorization"]
+        == "Bearer suno-oauth-access-9999"
+    )
