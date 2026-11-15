@@ -501,6 +501,8 @@ export default function Chat({ chat }) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               input: speechText.slice(0, 4096),
+              ...(profile?.voice ? { voice: profile.voice } : {}),
+              ...(profile?.speed ? { speed: Number(profile.speed) } : {}),
               response_format: "mp3",
             }),
             signal,
@@ -533,6 +535,7 @@ export default function Chat({ chat }) {
             () => {},
           );
         }
+        await api("/tts/stop", {}).catch(() => {});
       },
       onStateChange: ({ activeId }) => setSpeakingId(activeId),
       onError: report,

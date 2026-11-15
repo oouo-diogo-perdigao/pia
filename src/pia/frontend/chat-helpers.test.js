@@ -13,14 +13,36 @@ import {
 
 test("buildChatModelOptions combines auto option with /chat/models response and deduplicates", () => {
   const { options, defaultModel, hasCatalog } = buildChatModelOptions({
-    default: "gemini/gemini-2.5-flash",
+    default: "free",
+    selected: "auto",
     models: [
-      "gemini/gemini-2.5-flash",
-      { id: "gemini/gemini-2.5-flash", provider: "gemini", tier: "free" },
-      { model: "groq/llama-3.3-70b", provider: "groq", tier: "free" },
       {
-        model: "openai/gpt-5",
+        id: "auto",
+        label: "Automático (padrão PIA)",
+        provider: "auto",
+        model: "free",
+        tier: "auto",
+        available: true,
+      },
+      {
+        id: "gemini/gemini-2.5-flash",
+        label: "gemini: gemini-2.5-flash",
+        provider: "gemini",
+        model: "gemini-2.5-flash",
+        tier: "free",
+        available: true,
+      },
+      "gemini/gemini-2.5-flash",
+      {
+        id: "groq/llama-3.3-70b",
+        provider: "groq",
+        model: "llama-3.3-70b",
+        tier: "free",
+      },
+      {
+        id: "openai/gpt-5",
         provider: "openai",
+        model: "gpt-5",
         tier: "paid",
         available: false,
       },
@@ -28,12 +50,13 @@ test("buildChatModelOptions combines auto option with /chat/models response and 
   });
 
   assert.equal(hasCatalog, true);
-  assert.equal(defaultModel, "gemini/gemini-2.5-flash");
+  assert.equal(defaultModel, "free");
   assert.equal(options[0].value, CHAT_AUTO_MODEL_SENTINEL);
   assert.equal(options[0].label, "Automático (Padrão)");
   assert.equal(options.length, 4);
   assert.equal(options[1].value, "gemini/gemini-2.5-flash");
-  assert.equal(options[1].label, "gemini-2.5-flash (Gemini)");
+  assert.equal(options[1].label, "gemini: gemini-2.5-flash (free)");
+  assert.equal(options[2].value, "groq/llama-3.3-70b");
   assert.equal(options[2].label, "llama-3.3-70b (Groq · free)");
   assert.equal(options[3].disabled, true);
 });

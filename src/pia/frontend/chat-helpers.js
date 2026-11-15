@@ -41,7 +41,9 @@ function normalizeModelEntry(entry) {
   if (!entry) return null;
   if (typeof entry === "string") {
     const value = entry.trim();
-    if (!value || value === CHAT_AUTO_MODEL_SENTINEL) return null;
+    if (!value || value === CHAT_AUTO_MODEL_SENTINEL || value === "auto") {
+      return null;
+    }
     const { provider, shortModel } = splitModelProvider(value);
     const providerLabel = formatProviderName(provider);
     return {
@@ -53,9 +55,23 @@ function normalizeModelEntry(entry) {
     };
   }
   if (typeof entry !== "object") return null;
-  const value = String(entry.model || entry.id || entry.value || "").trim();
-  if (!value || value === CHAT_AUTO_MODEL_SENTINEL) return null;
-  const { provider, shortModel } = splitModelProvider(value, entry.provider);
+  const rawId = String(entry.id || entry.value || "").trim();
+  const rawProvider = String(entry.provider || "")
+    .trim()
+    .toLowerCase();
+  if (
+    rawId === "auto" ||
+    rawId === CHAT_AUTO_MODEL_SENTINEL ||
+    rawProvider === "auto"
+  ) {
+    return null;
+  }
+  const value = String(rawId || entry.model || "").trim();
+  if (!value) return null;
+  const { provider, shortModel } = splitModelProvider(
+    entry.model || value,
+    entry.provider,
+  );
   const providerLabel = formatProviderName(provider);
   const tier = String(entry.tier || "")
     .trim()

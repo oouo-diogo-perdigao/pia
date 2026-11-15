@@ -3,6 +3,7 @@
 ## [TTS Unificado, Voz por Bot e Bots Dinâmicos (OpenBot)] - 2026-11-14
 
 ### Added
+- Interface do Chat aprimorada (`src/pia/frontend/Chat.jsx`, `chat-helpers.js`, `workspace.css`) com seletor de modelo no topo da conversa (`GET /api/pia/chat/models` e envio do campo `model` em `POST /api/pia/chat/send`), popover `"i"` nas respostas da assistente exibindo modelo/provedor e ferramentas/MCPs usados, alternância Som ↔ Stop no botão de fala com pausa/reset imediato de `<audio>` e cancelamento remoto (`/api/pia/tts/jobs/<id>/cancel` e `POST /api/pia/tts/stop`), e pré-visualização inline/zoom de capturas de tela, players `<MediaTrack>` e cartões de download/transcrição para resultados de MCP (buckets/RPG e Suno).
 - Seletor de modelo por mensagem no chat (`GET /api/pia/chat/models` e `model` opcional em `POST /api/pia/chat/send`), persistência de metadados (`model`, `provider`, `tools_used`, `attachments`) em `WorkspaceStore` (`messages.meta`) e emissão no evento SSE `done`.
 - Novas ferramentas nativas no chat e MCP (`src/mcp_chat_tools.py`, `src/tool_registry.py`): `pia_screenshot` (captura de tela em `/api/pia/chat/assets/*`), `pia_storage_list`/`pia_storage_get` (buckets S3-compatíveis com bloqueio de credenciais sensíveis), `pia_rpg_sessions` (busca fuzzy de campanhas e sessões de RPG com resumo/transcrição) e `pia_music` multi-turno integrado ao Suno MCP (`call_suno_mcp` via HTTP JSON-RPC/REST e stdio).
 - Rota `POST /api/pia/tts/stop` no WorkspaceService para interromper imediatamente a fala e áudios em reprodução via `TTSManager().stop()`.
