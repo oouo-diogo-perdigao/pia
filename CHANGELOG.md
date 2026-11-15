@@ -3,6 +3,9 @@
 ## [TTS Unificado, Voz por Bot e Bots Dinâmicos (OpenBot)] - 2026-11-14
 
 ### Added
+- Seletor de modelo por mensagem no chat (`GET /api/pia/chat/models` e `model` opcional em `POST /api/pia/chat/send`), persistência de metadados (`model`, `provider`, `tools_used`, `attachments`) em `WorkspaceStore` (`messages.meta`) e emissão no evento SSE `done`.
+- Novas ferramentas nativas no chat e MCP (`src/mcp_chat_tools.py`, `src/tool_registry.py`): `pia_screenshot` (captura de tela em `/api/pia/chat/assets/*`), `pia_storage_list`/`pia_storage_get` (buckets S3-compatíveis com bloqueio de credenciais sensíveis), `pia_rpg_sessions` (busca fuzzy de campanhas e sessões de RPG com resumo/transcrição) e `pia_music` multi-turno integrado ao Suno MCP (`call_suno_mcp` via HTTP JSON-RPC/REST e stdio).
+- Rota `POST /api/pia/tts/stop` no WorkspaceService para interromper imediatamente a fala e áudios em reprodução via `TTSManager().stop()`.
 - Supertonic 3 atualizado para o pipeline ONNX multilíngue (`Supertone/supertonic-2`, 31 idiomas incluindo português `<pt>...</pt>` com acentuação NFKD preservada) e catálogo completo com 10 vozes (`F1..F5` `Voz feminina 1..5` e `M1..M5` `Voz masculina 1..5`).
 - Suporte a texto customizado no preview de TTS (`POST /api/pia/tts/preview`) com fallback automático para a frase padrão da PIA.
 - Configuração estruturada de Música (`GET /api/pia/music/providers` e `POST /api/pia/music/select`) com 3 provedores (`local`, `gemini`, `suno_mcp`) e integração com `Apps/music`.

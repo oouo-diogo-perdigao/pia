@@ -234,6 +234,7 @@ def route(handler):
                 "/tts/voices",
                 "/tts/selection",
                 "/music/providers",
+                "/chat/models",
             }
             is_allowed_get = (
                 subpath in allowed_get

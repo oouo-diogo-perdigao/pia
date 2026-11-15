@@ -135,6 +135,67 @@ button:disabled {
   min-height: 0;
   flex-direction: column;
 }
+.chat-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px max(25px, calc((100% - 800px) / 2));
+  border-bottom: 1px solid #2f2839;
+  background: rgba(25, 25, 40, 0.45);
+}
+.chat-model-select {
+  min-width: 220px;
+  max-width: 320px;
+}
+.chat-inline-image {
+  display: block;
+  max-width: min(100%, 480px);
+  max-height: 360px;
+  object-fit: contain;
+  border-radius: 12px;
+  margin-top: 8px;
+  cursor: zoom-in;
+  border: 1px solid #3c3448;
+}
+.chat-media-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  margin: 4px 0;
+  border-radius: 10px;
+  background: #241f2c;
+  border: 1px solid #3c3448;
+}
+.chat-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  max-width: 100%;
+}
+.chat-attachment-card {
+  background: #241f2c;
+  border-color: #3c3448;
+  border-radius: 12px;
+  max-width: 520px;
+}
+.chat-transcript-preview {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #191928;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #cdc7d8;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.message-tools {
+  margin-top: 6px;
+}
 .messages {
   flex: 1;
   overflow: auto;

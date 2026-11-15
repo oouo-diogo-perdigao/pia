@@ -46,14 +46,49 @@ TOOLS = [
     ),
     spec(
         "pia_music",
-        "Gerar uma música com descrição e letra opcional.",
+        "Gerar uma música com descrição e letra opcional (local, gemini ou suno_mcp).",
         {
             "prompt": {"type": "string"},
             "lyrics": {"type": "string"},
-            "provider": {"type": "string", "enum": ["local", "gemini"]},
+            "provider": {"type": "string", "enum": ["local", "gemini", "suno_mcp"]},
             "duration": {"type": "integer", "minimum": 10, "maximum": 180},
         },
         ("prompt",),
+    ),
+    spec(
+        "pia_screenshot",
+        "Capturar um print da tela atual do computador e retornar a URL da imagem.",
+        {},
+    ),
+    spec(
+        "pia_storage_list",
+        "Listar buckets ou objetos no conector Object Storage (S3/R2).",
+        {
+            "account": {"type": "string"},
+            "bucket": {"type": "string"},
+            "prefix": {"type": "string"},
+            "query": {"type": "string"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+        },
+    ),
+    spec(
+        "pia_storage_get",
+        "Ler o conteúdo de texto de um arquivo no bucket Object Storage.",
+        {
+            "key": {"type": "string"},
+            "account": {"type": "string"},
+            "bucket": {"type": "string"},
+        },
+        ("key",),
+    ),
+    spec(
+        "pia_rpg_sessions",
+        "Consultar campanhas e sessões de RPG nos buckets/cache (list, latest ou transcript com busca aproximada).",
+        {
+            "action": {"type": "string", "enum": ["list", "latest", "transcript"]},
+            "campaign": {"type": "string"},
+            "session": {"type": "string"},
+        },
     ),
     spec(
         "pia_delegate",
@@ -117,16 +152,36 @@ def call(name, arguments, resources=None):
         from Plugins.Apps.music.service import generate
 
         return generate(**arguments)
+    if name == "pia_screenshot":
+        from .mcp_chat_tools import take_screenshot
+
+        return take_screenshot()
+    if name == "pia_storage_list":
+        from .mcp_chat_tools import storage_list
+
+        return storage_list(**arguments)
+    if name == "pia_storage_get":
+        from .mcp_chat_tools import storage_get
+
+        return storage_get(**arguments)
+    if name == "pia_rpg_sessions":
+        from .mcp_chat_tools import rpg_sessions
+
+        return rpg_sessions(**arguments)
     if name == "pia_delegate":
         from Plugins.Connectors.agents.service import ask
 
         return ask(**arguments)
 
 
-def complete_with_tools(agent, messages, model=None, allowed=None, on_delta=None):
+def complete_with_tools(
+    agent, messages, model=None, allowed=None, on_delta=None, return_meta=False
+):
     """Bounded real function calling. Model-supplied names cannot bypass allowlists."""
     selected = [t for t in TOOLS if t["name"] in (allowed or ())]
     history = list(messages)
+    tools_used = []
+    attachments = []
     for _ in range(6):
         response = agent.complete(
             history,
@@ -149,40 +204,36 @@ def complete_with_tools(agent, messages, model=None, allowed=None, on_delta=None
             text = message.content or ""
             if on_delta:
                 on_delta(text)
+            if return_meta:
+                return {
+                    "text": text,
+                    "tools_used": tools_used,
+                    "attachments": attachments,
+                }
             return text
         history.append(message.model_dump(exclude_none=True))
         for tool in calls:
             if tool.function.name not in {t["name"] for t in selected}:
                 raise ValueError("Ferramenta não autorizada nesta conversa.")
+            tools_used.append(f"mcp:{tool.function.name}")
             try:
                 result = call(tool.function.name, json.loads(tool.function.arguments))
+                if isinstance(result, dict):
+                    if result.get("image_url"):
+                        attachments.append(
+                            {"type": "image", "url": result["image_url"]}
+                        )
+                    if result.get("audio_url"):
+                        attachments.append(
+                            {"type": "audio", "url": result["audio_url"]}
+                        )
             except Exception as exc:
                 result = {"error": str(exc)}
-            # Images/audio are rendered directly; never feed base64 to an LLM.
-            if isinstance(result, dict) and (
-                "markdown" in result
-                or "audio_url" in result
-                or result.get("mimeType") == "image/png"
-            ):
-                if result.get("mimeType") == "image/png":
-                    from .chat_tools import save_camera
-
-                    text = save_camera(result)
-                else:
-                    text = (
-                        result.get("markdown")
-                        or f"[Música gerada]({result['audio_url']})"
-                    )
-                if on_delta:
-                    on_delta(text)
-                return text
             history.append(
                 {
                     "role": "tool",
                     "tool_call_id": tool.id,
-                    "content": json.dumps(result, ensure_ascii=False, default=str)[
-                        :32000
-                    ],
+                    "content": json.dumps(result, ensure_ascii=False, default=str),
                 }
             )
-    raise RuntimeError("Limite de seis etapas de ferramentas atingido.")
+    raise RuntimeError("Limite de chamadas de ferramentas excedido.")

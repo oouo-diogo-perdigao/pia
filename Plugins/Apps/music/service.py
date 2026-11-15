@@ -473,35 +473,31 @@ def generate(
                     raise RuntimeError("O motor musical excedeu 30 minutos.")
                 extension = "mp3"
             elif provider == "suno_mcp":
+                from src.mcp_chat_tools import call_suno_mcp
+
                 cfg = settings()
                 suno_url = str(cfg.get("MUSIC_SUNO_MCP_URL") or "").strip()
                 suno_cmd = str(cfg.get("MUSIC_SUNO_MCP_COMMAND") or "").strip()
                 suno_tok = str(cfg.get("MUSIC_SUNO_MCP_TOKEN") or "").strip()
-                if not suno_url and not suno_cmd:
-                    raise RuntimeError(
-                        "Suno (MCP) não configurado: informe a URL ou comando do servidor MCP do Suno."
-                    )
-                if not suno_url:
-                    raise RuntimeError(
-                        "Suno (MCP) via comando stdio requer execução pelo agente MCP; configure uma URL HTTP/HTTPS para geração direta."
-                    )
                 progress("Gerando música via Suno (MCP)…")
-                req_headers = {"Content-Type": "application/json"}
-                if suno_tok:
-                    req_headers["Authorization"] = f"Bearer {suno_tok}"
-                data = _json(
-                    session.post(
-                        suno_url,
-                        headers=req_headers,
-                        json={
-                            "prompt": prompt,
-                            "lyrics": lyrics,
-                            "duration": duration,
-                        },
-                        timeout=300,
-                        allow_redirects=False,
-                    )
+                data = call_suno_mcp(
+                    prompt,
+                    lyrics=lyrics,
+                    duration=duration,
+                    suno_url=suno_url,
+                    suno_cmd=suno_cmd,
+                    suno_token=suno_tok,
                 )
+                if isinstance(data.get("content"), list):
+                    for part in data["content"]:
+                        if isinstance(part, dict) and isinstance(part.get("text"), str):
+                            try:
+                                parsed = json.loads(part["text"])
+                                if isinstance(parsed, dict):
+                                    data = parsed
+                                    break
+                            except Exception:
+                                pass
                 if isinstance(data.get("audio_base64"), str):
                     raw = base64.b64decode(data["audio_base64"], validate=True)
                     extension = "wav" if data.get("format") == "wav" else "mp3"

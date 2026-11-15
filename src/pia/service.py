@@ -232,7 +232,7 @@ class WorkspaceService:
             raise ValueError("Plugin não encontrado.")
         return self.notifications.publish(source, title, text, links)
 
-    def send(self, chat, text, request=None):
+    def send(self, chat, text, request=None, model=None):
         if not isinstance(text, str) or not text.strip():
             raise ValueError("Mensagem vazia.")
         if len(text) > 100000:
@@ -264,8 +264,12 @@ class WorkspaceService:
                             raise InterruptedError("Resposta interrompida.")
                         job.emit("delta", text=value)
 
-                    self.backend.reply(chat, text.strip(), on_delta=delta)
-                    job.emit("done")
+                    reply_kwargs = {"on_delta": delta}
+                    if model:
+                        reply_kwargs["model"] = model
+                    self.backend.reply(chat, text.strip(), **reply_kwargs)
+                    meta = getattr(self.backend, "_last_reply_meta", None) or {}
+                    job.emit("done", **meta)
                 except InterruptedError:
                     if job.text:
                         self.store.append(chat, "assistant", job.text)
@@ -632,6 +636,10 @@ class WorkspaceService:
             if data.get("folder"):
                 self.store.update_chat(chat, folder=data["folder"], move=True)
             return {"id": chat}
+        if path == "/chat/models":
+            from src.llm_routing import available_chat_models
+
+            return available_chat_models()
         if path == "/chat/messages":
             chat = query.get("chat", [""])[0]
             return {
@@ -639,7 +647,14 @@ class WorkspaceService:
                 "draft": self.store.get("draft:" + chat, ""),
             }
         if path == "/chat/send":
-            return {"job": self.send(data["chat"], data["text"], data.get("request"))}
+            return {
+                "job": self.send(
+                    data["chat"],
+                    data["text"],
+                    data.get("request"),
+                    model=data.get("model"),
+                )
+            }
         if path == "/chat/cancel":
             self.jobs[data["job"]].cancelled.set()
             return {"ok": True}
@@ -838,6 +853,13 @@ class WorkspaceService:
                 text=data.get("text"),
                 workspace_jobs=self.jobs,
             )
+        if path == "/tts/stop" and method == "POST":
+            from src.TTSManager import TTSManager
+
+            if hasattr(self.backend, "voice_stop"):
+                self.backend.voice_stop.set()
+            TTSManager().stop()
+            return {"ok": True}
         if path.startswith("/speakers/") and path.endswith("/voice"):
             from urllib.parse import unquote
             from src.tts_service import get_tts_service

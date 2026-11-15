@@ -36,9 +36,10 @@ class WorkspaceStore:
             ]:
                 if name not in columns:
                     db.execute(f"ALTER TABLE chats ADD COLUMN {name} {definition}")
-            if "parent" not in {
-                c[1] for c in db.execute("PRAGMA table_info(messages)")
-            }:
+            msg_columns = {c[1] for c in db.execute("PRAGMA table_info(messages)")}
+            if "meta" not in msg_columns:
+                db.execute("ALTER TABLE messages ADD COLUMN meta TEXT")
+            if "parent" not in msg_columns:
                 db.execute("ALTER TABLE messages ADD COLUMN parent INTEGER")
                 for (chat,) in db.execute("SELECT id FROM chats").fetchall():
                     previous = None
@@ -116,13 +117,29 @@ class WorkspaceStore:
         with self.connect() as db:
             row = db.execute("SELECT leaf FROM chats WHERE id=?", (chat,)).fetchone()
             leaf = row[0] if row else None
-            nodes = {
-                i: dict(id=i, parent=p, role=r, content=t)
-                for i, p, r, t in db.execute(
-                    "SELECT id,parent,role,text FROM messages WHERE chat=? ORDER BY id",
-                    (chat,),
-                )
-            }
+            nodes = {}
+            for i, p, r, t, m in db.execute(
+                "SELECT id,parent,role,text,meta FROM messages WHERE chat=? ORDER BY id",
+                (chat,),
+            ):
+                node = dict(id=i, parent=p, role=r, content=t)
+                if m:
+                    try:
+                        parsed = json.loads(m)
+                        if isinstance(parsed, dict):
+                            for k in (
+                                "model",
+                                "provider",
+                                "tools_used",
+                                "attachments",
+                                "audio_url",
+                                "image_url",
+                            ):
+                                if k in parsed and parsed[k] is not None:
+                                    node[k] = parsed[k]
+                    except Exception:
+                        pass
+                nodes[i] = node
         path, seen = [], set()
         while leaf in nodes and leaf not in seen:
             seen.add(leaf)
@@ -322,7 +339,7 @@ class WorkspaceStore:
                 "DELETE FROM values_store WHERE key LIKE ?", ("branch:" + chat + ":%",)
             )
 
-    def append(self, chat, role, text):
+    def append(self, chat, role, text, meta=None):
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT leaf FROM chats WHERE id=?", (chat,)).fetchone()
@@ -330,9 +347,14 @@ class WorkspaceStore:
                 raise ValueError("Conversa não encontrada.")
             previous = db.execute("SELECT MAX(id) FROM messages").fetchone()[0] or 0
             identity = message_id(previous)
+            meta_json = (
+                json.dumps(meta, ensure_ascii=False)
+                if isinstance(meta, dict) and meta
+                else None
+            )
             db.execute(
-                "INSERT INTO messages(id,chat,role,text,parent) VALUES(?,?,?,?,?)",
-                (identity, chat, role, text, row[0]),
+                "INSERT INTO messages(id,chat,role,text,parent,meta) VALUES(?,?,?,?,?,?)",
+                (identity, chat, role, text, row[0], meta_json),
             )
             db.execute("UPDATE chats SET leaf=? WHERE id=?", (identity, chat))
             db.execute(

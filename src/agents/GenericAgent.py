@@ -19,6 +19,10 @@ class GenericAgent:
     def __init__(self):
         self.model_disabled_until = {}
         self._lock = threading.Lock()
+        self._local = threading.local()
+
+    def last_meta(self):
+        return dict(getattr(self._local, "last_meta", None) or {})
 
     def _candidates(self, model):
         candidates = select_models(model)
@@ -63,6 +67,10 @@ class GenericAgent:
                 logger_llm.info(
                     "[LLM] provider=%s model=%s", candidate.provider, candidate.model
                 )
+                self._local.last_meta = {
+                    "provider": candidate.provider,
+                    "model": candidate.model,
+                }
                 return response
             except Exception as exc:
                 self._failed(candidate, exc)
@@ -91,6 +99,10 @@ class GenericAgent:
                     )
                     if meaningful:
                         emitted = True
+                        self._local.last_meta = {
+                            "provider": candidate.provider,
+                            "model": candidate.model,
+                        }
                     if emitted:
                         yield from pending
                         pending.clear()

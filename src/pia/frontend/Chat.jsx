@@ -1,14 +1,18 @@
 import { MediaTrack } from "./MediaPlayer";
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
-  Button,
   Group,
   Text,
   Textarea,
   Paper,
   Loader,
   Select,
-  Checkbox,
+  Popover,
+  Badge,
+  Modal,
+  ActionIcon,
+  Stack,
+  Divider,
 } from "@mantine/core";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -26,13 +30,105 @@ import {
   Square,
   X,
   Check,
+  Info,
+  Download,
+  FileText,
+  Database,
+  Sparkles,
 } from "lucide-react";
 import { api, watchJob, safe, report, copy } from "./api";
 import { Icon, usePia } from "./shared";
-function Message({ record, onAction }) {
+import {
+  CHAT_AUTO_MODEL_SENTINEL,
+  buildChatModelOptions,
+  buildChatSendPayload,
+  buildChatActionPayload,
+  formatMessageInfo,
+  extractMessageMedia,
+  isImageUrl,
+  isAudioUrl,
+  createChatSpeechController,
+} from "./chat-helpers";
+
+const CHAT_MODEL_STORAGE_KEY = "pia.chat.selectedModel";
+
+function buildMarkdownComponents(onPreviewImage) {
+  return {
+    img: ({ src, alt, ...props }) =>
+      src ? (
+        <img
+          src={src}
+          alt={alt || "Imagem"}
+          loading="lazy"
+          className="chat-inline-image"
+          onClick={() =>
+            onPreviewImage?.({ url: src, title: alt || "Captura / Imagem" })
+          }
+          {...props}
+        />
+      ) : null,
+    a: ({ href, children, ...props }) => {
+      if (isAudioUrl(href)) {
+        const label =
+          typeof children === "string" ? children : "Música / Áudio gerado";
+        return (
+          <span className="chat-media-chip">
+            <MediaTrack url={href} title={label} />
+            <a href={href} download>
+              Baixar áudio
+            </a>
+          </span>
+        );
+      }
+      if (isImageUrl(href)) {
+        const label = typeof children === "string" ? children : "Imagem";
+        return (
+          <span>
+            <img
+              src={href}
+              alt={label}
+              loading="lazy"
+              className="chat-inline-image"
+              onClick={() => onPreviewImage?.({ url: href, title: label })}
+            />
+            <a href={href} download>
+              {children}
+            </a>
+          </span>
+        );
+      }
+      return (
+        <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+          {children}
+        </a>
+      );
+    },
+  };
+}
+
+function Message({
+  record,
+  onAction,
+  isSpeaking,
+  onToggleSpeak,
+  onPreviewImage,
+}) {
   const { t } = usePia(),
     [editing, setEditing] = useState(false),
-    [text, setText] = useState(record.content);
+    [text, setText] = useState(record.content),
+    [infoOpen, setInfoOpen] = useState(false);
+
+  const info = useMemo(() => formatMessageInfo(record), [record]);
+  const media = useMemo(() => extractMessageMedia(record), [record]);
+  const markdownComponents = useMemo(
+    () => buildMarkdownComponents(onPreviewImage),
+    [onPreviewImage],
+  );
+  const hasAttachments =
+    media.images.length > 0 ||
+    media.audios.length > 0 ||
+    media.files.length > 0;
+
   return (
     <article className={"message " + record.role} data-message={record.id}>
       <div className="message-body">
@@ -72,26 +168,112 @@ function Message({ record, onAction }) {
             </Group>
           </Paper>
         ) : (
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              a: ({ href, children, ...props }) =>
-                href?.startsWith("/api/pia/music/files/") ? (
-                  <span>
-                    <MediaTrack url={href} title="Música gerada" />
-                    <a href={href} download>
-                      {children}
-                    </a>
-                  </span>
-                ) : (
-                  <a href={href} {...props}>
-                    {children}
-                  </a>
-                ),
-            }}
-          >
-            {record.content}
-          </ReactMarkdown>
+          <>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={markdownComponents}
+            >
+              {record.content}
+            </ReactMarkdown>
+            {hasAttachments && (
+              <div className="chat-attachments">
+                {media.images.map((img) => (
+                  <div key={img.url}>
+                    <img
+                      src={img.url}
+                      alt={img.title}
+                      loading="lazy"
+                      className="chat-inline-image"
+                      onClick={() =>
+                        onPreviewImage?.({ url: img.url, title: img.title })
+                      }
+                    />
+                    <Group gap={6} mt={4}>
+                      <Text size="xs" c="dimmed">
+                        {img.title}
+                      </Text>
+                      {img.downloadUrl && (
+                        <a href={img.downloadUrl} download>
+                          <Group gap={4} wrap="nowrap">
+                            <Download size={12} />
+                            <Text size="xs">Baixar</Text>
+                          </Group>
+                        </a>
+                      )}
+                    </Group>
+                  </div>
+                ))}
+                {media.audios.map((audio) => (
+                  <Paper
+                    key={audio.url}
+                    withBorder
+                    p="xs"
+                    className="chat-attachment-card"
+                  >
+                    <Group justify="space-between" wrap="wrap" gap="xs">
+                      <MediaTrack url={audio.url} title={audio.title} />
+                      {audio.downloadUrl && (
+                        <a href={audio.downloadUrl} download>
+                          <Group gap={4} wrap="nowrap">
+                            <Download size={13} />
+                            <Text size="xs">Baixar</Text>
+                          </Group>
+                        </a>
+                      )}
+                    </Group>
+                  </Paper>
+                ))}
+                {media.files.map((file, idx) => (
+                  <Paper
+                    key={file.url || `${file.name}-${idx}`}
+                    withBorder
+                    p="xs"
+                    className="chat-attachment-card"
+                  >
+                    <Group justify="space-between" gap="xs">
+                      <Group gap={6}>
+                        {file.bucket || file.kind === "bucket" ? (
+                          <Database size={14} />
+                        ) : (
+                          <FileText size={14} />
+                        )}
+                        <Text size="xs" fw={500}>
+                          {file.name}
+                        </Text>
+                        {file.bucket && (
+                          <Badge size="xs" variant="light" color="blue">
+                            {file.bucket}
+                          </Badge>
+                        )}
+                      </Group>
+                      {file.url && (
+                        <a href={file.url} download>
+                          <Group gap={4} wrap="nowrap">
+                            <Download size={13} />
+                            <Text size="xs">Baixar</Text>
+                          </Group>
+                        </a>
+                      )}
+                    </Group>
+                    {file.transcript && (
+                      <div className="chat-transcript-preview">
+                        {file.transcript}
+                      </div>
+                    )}
+                  </Paper>
+                ))}
+              </div>
+            )}
+            {record.role === "assistant" && info.tools.length > 0 && (
+              <Group className="message-tools" gap={6}>
+                {info.tools.map((tool) => (
+                  <Badge key={tool.name} size="xs" variant="dot" color="violet">
+                    {tool.detail ? `${tool.name} · ${tool.detail}` : tool.name}
+                  </Badge>
+                ))}
+              </Group>
+            )}
+          </>
         )}
       </div>
       <Group className="message-actions" gap={3}>
@@ -121,11 +303,69 @@ function Message({ record, onAction }) {
           onClick={() => onAction(record, "fork")}
         />
         <Icon
-          feedback
-          icon={Volume2}
-          label={t("Tocar")}
-          onClick={() => onAction(record, "speak")}
+          icon={isSpeaking ? Square : Volume2}
+          color={isSpeaking ? "red" : "gray"}
+          label={isSpeaking ? t("Parar fala") : t("Tocar")}
+          onClick={() => onToggleSpeak?.(record)}
         />
+        {record.role === "assistant" && (
+          <Popover
+            opened={infoOpen}
+            onChange={setInfoOpen}
+            width={290}
+            position="top"
+            withArrow
+            shadow="md"
+          >
+            <Popover.Target>
+              <ActionIcon
+                aria-label={t("Informações do modelo e ferramentas")}
+                variant="subtle"
+                color="gray"
+                onClick={() => setInfoOpen((open) => !open)}
+                onMouseEnter={() => setInfoOpen(true)}
+                onMouseLeave={() => setInfoOpen(false)}
+              >
+                <Info size={17} />
+              </ActionIcon>
+            </Popover.Target>
+            <Popover.Dropdown
+              onMouseEnter={() => setInfoOpen(true)}
+              onMouseLeave={() => setInfoOpen(false)}
+            >
+              <Stack gap={6}>
+                <Text size="xs" fw={600}>
+                  {t("Detalhes da resposta")}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  {t("Modelo")}: {info.modelDisplay || t("Padrão do sistema")}
+                </Text>
+                {info.tools.length > 0 && (
+                  <>
+                    <Divider />
+                    <Text size="xs" fw={600}>
+                      {t("Ferramentas / MCPs")}
+                    </Text>
+                    <Group gap={4}>
+                      {info.tools.map((tool) => (
+                        <Badge
+                          key={tool.name}
+                          size="xs"
+                          variant="light"
+                          color="violet"
+                        >
+                          {tool.detail
+                            ? `${tool.name} (${tool.detail})`
+                            : tool.name}
+                        </Badge>
+                      ))}
+                    </Group>
+                  </>
+                )}
+              </Stack>
+            </Popover.Dropdown>
+          </Popover>
+        )}
         <Icon
           icon={RotateCcw}
           label={t("Tentar novamente")}
@@ -180,14 +420,129 @@ export default function Chat({ chat }) {
     [streaming, setStreaming] = useState(""),
     [running, setRunning] = useState(null),
     [sending, setSending] = useState(false),
-    [dictating, setDictating] = useState(false);
+    [dictating, setDictating] = useState(false),
+    [modelOptions, setModelOptions] = useState(
+      () => buildChatModelOptions(null, null).options,
+    ),
+    [selectedModel, setSelectedModel] = useState(() => {
+      try {
+        return (
+          localStorage.getItem(CHAT_MODEL_STORAGE_KEY) ||
+          CHAT_AUTO_MODEL_SENTINEL
+        );
+      } catch {
+        return CHAT_AUTO_MODEL_SENTINEL;
+      }
+    }),
+    [speakingId, setSpeakingId] = useState(null),
+    [previewImage, setPreviewImage] = useState(null);
   const scroll = useRef(),
     follow = useRef(true),
     source = useRef(),
     draftTimer = useRef(),
     activeChat = useRef(chat),
     seenMessage = useRef(0),
-    readTimer = useRef();
+    readTimer = useRef(),
+    speechController = useRef(null);
+  const streamingMarkdownComponents = useMemo(
+    () => buildMarkdownComponents(setPreviewImage),
+    [],
+  );
+
+  useEffect(() => {
+    let active = true;
+    Promise.allSettled([api("/chat/models"), api("/settings")]).then(
+      ([modelsResult, settingsResult]) => {
+        if (!active) return;
+        const modelsData =
+          modelsResult.status === "fulfilled" ? modelsResult.value : null;
+        const settingsData =
+          settingsResult.status === "fulfilled"
+            ? settingsResult.value?.values || settingsResult.value
+            : null;
+        const { options } = buildChatModelOptions(modelsData, settingsData);
+        setModelOptions(options);
+        setSelectedModel((prev) =>
+          options.some((opt) => opt.value === prev && !opt.disabled)
+            ? prev
+            : CHAT_AUTO_MODEL_SENTINEL,
+        );
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [state.notifications?.profile_revision]);
+
+  useEffect(() => {
+    const controller = createChatSpeechController({
+      synthesize: async (record, speechText, { signal }) => {
+        const selection = await api("/tts/selection").catch(() => null);
+        const profile = selection?.profile || selection?.active || null;
+        if (profile?.provider && profile?.voice) {
+          try {
+            const started = await api("/tts/preview", {
+              profile,
+              text: speechText,
+            });
+            if (started?.job_id) {
+              return { jobId: started.job_id };
+            }
+            if (started?.audio_url) {
+              return { audioUrl: started.audio_url };
+            }
+          } catch {
+            // Fall through to full-length /v1/audio/speech or chat speak action.
+          }
+        }
+        try {
+          const response = await fetch("/v1/audio/speech", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              input: speechText.slice(0, 4096),
+              response_format: "mp3",
+            }),
+            signal,
+          });
+          if (response.ok) {
+            const blob = await response.blob();
+            return { objectUrl: URL.createObjectURL(blob) };
+          }
+        } catch (err) {
+          if (err?.name === "AbortError") throw err;
+        }
+        const fallback = await api("/chat/message", {
+          chat: activeChat.current,
+          id: record.id,
+          action: "speak",
+        });
+        if (fallback?.audio_url || fallback?.job_id) {
+          return {
+            audioUrl: fallback.audio_url,
+            jobId: fallback.job_id,
+          };
+        }
+        return { serverSide: true };
+      },
+      watch: watchJob,
+      pollJob: (jobId) => api(`/tts/jobs/${jobId}`),
+      cancelRemote: async (entry) => {
+        if (entry?.remoteJobId && !entry.playbackStarted) {
+          await api(`/tts/jobs/${entry.remoteJobId}/cancel`, {}).catch(
+            () => {},
+          );
+        }
+      },
+      onStateChange: ({ activeId }) => setSpeakingId(activeId),
+      onError: report,
+    });
+    speechController.current = controller;
+    return () => {
+      controller.stop();
+      speechController.current = null;
+    };
+  }, []);
   async function markVisible() {
     if (
       !chat ||
@@ -239,7 +594,37 @@ export default function Chat({ chat }) {
         setRunning(null);
         setStreaming("");
         if (event.type === "error") report(event.error);
-        load().catch(report);
+        const doneMeta =
+          event.result && typeof event.result === "object"
+            ? event.result
+            : event;
+        load()
+          .then(() => {
+            if (doneMeta?.model || doneMeta?.provider || doneMeta?.tools_used) {
+              setMessages((prev) => {
+                const copyList = [...prev];
+                for (let idx = copyList.length - 1; idx >= 0; idx--) {
+                  if (copyList[idx]?.role === "assistant") {
+                    copyList[idx] = {
+                      ...copyList[idx],
+                      ...(doneMeta.model && !copyList[idx].model
+                        ? { model: doneMeta.model }
+                        : {}),
+                      ...(doneMeta.provider && !copyList[idx].provider
+                        ? { provider: doneMeta.provider }
+                        : {}),
+                      ...(doneMeta.tools_used && !copyList[idx].tools_used
+                        ? { tools_used: doneMeta.tools_used }
+                        : {}),
+                    };
+                    break;
+                  }
+                }
+                return copyList;
+              });
+            }
+          })
+          .catch(report);
         refresh().catch(report);
       }
     });
@@ -247,6 +632,7 @@ export default function Chat({ chat }) {
   useEffect(() => {
     activeChat.current = chat;
     seenMessage.current = 0;
+    speechController.current?.stop();
     setRunning(null);
     setStreaming("");
     load(true).catch(report);
@@ -255,6 +641,7 @@ export default function Chat({ chat }) {
     return () => {
       activeChat.current = null;
       source.current?.close();
+      speechController.current?.stop();
       clearTimeout(draftTimer.current);
       clearTimeout(readTimer.current);
     };
@@ -292,11 +679,15 @@ export default function Chat({ chat }) {
     try {
       if (!target) {
         target = (await api("/chat/new", {})).id;
-        await api("/chat/send", {
-          chat: target,
-          text,
-          request: crypto.randomUUID(),
-        });
+        await api(
+          "/chat/send",
+          buildChatSendPayload({
+            chat: target,
+            text,
+            request: crypto.randomUUID(),
+            model: selectedModel,
+          }),
+        );
         await refresh();
         navigate({ view: "chat", chat: target });
         return;
@@ -305,11 +696,15 @@ export default function Chat({ chat }) {
         ...old,
         { id: "pending", role: "user", content: text },
       ]);
-      const result = await api("/chat/send", {
-        chat: target,
-        text,
-        request: crypto.randomUUID(),
-      });
+      const result = await api(
+        "/chat/send",
+        buildChatSendPayload({
+          chat: target,
+          text,
+          request: crypto.randomUUID(),
+          model: selectedModel,
+        }),
+      );
       if (target === activeChat.current) watch(result.job);
       await refresh();
     } catch (error) {
@@ -320,12 +715,16 @@ export default function Chat({ chat }) {
     }
   }
   async function action(record, action, text) {
-    const result = await api("/chat/message", {
-      chat,
-      id: record.id,
-      action,
-      ...(text !== undefined ? { text } : {}),
-    });
+    const result = await api(
+      "/chat/message",
+      buildChatActionPayload({
+        chat,
+        id: record.id,
+        action,
+        text,
+        model: selectedModel,
+      }),
+    );
     if (result.chat) {
       await refresh();
       navigate({ view: "chat", chat: result.chat });
@@ -361,8 +760,35 @@ export default function Chat({ chat }) {
       } else setDictating(false);
     });
   }
+  function handleModelChange(value) {
+    const next = value || CHAT_AUTO_MODEL_SENTINEL;
+    setSelectedModel(next);
+    try {
+      localStorage.setItem(CHAT_MODEL_STORAGE_KEY, next);
+    } catch {}
+  }
+
   return (
     <section className="chat-page">
+      <div className="chat-topbar">
+        <Group gap="xs" wrap="nowrap">
+          <Sparkles size={15} />
+          <Text size="xs" c="dimmed">
+            {t("Modelo:")}
+          </Text>
+          <Select
+            className="chat-model-select"
+            size="xs"
+            searchable
+            allowDeselect={false}
+            aria-label={t("Modelo para a próxima resposta")}
+            placeholder={t("Automático (Padrão)")}
+            data={modelOptions}
+            value={selectedModel}
+            onChange={handleModelChange}
+          />
+        </Group>
+      </div>
       <div
         id="messages"
         ref={scroll}
@@ -390,7 +816,14 @@ export default function Chat({ chat }) {
               <div className="message-body">{record.content}</div>
             </article>
           ) : (
-            <Message key={record.id} record={record} onAction={action} />
+            <Message
+              key={record.id}
+              record={record}
+              onAction={action}
+              isSpeaking={speakingId === record.id}
+              onToggleSpeak={(rec) => speechController.current?.toggle(rec)}
+              onPreviewImage={setPreviewImage}
+            />
           ),
         )}
         {(running || sending) && (
@@ -399,21 +832,7 @@ export default function Chat({ chat }) {
               {streaming ? (
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
-                  components={{
-                    a: ({ href, children, ...props }) =>
-                      href?.startsWith("/api/pia/music/files/") ? (
-                        <span>
-                          <MediaTrack url={href} title="Música gerada" />
-                          <a href={href} download>
-                            {children}
-                          </a>
-                        </span>
-                      ) : (
-                        <a href={href} {...props}>
-                          {children}
-                        </a>
-                      ),
-                  }}
+                  components={streamingMarkdownComponents}
                 >
                   {streaming}
                 </ReactMarkdown>
@@ -427,6 +846,29 @@ export default function Chat({ chat }) {
           </article>
         )}
       </div>
+      <Modal
+        opened={Boolean(previewImage)}
+        onClose={() => setPreviewImage(null)}
+        title={previewImage?.title || t("Visualização")}
+        size="xl"
+        centered
+      >
+        {previewImage && (
+          <Stack gap="sm" align="center">
+            <img
+              src={previewImage.url}
+              alt={previewImage.title || "Imagem"}
+              style={{ maxWidth: "100%", maxHeight: "75vh", borderRadius: 10 }}
+            />
+            <a href={previewImage.url} download>
+              <Group gap={6}>
+                <Download size={14} />
+                <Text size="sm">{t("Baixar imagem")}</Text>
+              </Group>
+            </a>
+          </Stack>
+        )}
+      </Modal>
       <div className="composer-wrap">
         <Paper withBorder className="composer" p="md">
           <Textarea

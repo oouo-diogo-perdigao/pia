@@ -23,7 +23,7 @@ def save_camera(result):
     return "![Foto da câmera](/api/pia/chat/assets/" + name + ")"
 
 
-def allowed_tools(text):
+def allowed_tools(text, history=None):
     plain = (
         unicodedata.normalize("NFKD", text.lower()).encode("ascii", "ignore").decode()
     )
@@ -35,6 +35,15 @@ def allowed_tools(text):
         tools.update(("pia_accounts", "pia_resources"))
     if re.search(r"\b(codex|agy|antigravity)\b", plain):
         tools.add("pia_delegate")
+    if re.search(r"\b(print|screenshot|captura de tela|capture a tela|tela)\b", plain):
+        tools.add("pia_screenshot")
+    if re.search(
+        r"\b(bucket|buckets|s3|r2|sessao|sessoes|rpg|transcricao|transcricoes|campanha|origem|destructo|destructor|arquivo|arquivos)\b",
+        plain,
+    ):
+        tools.update(("pia_storage_list", "pia_storage_get", "pia_rpg_sessions"))
+    if re.search(r"\b(musica|musicas|cancao|cancoes|suno|song|music|melodia)\b", plain):
+        tools.add("pia_music")
     return tools
 
 
@@ -86,16 +95,6 @@ class ChatTools:
             from .tool_registry import call
 
             return save_camera(call("pia_camera", {}))
-        if re.search(
-            r"\b(gere|gerar|crie|criar|componha|compor)\b", plain
-        ) and re.search(r"\b(musica|cancao|song|music)\b", plain):
-            from Plugins.Apps.music.service import generate
-
-            result = generate(
-                text,
-                provider="gemini" if "gemini" in plain or "lyria" in plain else "local",
-            )
-            return f"[Música gerada]({result['audio_url']})"
         if not image_intent(text):
             return None
         return self.generate_image(text)

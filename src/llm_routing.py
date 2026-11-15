@@ -119,9 +119,19 @@ def select_models(expression=None, models=None):
     if not isinstance(expression, str) or not expression.strip():
         raise ValueError("O modelo/seletor LLM deve ser texto não vazio.")
     expression = expression.strip()
-    # Legacy public aliases continue to use the configured default policy.
-    if expression in ("my-agent", "gemini-local"):
+    # Legacy public aliases and "auto" continue to use the configured default policy.
+    if expression in ("my-agent", "gemini-local", "auto"):
         expression = config.LLM_MODEL
+    if ":" in expression and not expression.startswith(("+", "-")):
+        prov, _, mod = expression.partition(":")
+        colon_matches = [
+            m
+            for m in models
+            if m.provider == prov and m.model in (mod, f"{prov}/{mod}")
+        ]
+        if colon_matches:
+            return tuple(dict.fromkeys(colon_matches))
+        expression = f"{prov}/{mod}"
     # Exact IDs can contain '-' and '+', so resolve them before parsing selectors.
     exact = [m for m in models if expression == m.model]
     if exact:
@@ -161,3 +171,45 @@ def select_models(expression=None, models=None):
         position = match.end()
         first = False
     return tuple(m for m in models if m in selected)
+
+
+def available_chat_models():
+    """Return selectable chat models with availability flags for the UI selector."""
+    entries = []
+    seen = set()
+    entries.append(
+        {
+            "id": "auto",
+            "label": "Automático (padrão PIA)",
+            "provider": "auto",
+            "model": config.LLM_MODEL,
+            "tier": "auto",
+            "available": True,
+        }
+    )
+    for item in catalog():
+        key = (item.provider, item.model)
+        if key in seen:
+            continue
+        seen.add(key)
+        is_avail = item.params() is not None
+        short_name = (
+            item.model.split("/", 1)[1]
+            if item.model.startswith(item.provider + "/")
+            else item.model
+        )
+        entries.append(
+            {
+                "id": item.model,
+                "label": f"{item.provider}: {short_name}",
+                "provider": item.provider,
+                "model": short_name,
+                "tier": item.tier,
+                "available": is_avail,
+            }
+        )
+    return {
+        "default": config.LLM_MODEL,
+        "selected": "auto",
+        "models": entries,
+    }
