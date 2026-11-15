@@ -23,34 +23,40 @@ from .local_catalog import (
 logger = logging.getLogger(__name__)
 
 _MODEL_ID = "supertonic-3"
-_HF_BASE = "https://huggingface.co/Supertone/supertonic/resolve/main"
+_HF_BASE = "https://huggingface.co/Supertone/supertonic-2/resolve/main"
 _SUPERTONIC_VOICES = [
-    {"id": "M1", "name": "Masculino 1 (M1)", "lang": "multi", "gender": "male"},
-    {"id": "M2", "name": "Masculino 2 (M2)", "lang": "multi", "gender": "male"},
-    {"id": "F1", "name": "Feminino 1 (F1)", "lang": "multi", "gender": "female"},
-    {"id": "F2", "name": "Feminino 2 (F2)", "lang": "multi", "gender": "female"},
+    {"id": "F1", "name": "Voz feminina 1", "lang": "multi", "gender": "female"},
+    {"id": "F2", "name": "Voz feminina 2", "lang": "multi", "gender": "female"},
+    {"id": "F3", "name": "Voz feminina 3", "lang": "multi", "gender": "female"},
+    {"id": "F4", "name": "Voz feminina 4", "lang": "multi", "gender": "female"},
+    {"id": "F5", "name": "Voz feminina 5", "lang": "multi", "gender": "female"},
+    {"id": "M1", "name": "Voz masculina 1", "lang": "multi", "gender": "male"},
+    {"id": "M2", "name": "Voz masculina 2", "lang": "multi", "gender": "male"},
+    {"id": "M3", "name": "Voz masculina 3", "lang": "multi", "gender": "male"},
+    {"id": "M4", "name": "Voz masculina 4", "lang": "multi", "gender": "male"},
+    {"id": "M5", "name": "Voz masculina 5", "lang": "multi", "gender": "male"},
 ]
 _VALID_VOICE_IDS = {v["id"] for v in _SUPERTONIC_VOICES}
 _ARTIFACTS = [
     {
         "filename": "tts.json",
         "url": f"{_HF_BASE}/onnx/tts.json",
-        "size_bytes": 8_645,
+        "size_bytes": 8_699,
     },
     {
         "filename": "unicode_indexer.json",
         "url": f"{_HF_BASE}/onnx/unicode_indexer.json",
-        "size_bytes": 262_134,
+        "size_bytes": 262_196,
     },
     {
         "filename": "duration_predictor.onnx",
         "url": f"{_HF_BASE}/onnx/duration_predictor.onnx",
-        "size_bytes": 1_500_789,
+        "size_bytes": 1_521_526,
     },
     {
         "filename": "text_encoder.onnx",
         "url": f"{_HF_BASE}/onnx/text_encoder.onnx",
-        "size_bytes": 27_348_373,
+        "size_bytes": 27_431_318,
     },
     {
         "filename": "vector_estimator.onnx",
@@ -68,7 +74,7 @@ _ARTIFACTS = [
             "url": f"{_HF_BASE}/voice_styles/{vid}.json",
             "size_bytes": 420_000,
         }
-        for vid in ("M1", "M2", "F1", "F2")
+        for vid in ("F1", "F2", "F3", "F4", "F5", "M1", "M2", "M3", "M4", "M5")
     ],
 ]
 _CORE_FILES = (
@@ -96,21 +102,23 @@ def _encode_wav_int16(samples: Any, sample_rate: int) -> bytes:
     return buf.getvalue()
 
 
-def _text_to_ids(text: str, indexer: list[int]) -> list[int]:
+def _text_to_ids(
+    text: str,
+    indexer: list[int],
+    *,
+    lang: str = "pt",
+    multilingual: bool = True,
+) -> list[int]:
+    clean = unicodedata.normalize("NFC", (text or "").strip())
+    if multilingual and clean and not (clean.startswith("<") and "</" in clean):
+        clean = f"<{lang}>{clean}</{lang}>"
+    decomposed = unicodedata.normalize("NFKD", clean)
     ids: list[int] = []
     n_idx = len(indexer)
-    for ch in text:
+    for ch in decomposed:
         code = ord(ch)
         if code < n_idx and indexer[code] >= 0:
             ids.append(int(indexer[code]))
-            continue
-        decomposed = unicodedata.normalize("NFKD", ch)
-        for sub in decomposed:
-            if unicodedata.combining(sub):
-                continue
-            sc = ord(sub)
-            if sc < n_idx and indexer[sc] >= 0:
-                ids.append(int(indexer[sc]))
     if not ids:
         space_id = (
             indexer[ord(" ")] if ord(" ") < n_idx and indexer[ord(" ")] >= 0 else 0
@@ -149,7 +157,7 @@ class _SupertonicRuntime:
     def get_style(self, voice_id: str) -> tuple[Any, Any]:
         import numpy as np
 
-        vid = voice_id if voice_id in _VALID_VOICE_IDS else "M1"
+        vid = voice_id if voice_id in _VALID_VOICE_IDS else "F1"
         with self._lock:
             if vid in self._styles:
                 return self._styles[vid]
@@ -178,7 +186,8 @@ class _SupertonicRuntime:
     ) -> bytes:
         import numpy as np
 
-        ids = _text_to_ids(text, self.indexer)
+        multilingual = self.cfg.get("split") == "opensource-multilingual"
+        ids = _text_to_ids(text, self.indexer, lang="pt", multilingual=multilingual)
         text_ids = np.array([ids], dtype=np.int64)
         text_mask = np.ones((1, 1, len(ids)), dtype=np.float32)
         style_dp, style_ttl = self.get_style(voice_id)
@@ -250,7 +259,7 @@ class Supertonic3Provider(TTSProvider):
     id = "supertonic3"
     name = "Supertonic 3 (local)"
     kind = "local"
-    description = "Supertonic ONNX · Síntese neural ultrarrápida offline"
+    description = "Lê as respostas em voz alta neste computador, em 31 idiomas"
 
     def models(self) -> list[dict[str, Any]]:
         return [
@@ -345,7 +354,7 @@ class Supertonic3Provider(TTSProvider):
         runtime = _get_runtime(base_dir)
         wav_bytes = runtime.synthesize_wav(
             text=text,
-            voice_id=voice or "M1",
+            voice_id=voice or "F1",
             speed=float(speed),
         )
         if fmt != "wav":

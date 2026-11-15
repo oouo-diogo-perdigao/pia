@@ -655,19 +655,20 @@ def test_supertonic3_onnx_pipeline_synthesizes_wav(api, tmp_path, monkeypatch):
     (model_root / "tts.json").write_text(
         json.dumps(
             {
+                "split": "opensource-multilingual",
                 "ae": {"sample_rate": 44100, "base_chunk_size": 512},
                 "ttl": {"chunk_compress_factor": 6, "latent_dim": 24},
             }
         ),
         encoding="utf-8",
     )
-    indexer = [-1] * 256
-    for i, ch in enumerate(" OlasouePIAeminhvz,."):
+    indexer = [-1] * 1000
+    for i, ch in enumerate(" OlasouePIAeminhvz,.<>pt/\u0301"):
         indexer[ord(ch)] = i
     (model_root / "unicode_indexer.json").write_text(
         json.dumps(indexer), encoding="utf-8"
     )
-    (model_root / "voice_styles" / "M1.json").write_text(
+    (model_root / "voice_styles" / "F1.json").write_text(
         json.dumps(
             {
                 "style_dp": {"dims": [1, 8, 16], "data": [0.1] * (8 * 16)},
@@ -722,7 +723,7 @@ def test_supertonic3_onnx_pipeline_synthesizes_wav(api, tmp_path, monkeypatch):
             "profile": {
                 "provider": "supertonic3",
                 "model": "supertonic-3",
-                "voice": "M1",
+                "voice": "F1",
                 "speed": 1.0,
             },
         },
@@ -761,3 +762,22 @@ def test_supertonic3_onnx_pipeline_synthesizes_wav(api, tmp_path, monkeypatch):
         "vector_estimator.onnx",
         "vocoder.onnx",
     ]
+
+    voices = supertonic3.Supertonic3Provider().list_voices()
+    assert [(v["id"], v["name"]) for v in voices] == [
+        ("F1", "Voz feminina 1"),
+        ("F2", "Voz feminina 2"),
+        ("F3", "Voz feminina 3"),
+        ("F4", "Voz feminina 4"),
+        ("F5", "Voz feminina 5"),
+        ("M1", "Voz masculina 1"),
+        ("M2", "Voz masculina 2"),
+        ("M3", "Voz masculina 3"),
+        ("M4", "Voz masculina 4"),
+        ("M5", "Voz masculina 5"),
+    ]
+    ids = supertonic3._text_to_ids("Olá!", indexer, lang="pt", multilingual=True)
+    # <pt>Ola\u0301</pt> -> '<' '>' 'p' 't' '/' and combining acute '\u0301' preserved
+    assert indexer[ord("\u0301")] in ids
+    assert indexer[ord("<")] in ids
+    assert indexer[ord(">")] in ids
