@@ -1,5 +1,17 @@
 # PIA Changelog
 
+## [Hotfix de integração — Bots e painéis] - 2026-11-15
+
+### Fixed
+- Import de Anchor nas Configurações e recuperação do ErrorBoundary para voltar à navegação após uma falha.
+- Registro explícito e normalização de IDs de plugins para abrir os painéis nativos sem iframes duplicados em Música, Podcast Automation, Captura de Tela e Object Storage.
+- Rotas `/bots/<id>`, `/bots/<id>/` e `/bots/<id>/index.html` com fallback para o workspace; `/apps/<id>` resolve `index.html` por padrão.
+- Despacho de consultas GET dos domínios plugins, skills, apps, bots e music, incluindo detalhes e status de plugins.
+
+### Added
+- Chat direto nas telas de Secretária e Bots, com `POST /api/pia/bots/chat` e suporte a `bot_id`/`agent_id` e `system_prompt` no envio de chat.
+- Testes de integração de rotas de bots/plugins e helpers do chat direto; bundle do workspace reconstruído no hotfix.
+
 ## [Nova Arquitetura Modular — Fases 0 a 8] - 2026-11-15
 
 ### Added
