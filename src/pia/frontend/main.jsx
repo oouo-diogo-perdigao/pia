@@ -36,11 +36,55 @@ class Boundary extends React.Component {
   componentDidCatch(error) {
     report(error);
   }
+  recoverToHash = (target) => {
+    try {
+      location.hash = "#" + encodeURIComponent(JSON.stringify(target));
+    } catch {
+      location.hash = "";
+    }
+    this.setState({ error: null });
+  };
+  recoverBack = () => {
+    try {
+      if (window.history.length > 1) {
+        window.history.back();
+      } else {
+        location.hash =
+          "#" + encodeURIComponent(JSON.stringify({ view: "chat" }));
+      }
+    } catch {
+      location.hash = "";
+    }
+    this.setState({ error: null });
+  };
   render() {
     return this.state.error ? (
-      <div style={{ padding: 30 }}>
-        <Text c="red">{this.state.error.message}</Text>
-        <Button onClick={() => location.reload()}>Recarregar</Button>
+      <div style={{ padding: 30, maxWidth: 640 }}>
+        <Stack gap="md">
+          <Text fw={700} size="lg" c="red">
+            Ocorreu um erro inesperado na tela
+          </Text>
+          <Text c="red" size="sm">
+            {this.state.error.message}
+          </Text>
+          <Group gap="sm" wrap="wrap">
+            <Button onClick={() => this.recoverToHash({ view: "chat" })}>
+              Voltar ao Chat
+            </Button>
+            <Button variant="light" onClick={this.recoverBack}>
+              Voltar à tela anterior
+            </Button>
+            <Button
+              variant="subtle"
+              onClick={() => {
+                this.setState({ error: null });
+                location.reload();
+              }}
+            >
+              Recarregar
+            </Button>
+          </Group>
+        </Stack>
       </div>
     ) : (
       this.props.children

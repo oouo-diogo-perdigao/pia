@@ -1,10 +1,13 @@
 """Atalhos: conversão de teclas e registro no GNOME, sem servidor e sem teclado."""
+
 import importlib.util
 from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("hotkeys_under_test", ROOT / "src/hotkeys.py")
+spec = importlib.util.spec_from_file_location(
+    "hotkeys_under_test", ROOT / "src/hotkeys.py"
+)
 hotkeys = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hotkeys)
 
@@ -36,7 +39,9 @@ class ShortcutFormatTests(unittest.TestCase):
         self.assertEqual(config["shortcuts"]["speak"]["linux"], "")
 
     def test_server_without_scheme_gets_http(self):
-        self.assertEqual(hotkeys.normalize_server("127.0.0.1:8762"), "http://127.0.0.1:8762")
+        self.assertEqual(
+            hotkeys.normalize_server("127.0.0.1:8762"), "http://127.0.0.1:8762"
+        )
 
 
 class GnomeRegistrationTests(unittest.TestCase):

@@ -84,7 +84,7 @@ def merge_srt(first_file, second_file, output_file):
         start = from_ms(subtitle["start"])
         end = from_ms(subtitle["end"])
 
-        blocks.append(f"{index}\n" f"{start} --> {end}\n" f"{subtitle['text']}")
+        blocks.append(f"{index}\n{start} --> {end}\n{subtitle['text']}")
 
     output = "\n\n".join(blocks) + "\n"
 

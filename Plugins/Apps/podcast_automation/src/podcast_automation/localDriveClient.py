@@ -45,7 +45,11 @@ class LocalDriveClient:
             return {}
         with path.open(encoding="utf-8") as stream:
             value = json.load(stream)
-        return value if isinstance(value, dict) and value.get("source") == "pia-server-discord" else {}
+        return (
+            value
+            if isinstance(value, dict) and value.get("source") == "pia-server-discord"
+            else {}
+        )
 
     def download_file(self, file: dict) -> Path:
         """

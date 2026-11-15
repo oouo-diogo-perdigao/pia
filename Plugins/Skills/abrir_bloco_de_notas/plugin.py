@@ -2,5 +2,5 @@ import subprocess
 
 
 def execute(piaClose):
-    subprocess.Popen(['notepad.exe'])
+    subprocess.Popen(["notepad.exe"])
     piaClose()

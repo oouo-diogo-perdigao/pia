@@ -5,16 +5,16 @@ import os
 import re
 import time
 import requests
-from src.app_access import current,headers
+from src.app_access import current, headers
 
 
 class PiaClient:
     def __init__(self):
-        context=current()
-        self.base_url=context['url'].rstrip('/')+'/v1'
-        self.model=context['model']
-        self.headers={'Content-Type':'application/json',**headers()}
-        self.timeout=float(context.get('timeout',3600))
+        context = current()
+        self.base_url = context["url"].rstrip("/") + "/v1"
+        self.model = context["model"]
+        self.headers = {"Content-Type": "application/json", **headers()}
+        self.timeout = float(context.get("timeout", 3600))
 
     def complete_json(self, prompt, fields, attempts=3):
         payload = {
@@ -39,16 +39,20 @@ class PiaClient:
                     timeout=self.timeout,
                 )
                 if response.status_code >= 400:
-                    detail = ''
+                    detail = ""
                     try:
-                        message = response.json().get('error', {}).get('message')
+                        message = response.json().get("error", {}).get("message")
                         if isinstance(message, str):
                             # Não imprime corpo completo; oculta a chave e URLs.
-                            key = self.headers.get('Authorization', '').removeprefix('Bearer ')
+                            key = self.headers.get("Authorization", "").removeprefix(
+                                "Bearer "
+                            )
                             if key:
-                                message = message.replace(key, '[chave omitida]')
-                            message = re.sub(r'https?://[^\s]+', '[URL omitida]', message)
-                            detail = ' ' + message[:1000]
+                                message = message.replace(key, "[chave omitida]")
+                            message = re.sub(
+                                r"https?://[^\s]+", "[URL omitida]", message
+                            )
+                            detail = " " + message[:1000]
                     except (ValueError, AttributeError):
                         pass
                     raise RuntimeError(

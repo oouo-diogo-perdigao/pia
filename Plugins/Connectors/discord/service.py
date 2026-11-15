@@ -1,4 +1,5 @@
 """Discord REST integration and local publication-channel binding."""
+
 from datetime import datetime, timezone
 import json
 import logging
@@ -14,7 +15,7 @@ from src.resource_plugins import save_json
 from Plugins.Connectors.pia_server.remote import managed, runtime
 
 ROOT = Path(__file__).resolve().parent
-API = 'https://discord.com/api/v10'
+API = "https://discord.com/api/v10"
 _lock = threading.RLock()
 
 
@@ -22,26 +23,42 @@ class Discord:
     def __init__(self, root=ROOT, session=None, log_path=None):
         self.root = Path(root)
         self.session = session or requests.Session()
-        self.log_path = Path(log_path or (ROOT.parents[2] / 'logs/discord.log' if self.root == ROOT else self.root / 'discord.log'))
+        self.log_path = Path(
+            log_path
+            or (
+                ROOT.parents[2] / "logs/discord.log"
+                if self.root == ROOT
+                else self.root / "discord.log"
+            )
+        )
 
     def config(self):
-        if managed():return runtime('discord')['settings']
-        return values('Connectors/discord')
+        if managed():
+            return runtime("discord")["settings"]
+        return values("Connectors/discord")
 
     def clean(self, text):
         text = str(text)
         for key, value in self.config().items():
-            if value and any(part in key for part in ('TOKEN', 'SECRET')):
-                text = text.replace(value, '[REDACTED]')
+            if value and any(part in key for part in ("TOKEN", "SECRET")):
+                text = text.replace(value, "[REDACTED]")
         return text
 
     def log(self, text, error=False):
         with _lock:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
-            logger = logging.getLogger('pia.discord.' + str(self.log_path.resolve()))
+            logger = logging.getLogger("pia.discord." + str(self.log_path.resolve()))
             if not logger.handlers:
-                handler = RotatingFileHandler(self.log_path, maxBytes=1_000_000, backupCount=2, encoding='utf-8', delay=True)
-                handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+                handler = RotatingFileHandler(
+                    self.log_path,
+                    maxBytes=1_000_000,
+                    backupCount=2,
+                    encoding="utf-8",
+                    delay=True,
+                )
+                handler.setFormatter(
+                    logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+                )
                 logger.addHandler(handler)
                 logger.setLevel(logging.INFO)
                 logger.propagate = False
@@ -52,26 +69,32 @@ class Discord:
 
     def logs(self):
         if not self.log_path.exists():
-            return ''
-        with self.log_path.open('rb') as stream:
+            return ""
+        with self.log_path.open("rb") as stream:
             stream.seek(max(0, self.log_path.stat().st_size - 32000))
-            return self.clean(stream.read().decode('utf-8', errors='replace'))
+            return self.clean(stream.read().decode("utf-8", errors="replace"))
 
     def request(self, method, path, **kwargs):
-        token = self.config().get('DISCORD_BOT_TOKEN')
+        token = self.config().get("DISCORD_BOT_TOKEN")
         if not token:
-            raise ValueError('Configure o token do bot Discord e salve as variáveis.')
+            raise ValueError("Configure o token do bot Discord e salve as variáveis.")
         try:
-            response = getattr(self.session, method.lower())(API + path,
-                headers={'Authorization': 'Bot ' + token}, timeout=30, **kwargs)
+            response = getattr(self.session, method.lower())(
+                API + path,
+                headers={"Authorization": "Bot " + token},
+                timeout=30,
+                **kwargs,
+            )
             try:
                 if response.status_code >= 400:
                     try:
                         data = response.json()
                     except ValueError:
-                        data = {'message': response.text[:4000]}
+                        data = {"message": response.text[:4000]}
                     detail = self.clean(json.dumps(data, ensure_ascii=False))[:5000]
-                    raise RuntimeError(f'Discord {method} {path}: HTTP {response.status_code} · {detail}')
+                    raise RuntimeError(
+                        f"Discord {method} {path}: HTTP {response.status_code} · {detail}"
+                    )
                 return response.json() if response.status_code != 204 else {}
             finally:
                 response.close()
@@ -82,125 +105,216 @@ class Discord:
 
     def public(self):
         value = self.config()
-        return {'id': value.get('DISCORD_BOT_ID', ''), 'invite_url': value.get('DISCORD_BOT_URL', ''),
-                'community_url': value.get('DISCORD_LINK', ''), 'configured': bool(value.get('DISCORD_BOT_TOKEN')),
-                'channel': value.get('DISCORD_CHANNEL_ID', ''), 'linked': self.binding(),
-                'link_enabled': value.get('DISCORD_LINK_ENABLED', 'false') == 'true'}
+        return {
+            "id": value.get("DISCORD_BOT_ID", ""),
+            "invite_url": value.get("DISCORD_BOT_URL", ""),
+            "community_url": value.get("DISCORD_LINK", ""),
+            "configured": bool(value.get("DISCORD_BOT_TOKEN")),
+            "channel": value.get("DISCORD_CHANNEL_ID", ""),
+            "linked": self.binding(),
+            "link_enabled": value.get("DISCORD_LINK_ENABLED", "false") == "true",
+        }
 
-    def send(self, text, channel=None,mentions=None):
-        channel = channel or self.config().get('DISCORD_CHANNEL_ID')
-        if not channel or not re.fullmatch('[0-9]+', str(channel)):
-            raise ValueError('Configure o canal do Discord para notificações ou use /link no canal desejado.')
-        allowed={'parse': []}
+    def send(self, text, channel=None, mentions=None):
+        channel = channel or self.config().get("DISCORD_CHANNEL_ID")
+        if not channel or not re.fullmatch("[0-9]+", str(channel)):
+            raise ValueError(
+                "Configure o canal do Discord para notificações ou use /link no canal desejado."
+            )
+        allowed = {"parse": []}
         if mentions:
-            if not isinstance(mentions,list) or len(mentions)>100 or any(not isinstance(value,str) or not re.fullmatch(r'[0-9]{1,20}',value) for value in mentions):
-                raise ValueError('IDs de menção inválidos.')
-            allowed['users']=list(dict.fromkeys(mentions))
-        result = self.request('POST', '/channels/' + str(channel) + '/messages',
-            json={'content': str(text)[:2000], 'allowed_mentions': allowed})
-        self.log(f'Mensagem enviada: canal={channel}, mensagem={result["id"]}.')
-        return {'id': result['id'], 'channel': str(channel)}
+            if (
+                not isinstance(mentions, list)
+                or len(mentions) > 100
+                or any(
+                    not isinstance(value, str)
+                    or not re.fullmatch(r"[0-9]{1,20}", value)
+                    for value in mentions
+                )
+            ):
+                raise ValueError("IDs de menção inválidos.")
+            allowed["users"] = list(dict.fromkeys(mentions))
+        result = self.request(
+            "POST",
+            "/channels/" + str(channel) + "/messages",
+            json={"content": str(text)[:2000], "allowed_mentions": allowed},
+        )
+        self.log(f"Mensagem enviada: canal={channel}, mensagem={result['id']}.")
+        return {"id": result["id"], "channel": str(channel)}
 
     def diagnose(self, channel=None):
-        user = self.request('GET', '/users/@me')
-        app = self.request('GET', '/oauth2/applications/@me')
-        configured = self.config().get('DISCORD_BOT_ID')
-        if not user.get('bot') or (configured and configured != app['id']):
-            raise ValueError('DISCORD_BOT_ID não corresponde à aplicação do token informado.')
-        result = {'id': app['id'], 'name': app.get('name', user.get('username', '')),
-                  'interactions_endpoint': bool(app.get('interactions_endpoint_url'))}
-        channel = channel or self.config().get('DISCORD_CHANNEL_ID')
+        user = self.request("GET", "/users/@me")
+        app = self.request("GET", "/oauth2/applications/@me")
+        configured = self.config().get("DISCORD_BOT_ID")
+        if not user.get("bot") or (configured and configured != app["id"]):
+            raise ValueError(
+                "DISCORD_BOT_ID não corresponde à aplicação do token informado."
+            )
+        result = {
+            "id": app["id"],
+            "name": app.get("name", user.get("username", "")),
+            "interactions_endpoint": bool(app.get("interactions_endpoint_url")),
+        }
+        channel = channel or self.config().get("DISCORD_CHANNEL_ID")
         if channel:
-            if not re.fullmatch('[0-9]+', str(channel)):
-                raise ValueError('ID do canal inválido.')
-            info = self.request('GET', '/channels/' + str(channel))
-            result['channel'] = {'id': info['id'], 'name': info.get('name', ''), 'guild': info.get('guild_id', '')}
-        self.log(f'Diagnóstico OK: bot={app["id"]}. Token válido; nenhuma mensagem enviada.')
+            if not re.fullmatch("[0-9]+", str(channel)):
+                raise ValueError("ID do canal inválido.")
+            info = self.request("GET", "/channels/" + str(channel))
+            result["channel"] = {
+                "id": info["id"],
+                "name": info.get("name", ""),
+                "guild": info.get("guild_id", ""),
+            }
+        self.log(
+            f"Diagnóstico OK: bot={app['id']}. Token válido; nenhuma mensagem enviada."
+        )
         return result
 
     def register_link(self):
         # A stale channel must not prevent repairing it via /link.
-        app = self.request('GET', '/oauth2/applications/@me')
-        configured = self.config().get('DISCORD_BOT_ID')
-        if configured and configured != app['id']:
-            raise ValueError('DISCORD_BOT_ID não corresponde à aplicação do token informado.')
-        if app.get('interactions_endpoint_url'):
-            raise ValueError('O bot usa um Interactions Endpoint URL. Remova esse endpoint no Developer Portal para receber /link pela PIA local. Nenhum endpoint foi alterado automaticamente.')
-        result = self.request('POST', '/applications/' + app['id'] + '/commands', json={
-            'name': 'link', 'description': 'Vincula este canal às publicações da PIA local e informa o ID.',
-            'type': 1, 'default_member_permissions': '8', 'contexts': [0], 'integration_types': [0]})
-        self.log(f'Comando /link registrado/atualizado: aplicação={app["id"]}, comando={result["id"]}, apenas administradores.')
-        return {'id': result['id'], 'application': app['id'], 'name': 'link'}
+        app = self.request("GET", "/oauth2/applications/@me")
+        configured = self.config().get("DISCORD_BOT_ID")
+        if configured and configured != app["id"]:
+            raise ValueError(
+                "DISCORD_BOT_ID não corresponde à aplicação do token informado."
+            )
+        if app.get("interactions_endpoint_url"):
+            raise ValueError(
+                "O bot usa um Interactions Endpoint URL. Remova esse endpoint no Developer Portal para receber /link pela PIA local. Nenhum endpoint foi alterado automaticamente."
+            )
+        result = self.request(
+            "POST",
+            "/applications/" + app["id"] + "/commands",
+            json={
+                "name": "link",
+                "description": "Vincula este canal às publicações da PIA local e informa o ID.",
+                "type": 1,
+                "default_member_permissions": "8",
+                "contexts": [0],
+                "integration_types": [0],
+            },
+        )
+        self.log(
+            f"Comando /link registrado/atualizado: aplicação={app['id']}, comando={result['id']}, apenas administradores."
+        )
+        return {"id": result["id"], "application": app["id"], "name": "link"}
 
     def enable(self, enabled):
         if not isinstance(enabled, bool):
-            raise ValueError('Estado do listener inválido.')
+            raise ValueError("Estado do listener inválido.")
         with _lock:
-            self.set_value('DISCORD_LINK_ENABLED', str(enabled).lower(), preferred='DISCORD_LINK_ENABLED__BOOL')
+            self.set_value(
+                "DISCORD_LINK_ENABLED",
+                str(enabled).lower(),
+                preferred="DISCORD_LINK_ENABLED__BOOL",
+            )
 
     def set_value(self, name, value, preferred=None):
         """Respect an existing explicit type and remove legacy aliases that could shadow it."""
-        kind=split_key(preferred)[1] if preferred else 'string'
-        get_store().save('Connectors/discord',{name:str(value)},{name:kind})
+        kind = split_key(preferred)[1] if preferred else "string"
+        get_store().save("Connectors/discord", {name: str(value)}, {name: kind})
 
     def binding(self):
-        return document('Connectors/discord',{}).get('linked',{})
+        return document("Connectors/discord", {}).get("linked", {})
 
     def link(self, *, guild, channel, user, permissions, app_permissions, application):
         """Called only by the authenticated Gateway, never exposed as HTTP input."""
         value = self.config()
-        if value.get('DISCORD_LINK_ENABLED', 'false') != 'true':
-            raise PermissionError('O comando /link está desativado nesta PIA.')
+        if value.get("DISCORD_LINK_ENABLED", "false") != "true":
+            raise PermissionError("O comando /link está desativado nesta PIA.")
         if not guild or not (int(permissions) & 8):
-            raise PermissionError('Somente administradores do servidor podem usar /link. Mensagens diretas não são aceitas.')
+            raise PermissionError(
+                "Somente administradores do servidor podem usar /link. Mensagens diretas não são aceitas."
+            )
         for identity in (guild, channel, user, application):
-            if not re.fullmatch('[0-9]+', str(identity)):
-                raise ValueError('Identificador do Discord inválido.')
-        if value.get('DISCORD_BOT_ID') and str(application) != value['DISCORD_BOT_ID']:
-            raise PermissionError('Aplicação do Discord inválida.')
-        admins = [s for s in re.split(r'[\s,;]+', value.get('DISCORD_ADMIN_USER_IDS', '').strip()) if s]
+            if not re.fullmatch("[0-9]+", str(identity)):
+                raise ValueError("Identificador do Discord inválido.")
+        if value.get("DISCORD_BOT_ID") and str(application) != value["DISCORD_BOT_ID"]:
+            raise PermissionError("Aplicação do Discord inválida.")
+        admins = [
+            s
+            for s in re.split(
+                r"[\s,;]+", value.get("DISCORD_ADMIN_USER_IDS", "").strip()
+            )
+            if s
+        ]
         if admins and str(user) not in admins:
-            raise PermissionError('Este administrador não está na lista DISCORD_ADMIN_USER_IDS da PIA.')
+            raise PermissionError(
+                "Este administrador não está na lista DISCORD_ADMIN_USER_IDS da PIA."
+            )
         app_permissions = int(app_permissions)
         if not (app_permissions & 8) and (app_permissions & 3072) != 3072:
-            raise PermissionError('O bot precisa de Ver canal e Enviar mensagens neste canal.')
+            raise PermissionError(
+                "O bot precisa de Ver canal e Enviar mensagens neste canal."
+            )
         with _lock:
             linked = self.binding()
-            restricted = value.get('DISCORD_GUILD_ID') or linked.get('guild')
+            restricted = value.get("DISCORD_GUILD_ID") or linked.get("guild")
             if restricted and str(guild) != str(restricted):
-                raise PermissionError('Esta PIA está vinculada a outro servidor. Remova o vínculo nas configurações locais primeiro.')
-            info = self.request('GET', '/channels/' + str(channel))
-            if str(info.get('guild_id')) != str(guild) or info.get('type') not in (0, 5):
-                raise ValueError('Use /link em um canal de texto ou anúncios do servidor.')
-            guild_info=self.request('GET','/guilds/'+str(guild))
-            self.set_value('DISCORD_CHANNEL_ID', str(channel))
-            file = self.root / 'config.json'
-            data = document('Connectors/discord',{})
-            channels=data.get('channels',[]) or ([data['linked']] if data.get('linked') else [])
-            data['linked'] = dict(guild=str(guild), channel=str(channel), name=info.get('name', ''),
-                                  user=str(user), at=datetime.now(timezone.utc).isoformat())
-            data['linked']['guild_name']=guild_info.get('name',str(guild))
-            channels=[{**item,'guild_name':item.get('guild_name') or guild_info.get('name',str(guild))} for item in channels]
-            data['channels']=[c for c in channels if c['channel']!=str(channel)]+[data['linked'].copy()]
-            save_document('Connectors/discord', data)
-        self.log(f'/link concluído: servidor={guild}, canal={channel}, administrador={user}.')
-        return {'channel': str(channel), 'text': f'Canal vinculado à PIA local.\nDISCORD_CHANNEL_ID={channel}\nO valor já foi salvo nas configurações da PIA. Publicações com um canal específico no Podcast Automation continuam usando esse canal; deixe-o vazio para usar o padrão.'}
+                raise PermissionError(
+                    "Esta PIA está vinculada a outro servidor. Remova o vínculo nas configurações locais primeiro."
+                )
+            info = self.request("GET", "/channels/" + str(channel))
+            if str(info.get("guild_id")) != str(guild) or info.get("type") not in (
+                0,
+                5,
+            ):
+                raise ValueError(
+                    "Use /link em um canal de texto ou anúncios do servidor."
+                )
+            guild_info = self.request("GET", "/guilds/" + str(guild))
+            self.set_value("DISCORD_CHANNEL_ID", str(channel))
+            data = document("Connectors/discord", {})
+            channels = data.get("channels", []) or (
+                [data["linked"]] if data.get("linked") else []
+            )
+            data["linked"] = dict(
+                guild=str(guild),
+                channel=str(channel),
+                name=info.get("name", ""),
+                user=str(user),
+                at=datetime.now(timezone.utc).isoformat(),
+            )
+            data["linked"]["guild_name"] = guild_info.get("name", str(guild))
+            channels = [
+                {
+                    **item,
+                    "guild_name": item.get("guild_name")
+                    or guild_info.get("name", str(guild)),
+                }
+                for item in channels
+            ]
+            data["channels"] = [c for c in channels if c["channel"] != str(channel)] + [
+                data["linked"].copy()
+            ]
+            save_document("Connectors/discord", data)
+        self.log(
+            f"/link concluído: servidor={guild}, canal={channel}, administrador={user}."
+        )
+        return {
+            "channel": str(channel),
+            "text": f"Canal vinculado à PIA local.\nDISCORD_CHANNEL_ID={channel}\nO valor já foi salvo nas configurações da PIA. Publicações com um canal específico no Podcast Automation continuam usando esse canal; deixe-o vazio para usar o padrão.",
+        }
 
     def channels(self):
-        data=runtime('discord')['config'] if managed() else document('Connectors/discord',{})
-        rows=data.get('channels',[])
-        if not rows and data.get('linked'):rows=[data['linked']]
-        default=self.config().get('DISCORD_CHANNEL_ID')
-        if default and not any(row.get('channel')==default for row in rows):
-            rows=[*rows, {'guild':'Discord','channel':default,'name':default}]
+        data = (
+            runtime("discord")["config"]
+            if managed()
+            else document("Connectors/discord", {})
+        )
+        rows = data.get("channels", [])
+        if not rows and data.get("linked"):
+            rows = [data["linked"]]
+        default = self.config().get("DISCORD_CHANNEL_ID")
+        if default and not any(row.get("channel") == default for row in rows):
+            rows = [*rows, {"guild": "Discord", "channel": default, "name": default}]
         return rows
 
     def unlink(self):
         with _lock:
-            file = self.root / 'config.json'
-            data = document('Connectors/discord',{})
-            data.pop('linked', None)
-            save_document('Connectors/discord', data)
-            self.set_value('DISCORD_CHANNEL_ID', '')
-        self.log('Vínculo de publicação removido na interface local.')
-        return {'ok': True}
+            data = document("Connectors/discord", {})
+            data.pop("linked", None)
+            save_document("Connectors/discord", data)
+            self.set_value("DISCORD_CHANNEL_ID", "")
+        self.log("Vínculo de publicação removido na interface local.")
+        return {"ok": True}

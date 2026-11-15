@@ -7,3 +7,6 @@ icon = "screen"
 entrypoint = "index.html"
 api = "web_api.py"
 native = "native.py"
+
+[tools]
+module = "tools.py"

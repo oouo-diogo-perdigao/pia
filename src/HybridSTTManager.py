@@ -10,7 +10,7 @@ import threading
 import time
 import wave
 
-from src.stt_recovery import recover_segments,find_repetition
+from src.stt_recovery import recover_segments, find_repetition
 from .transcription import timed_result
 from .STTManager import STTManager as LocalSTTManager, SATState
 from .config import (
@@ -178,15 +178,21 @@ class STTManager(LocalSTTManager):
         language = self._normalize_language(language)
         errors: list[str] = []
 
-        providers=('local',) if local_model else tuple(dict.fromkeys((*self.providers,'local')))
+        providers = (
+            ("local",)
+            if local_model
+            else tuple(dict.fromkeys((*self.providers, "local")))
+        )
         for provider in providers:
             if not self._provider_available(provider):
                 continue
 
-            if provider == 'groq' and len(audio_bytes) > int(setting('STT_GROQ_MAX_UPLOAD_BYTES', '25000000')):
-                reason = f'groq: arquivo de {len(audio_bytes)} bytes excede o limite local de upload; pulando sem enviar'
+            if provider == "groq" and len(audio_bytes) > int(
+                setting("STT_GROQ_MAX_UPLOAD_BYTES", "25000000")
+            ):
+                reason = f"groq: arquivo de {len(audio_bytes)} bytes excede o limite local de upload; pulando sem enviar"
                 errors.append(reason)
-                logging.info('[STT] %s', reason)
+                logging.info("[STT] %s", reason)
                 continue
 
             if require_timestamps and provider == "gemini":
@@ -194,27 +200,49 @@ class STTManager(LocalSTTManager):
                 continue
 
             if provider == "local":
-                if progress:progress(dict(state='preparing',label='Preparando Whisper '+(local_model or 'local'),percent=0,provider='local'))
+                if progress:
+                    progress(
+                        dict(
+                            state="preparing",
+                            label="Preparando Whisper " + (local_model or "local"),
+                            percent=0,
+                            provider="local",
+                        )
+                    )
                 self.active_provider = "local"
                 self._force_local_worker = True
                 try:
-                    logger_stt.info('[STT_PROGRESS] {"state":"preparing","processed":0,"duration":0,"percent":0}')
+                    logger_stt.info(
+                        '[STT_PROGRESS] {"state":"preparing","processed":0,"duration":0,"percent":0}'
+                    )
                     result = super().transcribe_request(
                         audio_bytes,
                         language=language,
                         prompt=prompt,
                         temperature=temperature,
-                        **(dict(local_model=local_model,progress=progress,request_timeout=request_timeout) if local_model or progress or request_timeout else {}),
+                        **(
+                            dict(
+                                local_model=local_model,
+                                progress=progress,
+                                request_timeout=request_timeout,
+                            )
+                            if local_model or progress or request_timeout
+                            else {}
+                        ),
                     )
                     if result.get("ok"):
                         result["provider"] = "local"
                         if require_timestamps:
                             result = timed_result(result)
                         return result
-                    logger_stt.info('[STT_PROGRESS] {"state":"error","processed":0,"duration":0,"percent":0}')
+                    logger_stt.info(
+                        '[STT_PROGRESS] {"state":"error","processed":0,"duration":0,"percent":0}'
+                    )
                     errors.append("local: " + str(result.get("error")))
                 except Exception as exc:
-                    logger_stt.info('[STT_PROGRESS] {"state":"error","processed":0,"duration":0,"percent":0}')
+                    logger_stt.info(
+                        '[STT_PROGRESS] {"state":"error","processed":0,"duration":0,"percent":0}'
+                    )
                     errors.append(f"local: {exc}")
                 finally:
                     self._force_local_worker = False
@@ -224,21 +252,34 @@ class STTManager(LocalSTTManager):
                 self.active_provider = provider
                 if provider == "groq":
                     result = self._transcribe_groq_litellm(
-                        audio_bytes, language=language, prompt=prompt,
+                        audio_bytes,
+                        language=language,
+                        prompt=prompt,
                         return_metadata=True,
                     )
                 else:
-                    result = {"text": self._transcribe_remote(
-                        provider, audio_bytes, language=language, prompt=prompt)}
+                    result = {
+                        "text": self._transcribe_remote(
+                            provider, audio_bytes, language=language, prompt=prompt
+                        )
+                    }
                 if isinstance(result, str):
                     result = {"text": result}
-                if provider=='groq' and isinstance(result.get('segments'),list):
-                    result=self._recover_groq_result(audio_bytes,result,language=language,prompt=prompt)
+                if provider == "groq" and isinstance(result.get("segments"), list):
+                    result = self._recover_groq_result(
+                        audio_bytes, result, language=language, prompt=prompt
+                    )
                 if require_timestamps:
                     result = timed_result(result)
                 text = result.get("text")
-                if text and not isinstance(result.get('segments'),list) and find_repetition([{'text':text}]):
-                    raise RemoteSTTUnavailable('Repetição suspeita sem timestamps; tentando outro provider.')
+                if (
+                    text
+                    and not isinstance(result.get("segments"), list)
+                    and find_repetition([{"text": text}])
+                ):
+                    raise RemoteSTTUnavailable(
+                        "Repetição suspeita sem timestamps; tentando outro provider."
+                    )
                 if text:
                     logger_stt.info(text)
                 return {
@@ -256,13 +297,17 @@ class STTManager(LocalSTTManager):
         self.active_provider = None
         return {
             "ok": False,
-            "error": ("Não foi possível obter timestamps reais. " if require_timestamps else
-                      "Todos os providers STT falharam. ") + " | ".join(errors),
+            "error": (
+                "Não foi possível obter timestamps reais. "
+                if require_timestamps
+                else "Todos os providers STT falharam. "
+            )
+            + " | ".join(errors),
         }
 
     def get_status_payload(self) -> dict:
         payload = super().get_status_payload()
-        next_provider = self._next_available_provider()
+        self._next_available_provider()
         payload.update(
             {
                 # Campos antigos preservados para clientes existentes.
@@ -377,27 +422,56 @@ class STTManager(LocalSTTManager):
 
         return ""
 
-    def _recover_groq_result(self,audio_bytes,result,*,language=None,prompt=None):
-        timed_result(result)  # Validate before regenerating text; missing timestamps are not silence.
-        samples=None
-        def retry(start,end,attempt):
+    def _recover_groq_result(self, audio_bytes, result, *, language=None, prompt=None):
+        timed_result(
+            result
+        )  # Validate before regenerating text; missing timestamps are not silence.
+        samples = None
+
+        def retry(start, end, attempt):
             nonlocal samples
             if samples is None:
                 from faster_whisper.audio import decode_audio
-                samples=decode_audio(io.BytesIO(audio_bytes),sampling_rate=16000)
-            first=max(0,round(start*16000));last=min(len(samples),round(end*16000))
-            if last<=first:raise RemoteSTTUnavailable('Trecho de recuperação vazio.')
-            buffer=io.BytesIO()
-            with wave.open(buffer,'wb') as output:
-                output.setnchannels(1);output.setsampwidth(2);output.setframerate(16000)
-                output.writeframes((samples[first:last].clip(-1,1)*32767).astype('<i2').tobytes())
-            response=self._transcribe_groq_litellm(buffer.getvalue(),language=language,prompt=prompt,return_metadata=True,temperature=min(.6,(attempt-1)*.2))
+
+                samples = decode_audio(io.BytesIO(audio_bytes), sampling_rate=16000)
+            first = max(0, round(start * 16000))
+            last = min(len(samples), round(end * 16000))
+            if last <= first:
+                raise RemoteSTTUnavailable("Trecho de recuperação vazio.")
+            buffer = io.BytesIO()
+            with wave.open(buffer, "wb") as output:
+                output.setnchannels(1)
+                output.setsampwidth(2)
+                output.setframerate(16000)
+                output.writeframes(
+                    (samples[first:last].clip(-1, 1) * 32767).astype("<i2").tobytes()
+                )
+            response = self._transcribe_groq_litellm(
+                buffer.getvalue(),
+                language=language,
+                prompt=prompt,
+                return_metadata=True,
+                temperature=min(0.6, (attempt - 1) * 0.2),
+            )
             timed_result(response)
-            return {'segments':response['segments'],'offset':first/16000}
-        def report(state,processed,duration):
-            logger_stt.info('[STT_RECOVERY] provider=groq state=%s processed=%.3f duration=%.3f',state,processed,duration)
-        segments=recover_segments(result['segments'],float(result['duration']),retry,report=report)
-        return {**result,'segments':segments,'text':' '.join(s['text'] for s in segments)}
+            return {"segments": response["segments"], "offset": first / 16000}
+
+        def report(state, processed, duration):
+            logger_stt.info(
+                "[STT_RECOVERY] provider=groq state=%s processed=%.3f duration=%.3f",
+                state,
+                processed,
+                duration,
+            )
+
+        segments = recover_segments(
+            result["segments"], float(result["duration"]), retry, report=report
+        )
+        return {
+            **result,
+            "segments": segments,
+            "text": " ".join(s["text"] for s in segments),
+        }
 
     def _transcribe_groq_litellm(
         self,
@@ -408,8 +482,10 @@ class STTManager(LocalSTTManager):
         return_metadata: bool = False,
         temperature: float | None = None,
     ) -> str | dict:
-        if len(audio_bytes) > int(setting('STT_GROQ_MAX_UPLOAD_BYTES', '25000000')):
-            raise RemoteSTTUnavailable('Arquivo excede o limite de 25 MB para upload ao Groq.')
+        if len(audio_bytes) > int(setting("STT_GROQ_MAX_UPLOAD_BYTES", "25000000")):
+            raise RemoteSTTUnavailable(
+                "Arquivo excede o limite de 25 MB para upload ao Groq."
+            )
         if not GROQ_API_KEY:
             raise RemoteSTTUnavailable("GROQ_API_KEY não configurada.")
 
@@ -430,7 +506,7 @@ class STTManager(LocalSTTManager):
                     "api_key": GROQ_API_KEY,
                 }
                 if temperature is not None:
-                    kwargs["temperature"]=temperature
+                    kwargs["temperature"] = temperature
                 if return_metadata:
                     kwargs["response_format"] = "verbose_json"
                 if language:
@@ -444,10 +520,14 @@ class STTManager(LocalSTTManager):
                 # Decode the uploaded file to measure its full duration, including trailing silence.
                 # Never infer duration from the last speech segment.
                 from faster_whisper.audio import decode_audio
+
                 samples = decode_audio(io.BytesIO(audio_bytes), sampling_rate=16000)
-                return {"text": str(data.get("text") or "").strip(),
-                        "segments": data.get("segments"), "duration": len(samples) / 16000,
-                        "language": data.get("language") or language or "auto"}
+                return {
+                    "text": str(data.get("text") or "").strip(),
+                    "segments": data.get("segments"),
+                    "duration": len(samples) / 16000,
+                    "language": data.get("language") or language or "auto",
+                }
             return str(data.get("text") or "").strip()
         finally:
             try:

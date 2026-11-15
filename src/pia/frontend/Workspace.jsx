@@ -3,7 +3,6 @@ import NotificationMenu, { CountBadge } from "./NotificationMenu";
 import Notifications from "./Notifications";
 import MediaPlayer from "./MediaPlayer";
 import { Bell } from "lucide-react";
-import Music from "../../../Plugins/Apps/music/web/Panel.jsx";
 import { Music2 } from "lucide-react";
 import { notify } from "./toasts";
 import Connectors, { connectors } from "./Connectors";
@@ -51,6 +50,8 @@ import {
   ChevronDown,
   ChevronRight,
   LogOut,
+  Puzzle,
+  Sparkles,
   UserRound,
 } from "lucide-react";
 import { api, session, safe, report } from "./api";
@@ -59,10 +60,12 @@ import { ScreenHistory } from "./navigation";
 import Chat from "./Chat";
 import SettingsPanel from "./Settings";
 import ServerLogin from "./ServerLogin";
-import Podcast from "../../../Plugins/Apps/podcast_automation/web/Panel.jsx";
-import Screenshots from "../../../Plugins/Apps/screenshots/web/Panel.jsx";
-import Storage from "../../../Plugins/Apps/object_storage/web/Panel.jsx";
-import Secretary from "../../../Plugins/Bot/secretaria/web/Panel.jsx";
+import PluginHost from "./features/plugins/PluginHost";
+import { resolvePluginPanel } from "./plugins/registry";
+
+const openbotExports = resolvePluginPanel("openbot")?.exports || {};
+const BotRunPanel = openbotExports.BotRunPanel;
+const SafeSvgAvatar = openbotExports.SafeSvgAvatar;
 const appIcons = {
   podcast_automation: AudioLines,
   music: Music2,
@@ -70,13 +73,19 @@ const appIcons = {
   object_storage: HardDrive,
 };
 function normalizeRoute(route) {
-  if (route.view === "connectors" || (route.view === "settings" &&
-      (["accounts", "connectors"].includes(route.section) || route.section?.startsWith("Connectors/")))) {
+  if (
+    route.view === "connectors" ||
+    (route.view === "settings" &&
+      (["accounts", "connectors"].includes(route.section) ||
+        route.section?.startsWith("Connectors/")))
+  ) {
     const connector = route.connector || route.section?.split("/")[1];
     return {
       view: "settings",
       section: "connectors",
-      connector: connectors.some((item) => item.id === connector) ? connector : "pia_server",
+      connector: connectors.some((item) => item.id === connector)
+        ? connector
+        : "pia_server",
     };
   }
   return route;
@@ -232,7 +241,9 @@ export default function Workspace({ standalone = null }) {
           .then((value) => {
             if (
               active &&
-              ((value.profile_revision && value.profile_revision !== latestState.current.notifications?.profile_revision) ||
+              ((value.profile_revision &&
+                value.profile_revision !==
+                  latestState.current.notifications?.profile_revision) ||
                 Object.keys(value.chat_counts || {}).some(
                   (id) =>
                     !latestState.current.chats.some((chat) => chat.id === id),
@@ -313,7 +324,13 @@ export default function Workspace({ standalone = null }) {
               ? " / Conectores / " +
                 (connectors.find((item) => item.id === route.connector)?.name ||
                   "Google")
-              : "")
+              : route.section === "mcp"
+                ? " / Conectores MCP"
+                : route.section === "plugins"
+                  ? " / Plugins"
+                  : route.section === "skills"
+                    ? " / Skills"
+                    : "")
           : route.view === "connectors"
             ? "Conectores / " +
               (connectors.find((c) => c.id === route.connector)?.name ||
@@ -489,23 +506,25 @@ export default function Workspace({ standalone = null }) {
     ) : route.view === "bots" ? (
       !route.bot ? (
         <Bots />
-      ) : route.bot === "secretaria" ? (
-        <Secretary />
+      ) : currentBot?.kind === "dynamic" && BotRunPanel ? (
+        <BotRunPanel botId={currentBot.id} />
       ) : (
-        <iframe title={currentBot?.name || "Bot"} src={currentBot?.url} />
+        <PluginHost
+          pluginId={route.bot}
+          fallbackUrl={currentBot?.url}
+          title={currentBot?.name || "Bot"}
+        />
       )
-    ) : route.app === "music" ? (
-      <Music sub={route.sub} />
-    ) : route.app === "podcast_automation" ? (
-      <Podcast sub={route.sub} />
-    ) : route.app === "screenshots" ? (
-      <Screenshots sub={route.sub} />
-    ) : route.app === "object_storage" ? (
-      <Storage sub={route.sub} />
     ) : (
-      <iframe title={currentApp?.name || "Aplicativo"} src={currentApp?.url} />
+      <PluginHost
+        pluginId={route.app}
+        props={{ sub: route.sub }}
+        fallbackUrl={currentApp?.url}
+        title={currentApp?.name || "Aplicativo"}
+      />
     );
-  if (account && !account.authenticated) return <ServerLogin server={account.server} />;
+  if (account && !account.authenticated)
+    return <ServerLogin server={account.server} />;
   if (!ready)
     return (
       <>
@@ -694,21 +713,39 @@ export default function Workspace({ standalone = null }) {
                 {!standalone && account?.authenticated && (
                   <Menu position="right-end" shadow="md">
                     <Menu.Target>
-                      <ActionIcon variant="subtle" size={38} aria-label="Minha conta" title={account.email || "Minha conta"}>
+                      <ActionIcon
+                        variant="subtle"
+                        size={38}
+                        aria-label="Minha conta"
+                        title={account.email || "Minha conta"}
+                      >
                         {account.email ? (
-                          <AccountAvatar size={30} color="violet" src={account.picture || null}
-                            alt="" imageProps={{ referrerPolicy: "no-referrer" }}>
+                          <AccountAvatar
+                            size={30}
+                            color="violet"
+                            src={account.picture || null}
+                            alt=""
+                            imageProps={{ referrerPolicy: "no-referrer" }}
+                          >
                             {account.email[0].toUpperCase()}
                           </AccountAvatar>
-                        ) : <UserRound size={19} />}
+                        ) : (
+                          <UserRound size={19} />
+                        )}
                       </ActionIcon>
                     </Menu.Target>
                     <Menu.Dropdown>
                       <Menu.Label>{account.email || "Minha conta"}</Menu.Label>
-                      <Menu.Item color="red" leftSection={<LogOut size={16} />} onClick={safe(async () => {
-                        await api("/integrations/pia_server/logout", {});
-                        location.reload();
-                      })}>Sair</Menu.Item>
+                      <Menu.Item
+                        color="red"
+                        leftSection={<LogOut size={16} />}
+                        onClick={safe(async () => {
+                          await api("/integrations/pia_server/logout", {});
+                          location.reload();
+                        })}
+                      >
+                        Sair
+                      </Menu.Item>
                     </Menu.Dropdown>
                   </Menu>
                 )}
@@ -744,6 +781,18 @@ export default function Workspace({ standalone = null }) {
                         radius="xl"
                         color="violet"
                         onClick={() => newChat()}
+                      />
+                    )}
+                    {route.view === "bots" && (
+                      <Icon
+                        icon={Plus}
+                        label="Criar Bot Dinâmico"
+                        variant="filled"
+                        radius="xl"
+                        color="violet"
+                        onClick={() =>
+                          navigate({ view: "bots", create: Date.now() })
+                        }
                       />
                     )}
                     <Icon
@@ -930,12 +979,35 @@ export default function Workspace({ standalone = null }) {
                       </div>
                     )}
                     <Nav
+                      active={
+                        route.section === "mcp" ||
+                        (route.section === "connectors" &&
+                          route.connector === "mcp")
+                      }
+                      onClick={() =>
+                        navigate({ view: "settings", section: "mcp" })
+                      }
+                    >
+                      <Plug size={15} />
+                      {t("Conectores MCP")}
+                    </Nav>
+                    <Nav
                       active={route.section === "plugins"}
                       onClick={() =>
                         navigate({ view: "settings", section: "plugins" })
                       }
                     >
-                      {t("Configurações dos plugins")}
+                      <Puzzle size={15} />
+                      {t("Plugins")}
+                    </Nav>
+                    <Nav
+                      active={route.section === "skills"}
+                      onClick={() =>
+                        navigate({ view: "settings", section: "skills" })
+                      }
+                    >
+                      <Sparkles size={15} />
+                      {t("Skills")}
                     </Nav>
                     <Nav
                       active={route.section === "documents"}
@@ -990,6 +1062,13 @@ export default function Workspace({ standalone = null }) {
                           >
                             {bot.id === "secretaria" ? (
                               <Avatar />
+                            ) : bot.kind === "dynamic" && SafeSvgAvatar ? (
+                              <SafeSvgAvatar
+                                src={bot.avatar_url || bot.avatar}
+                                colors={bot.avatar_colors}
+                                size={18}
+                                alt={bot.name}
+                              />
                             ) : (
                               <Bot size={18} />
                             )}{" "}
@@ -1060,6 +1139,16 @@ export default function Workspace({ standalone = null }) {
                   {route.view === "bots" && route.bot === "secretaria" && (
                     <Avatar />
                   )}
+                  {route.view === "bots" &&
+                    currentBot?.kind === "dynamic" &&
+                    SafeSvgAvatar && (
+                      <SafeSvgAvatar
+                        src={currentBot.avatar_url || currentBot.avatar}
+                        colors={currentBot.avatar_colors}
+                        size={24}
+                        alt={currentBot.name}
+                      />
+                    )}
                   {title}
                 </Text>
               </Group>
@@ -1069,7 +1158,8 @@ export default function Workspace({ standalone = null }) {
                     ? currentApp?.info
                     : route.view === "connectors"
                       ? connectors.find(
-                          (item) => item.id === (route.connector || "pia_server"),
+                          (item) =>
+                            item.id === (route.connector || "pia_server"),
                         )?.info
                       : route.view === "chat"
                         ? t("Converse com a PIA ou dê um comando.")

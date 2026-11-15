@@ -29,7 +29,7 @@ from pathlib import Path
 import yaml
 
 from src.config_paths import BASE_DIR, CONFIG_DIR
-from src.settings_store import get as setting,document
+from src.settings_store import get as setting, document
 
 PROJECT_DIR = BASE_DIR
 LOG_FILE = PROJECT_DIR / "logs" / "hotkeys.log"
@@ -40,7 +40,14 @@ GNOME_SCHEMA = "org.gnome.settings-daemon.plugins.media-keys"
 GNOME_PATH_ROOT = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings"
 GNOME_BINDING_SCHEMA = f"{GNOME_SCHEMA}.custom-keybinding"
 
-ACTIONS = ("voice", "dictation", "speak", "storytelling", "screenshot", "screenshot_window")
+ACTIONS = (
+    "voice",
+    "dictation",
+    "speak",
+    "storytelling",
+    "screenshot",
+    "screenshot_window",
+)
 ACTION_LABELS = {
     "screenshot": "PIA: captura de região",
     "screenshot_window": "PIA: captura de janela ativa",
@@ -130,8 +137,9 @@ def load_config(path: Path | None = None) -> dict:
             raise ValueError(f"{source} precisa ser um mapa YAML.")
         raw = loaded
     if path is None:
-        text=document("main/shortcuts.yaml")
-        if text is not None:raw=yaml.safe_load(text) or {}
+        text = document("main/shortcuts.yaml")
+        if text is not None:
+            raw = yaml.safe_load(text) or {}
 
     shortcuts_raw = raw.get("shortcuts") or {}
     if not isinstance(shortcuts_raw, dict):
@@ -141,15 +149,23 @@ def load_config(path: Path | None = None) -> dict:
     for name, fallback in DEFAULT_SHORTCUTS.items():
         item = shortcuts_raw.get(name) or {}
         if not isinstance(item, dict):
-            raise ValueError(f"O atalho '{name}' precisa ser um mapa com windows e linux.")
+            raise ValueError(
+                f"O atalho '{name}' precisa ser um mapa com windows e linux."
+            )
         shortcuts[name] = {
             "windows": _shortcut_value(item, "windows", fallback["windows"]),
             "linux": _shortcut_value(item, "linux", fallback["linux"]),
         }
 
-    server = str(raw.get("server") or setting("PUBLIC_BASE_URL") or "http://127.0.0.1:8762")
+    server = str(
+        raw.get("server") or setting("PUBLIC_BASE_URL") or "http://127.0.0.1:8762"
+    )
     voice = str(raw.get("voice") or setting("TTS_DEFAULT_VOICE") or "pm_santa")
-    speed = float(raw.get("speed") if raw.get("speed") is not None else setting("TTS_DEFAULT_SPEED") or 0.95)
+    speed = float(
+        raw.get("speed")
+        if raw.get("speed") is not None
+        else setting("TTS_DEFAULT_SPEED") or 0.95
+    )
     return {
         "server": normalize_server(server),
         "voice": voice,
@@ -175,7 +191,9 @@ def split_shortcut(shortcut: str) -> tuple[list[str], str]:
 def to_gnome(shortcut: str) -> str:
     modifiers, key = split_shortcut(shortcut)
     tokens = [f"<{GNOME_MODIFIERS[item]}>" for item in modifiers]
-    tokens.append("Print" if key == "print_screen" else key if len(key) == 1 else key.capitalize())
+    tokens.append(
+        "Print" if key == "print_screen" else key if len(key) == 1 else key.capitalize()
+    )
     return "".join(tokens)
 
 
@@ -187,7 +205,9 @@ def to_pynput(shortcut: str) -> str:
 
 
 def normalize_binding(binding: str) -> str:
-    return binding.replace("<Primary>", "<Control>").replace("<Super>", "<Super>").lower()
+    return (
+        binding.replace("<Primary>", "<Control>").replace("<Super>", "<Super>").lower()
+    )
 
 
 def parse_gsettings_list(raw: str) -> list[str]:
@@ -247,9 +267,13 @@ def _gsettings_set(schema: str, key: str, value: str, path: str | None = None) -
 
 def install_gnome(config: dict) -> None:
     if not shutil.which("gsettings"):
-        raise RuntimeError("gsettings não está disponível; não dá para registrar atalhos no GNOME.")
+        raise RuntimeError(
+            "gsettings não está disponível; não dá para registrar atalhos no GNOME."
+        )
 
-    existing = parse_gsettings_list(_gsettings("get", GNOME_SCHEMA, "custom-keybindings"))
+    existing = parse_gsettings_list(
+        _gsettings("get", GNOME_SCHEMA, "custom-keybindings")
+    )
     desktop_bindings = ""
     for schema in (GNOME_SCHEMA, "org.gnome.desktop.wm.keybindings"):
         try:
@@ -332,7 +356,9 @@ def _read_clipboard_tk() -> str:
         root.destroy()
 
 
-def request(method: str, url: str, payload: dict | None = None) -> tuple[int | None, dict]:
+def request(
+    method: str, url: str, payload: dict | None = None
+) -> tuple[int | None, dict]:
     data = None
     headers = {}
     if payload is not None:
@@ -356,19 +382,33 @@ def request(method: str, url: str, payload: dict | None = None) -> tuple[int | N
 
 def run_action(action: str, config: dict) -> None:
     base = config["server"]
-    if action.startswith('screenshot'):
-        local = 'http://localhost:' + str(urlsplit(base).port or 8762)
-        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(CookieJar()))
+    if action.startswith("screenshot"):
+        local = "http://localhost:" + str(urlsplit(base).port or 8762)
+        opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(CookieJar())
+        )
+
         def post(path, value):
-            req = urllib.request.Request(local + '/api/pia/' + path,
-                data=json.dumps(value).encode(), headers={'Content-Type': 'application/json', 'Origin': local})
+            req = urllib.request.Request(
+                local + "/api/pia/" + path,
+                data=json.dumps(value).encode(),
+                headers={"Content-Type": "application/json", "Origin": local},
+            )
             with opener.open(req, timeout=30) as response:
                 return json.loads(response.read())
+
         try:
-            post('session', {})
-            post('apps/screenshots/capture', {'mode': {'screenshot': 'selection', 'screenshot_window': 'window'}[action]})
+            post("session", {})
+            post(
+                "apps/screenshots/capture",
+                {
+                    "mode": {"screenshot": "selection", "screenshot_window": "window"}[
+                        action
+                    ]
+                },
+            )
         except Exception as exc:
-            notify('Não foi possível iniciar a captura: ' + str(exc))
+            notify("Não foi possível iniciar a captura: " + str(exc))
         return
 
     if action == "voice":
@@ -435,45 +475,63 @@ def listen(config: dict) -> None:
     combos = []
     print_actions = {}
     for action in ACTIONS:
-        shortcut = config['shortcuts'][action][system].strip()
+        shortcut = config["shortcuts"][action][system].strip()
         if shortcut:
             combos.append((frozenset(HotKey.parse(to_pynput(shortcut))), action))
             mods, key = split_shortcut(shortcut)
-            if key == 'print_screen' and action.startswith('screenshot'):
-                aliases = {'control': 'ctrl', 'win': 'super', 'meta': 'super'}
+            if key == "print_screen" and action.startswith("screenshot"):
+                aliases = {"control": "ctrl", "win": "super", "meta": "super"}
                 print_actions[frozenset(aliases.get(m, m) for m in mods)] = action
     if not combos:
         return
     held, fired = set(), set()
+
     def press(key):
         held.add(listener.canonical(key))
         for combo, action in combos:
             if held == combo and action not in fired:
                 fired.add(action)
-                threading.Thread(target=run_action, args=(action, config), daemon=True).start()
+                threading.Thread(
+                    target=run_action, args=(action, config), daemon=True
+                ).start()
+
     def release(key):
         held.discard(listener.canonical(key))
         for combo, action in combos:
             if not combo.issubset(held):
                 fired.discard(action)
+
     printing = [False]
+
     def windows_filter(message, data):
         if data.vkCode != 0x2C or not print_actions:
             return True
         import ctypes
-        mods = frozenset(name for name, key in [('ctrl',0x11),('alt',0x12),('shift',0x10),('super',0x5B)]
-                         if ctypes.windll.user32.GetAsyncKeyState(key) & 0x8000)
+
+        mods = frozenset(
+            name
+            for name, key in [
+                ("ctrl", 0x11),
+                ("alt", 0x12),
+                ("shift", 0x10),
+                ("super", 0x5B),
+            ]
+            if ctypes.windll.user32.GetAsyncKeyState(key) & 0x8000
+        )
         action = print_actions.get(mods)
         if message in (0x0100, 0x0104) and action:
             if not printing[0]:
                 printing[0] = True
-                threading.Thread(target=run_action, args=(action, config), daemon=True).start()
+                threading.Thread(
+                    target=run_action, args=(action, config), daemon=True
+                ).start()
             listener.suppress_event()
         elif message in (0x0101, 0x0105) and printing[0]:
             printing[0] = False
             listener.suppress_event()
         return True
-    options = {'win32_event_filter': windows_filter} if system == 'windows' else {}
+
+    options = {"win32_event_filter": windows_filter} if system == "windows" else {}
     listener = Listener(on_press=press, on_release=release, **options)
     with listener:
         listener.join()

@@ -1,4 +1,5 @@
-from src.settings_store import get_store,save_document,document
+from src.settings_store import get_store, save_document, document
+
 """Offline tests: real implementation, mocked desktop/model/provider boundaries.
 
 Run without the desktop dependencies: python -m unittest discover -s tests -p test_transcription.py
@@ -231,49 +232,63 @@ class TimingTests(unittest.TestCase):
         )
 
     def test_large_groq_upload_skips_without_cooldown(self):
-        manager = self.manager(('groq', 'local'))
-        with patch.dict(hybrid.os.environ, {'STT_GROQ_MAX_UPLOAD_BYTES': '25000000'}):
-            with patch.object(local.STTManager, 'transcribe_request', return_value=transcript()):
-                result = manager.transcribe_request(b'x' * 25000001, require_timestamps=True)
-        self.assertEqual(result['provider'], 'local')
+        manager = self.manager(("groq", "local"))
+        with patch.dict(hybrid.os.environ, {"STT_GROQ_MAX_UPLOAD_BYTES": "25000000"}):
+            with patch.object(
+                local.STTManager, "transcribe_request", return_value=transcript()
+            ):
+                result = manager.transcribe_request(
+                    b"x" * 25000001, require_timestamps=True
+                )
+        self.assertEqual(result["provider"], "local")
         manager._transcribe_groq_litellm.assert_not_called()
         manager._disable_provider_temporarily.assert_not_called()
         manager._transcribe_groq_litellm.reset_mock()
-        manager.transcribe_request(b'small', require_timestamps=True)
+        manager.transcribe_request(b"small", require_timestamps=True)
         manager._transcribe_groq_litellm.assert_called_once()
 
     def test_groq_adapter_checks_size_before_import_or_upload(self):
-        with patch.object(hybrid,'setting',return_value='10'):
-            with self.assertRaisesRegex(hybrid.RemoteSTTUnavailable, 'limite'):
-                hybrid.STTManager._transcribe_groq_litellm(self.manager(), b'x' * 11)
+        with patch.object(hybrid, "setting", return_value="10"):
+            with self.assertRaisesRegex(hybrid.RemoteSTTUnavailable, "limite"):
+                hybrid.STTManager._transcribe_groq_litellm(self.manager(), b"x" * 11)
 
     def test_local_progress_finishes_and_reports_original_time(self):
         agent = voice.VoiceAgent.__new__(voice.VoiceAgent)
         agent.model = Mock()
         agent.model.transcribe.return_value = (
-            iter(types.SimpleNamespace(**segment) for segment in transcript()['segments']),
-            types.SimpleNamespace(duration=105, language='pt'),
+            iter(
+                types.SimpleNamespace(**segment) for segment in transcript()["segments"]
+            ),
+            types.SimpleNamespace(duration=105, language="pt"),
         )
         logger = Mock()
-        with patch.object(voice, 'logger_stt', logger), patch.object(voice.time, 'monotonic', side_effect=[0, 1, 2, 3, 4]):
-            agent.transcribe_chunk(b'audio', return_metadata=True)
-        events = [json.loads(call.args[1]) for call in logger.info.call_args_list if call.args[0] == '[STT_PROGRESS] %s']
-        self.assertEqual(events[0]['state'], 'preparing')
-        self.assertEqual(events[-1]['state'], 'completed')
-        self.assertEqual(events[-1]['processed'], 105)
-        self.assertTrue(any(event['processed'] == 94.2 for event in events))
+        with (
+            patch.object(voice, "logger_stt", logger),
+            patch.object(voice.time, "monotonic", side_effect=[0, 1, 2, 3, 4]),
+        ):
+            agent.transcribe_chunk(b"audio", return_metadata=True)
+        events = [
+            json.loads(call.args[1])
+            for call in logger.info.call_args_list
+            if call.args[0] == "[STT_PROGRESS] %s"
+        ]
+        self.assertEqual(events[0]["state"], "preparing")
+        self.assertEqual(events[-1]["state"], "completed")
+        self.assertEqual(events[-1]["processed"], 105)
+        self.assertTrue(any(event["processed"] == 94.2 for event in events))
 
     def test_desktop_progress_partial_lines_and_failure(self):
         from src.stt_progress import STTProgress
+
         progress = STTProgress()
         progress.feed('[STT_PROGRESS] {"state":"transcribing","processed":60,')
-        self.assertEqual(progress.state, 'idle')
+        self.assertEqual(progress.state, "idle")
         progress.feed('"duration":120,"percent":50}\n')
-        self.assertIn('50.0%', progress.label)
+        self.assertIn("50.0%", progress.label)
         progress.feed('[STT_PROGRESS] {"state":"completed"}\n')
         self.assertEqual(progress.percent, 100)
         progress.feed('[STT_PROGRESS] {"state":"error"}\n')
-        self.assertIn('falha', progress.label)
+        self.assertIn("falha", progress.label)
 
 
 class HTTPTests(unittest.TestCase):
@@ -290,28 +305,53 @@ class HTTPTests(unittest.TestCase):
         cls.thread.join()
 
     def test_host_loaded_app_does_not_need_bearer_but_browser_cannot_bypass(self):
-        from src.app_access import issue,revoke
-        context=issue('podcast_automation');token=json.loads(context)['token']
-        body=json.dumps({'input_audio':{'data':base64.b64encode(b'audio').decode(),'format':'wav'},'response_format':'verbose_json'})
+        from src.app_access import issue, revoke
+
+        context = issue("podcast_automation")
+        token = json.loads(context)["token"]
+        body = json.dumps(
+            {
+                "input_audio": {
+                    "data": base64.b64encode(b"audio").decode(),
+                    "format": "wav",
+                },
+                "response_format": "verbose_json",
+            }
+        )
         try:
-            for origin,status in ((None,200),('http://localhost:8762',401)):
-                conn=HTTPConnection(*self.server.server_address,timeout=5)
-                headers={'Content-Type':'application/json','X-PIA-App-Token':token}
-                if origin:headers['Origin']=origin
-                with patch.object(http.STT_MANAGER,'transcribe_request',return_value=transcript()):
-                    conn.request('POST','/v1/audio/transcriptions',body,headers)
-                    response=conn.getresponse();response.read();self.assertEqual(response.status,status)
+            for origin, status in ((None, 200), ("http://localhost:8762", 401)):
+                conn = HTTPConnection(*self.server.server_address, timeout=5)
+                headers = {"Content-Type": "application/json", "X-PIA-App-Token": token}
+                if origin:
+                    headers["Origin"] = origin
+                with patch.object(
+                    http.STT_MANAGER, "transcribe_request", return_value=transcript()
+                ):
+                    conn.request("POST", "/v1/audio/transcriptions", body, headers)
+                    response = conn.getresponse()
+                    response.read()
+                    self.assertEqual(response.status, status)
                 conn.close()
-        finally:revoke(context)
+        finally:
+            revoke(context)
 
     def test_screen_all_plays_capture_feedback(self):
         conn = HTTPConnection(*self.server.server_address, timeout=5)
-        with patch.object(http.LOCAL_ACTIONS,'screenshot_all',return_value=b'png-fixture'), patch.object(http.LOCAL_ACTIONS,'play_audio') as sound:
-            conn.request('GET','/action/screen-all')
+        with (
+            patch.object(
+                http.LOCAL_ACTIONS, "screenshot_all", return_value=b"png-fixture"
+            ),
+            patch.object(http.LOCAL_ACTIONS, "play_audio") as sound,
+        ):
+            conn.request("GET", "/action/screen-all")
             response = conn.getresponse()
-            self.assertEqual(response.status,200)
-            self.assertEqual(response.read(),b'png-fixture')
-            self.assertTrue(sound.call_args.kwargs['path'].replace('\\','/').endswith('/src/sounds/print.mp3'))
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.read(), b"png-fixture")
+            self.assertTrue(
+                sound.call_args.kwargs["path"]
+                .replace("\\", "/")
+                .endswith("/src/sounds/print.mp3")
+            )
         conn.close()
 
     def request(self, fmt, token="local", result=None, multipart=False, chunked=False):
@@ -380,18 +420,18 @@ class HTTPTests(unittest.TestCase):
             self.assertEqual(self.request("verbose_json", multipart=True)[0], 413)
 
     def test_point_intervals_are_compatible_between_verbose_json_and_subtitles(self):
-        value=transcript()
-        value['segments'][0]['end']=value['segments'][0]['start']
-        status,body,_=self.request('verbose_json',result=value)
-        self.assertEqual(status,200)
-        parsed=json.loads(body)
-        self.assertEqual(parsed['segments'][0]['start'],2.25)
-        self.assertAlmostEqual(parsed['segments'][0]['end'],2.27)
-        self.assertEqual(parsed['timestamp_adjustments'][0]['original_end'],2.25)
-        for fmt in ('srt','vtt'):
-            status,body,_=self.request(fmt,result=value)
-            self.assertEqual(status,200)
-            self.assertIn('270',body)
+        value = transcript()
+        value["segments"][0]["end"] = value["segments"][0]["start"]
+        status, body, _ = self.request("verbose_json", result=value)
+        self.assertEqual(status, 200)
+        parsed = json.loads(body)
+        self.assertEqual(parsed["segments"][0]["start"], 2.25)
+        self.assertAlmostEqual(parsed["segments"][0]["end"], 2.27)
+        self.assertEqual(parsed["timestamp_adjustments"][0]["original_end"], 2.25)
+        for fmt in ("srt", "vtt"):
+            status, body, _ = self.request(fmt, result=value)
+            self.assertEqual(status, 200)
+            self.assertIn("270", body)
 
     def test_chunked_multipart(self):
         status, body, _ = self.request("verbose_json", multipart=True, chunked=True)
