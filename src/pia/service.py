@@ -778,6 +778,20 @@ class WorkspaceService:
             from src.tts_service import get_tts_service
 
             return get_tts_service().selection()
+        if path == "/music/providers":
+            from Plugins.Apps.music import service as music_service
+
+            return music_service.providers_catalog()
+        if path == "/music/select" and method == "POST":
+            from Plugins.Apps.music import service as music_service
+
+            return music_service.select_provider(
+                provider=data.get("provider"),
+                gemini_model=data.get("gemini_model"),
+                suno_mcp_url=data.get("suno_mcp_url"),
+                suno_mcp_command=data.get("suno_mcp_command"),
+                suno_mcp_token=data.get("suno_mcp_token"),
+            )
         if path == "/tts/select" and method == "POST":
             from src.tts_service import get_tts_service
 

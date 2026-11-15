@@ -7,11 +7,11 @@ import {
   Group,
   Stack,
   Slider,
-  NumberInput,
   Button,
   Radio,
   Alert,
   Paper,
+  TextInput,
 } from "@mantine/core";
 import { Volume2, RefreshCw } from "lucide-react";
 import { api, watchJob, report, safe } from "./api";
@@ -26,6 +26,12 @@ import {
   buildVoiceSelectGroups,
   ttsPreviewController,
 } from "./tts-helpers";
+import {
+  DEFAULT_TTS_PREVIEW_TEXT,
+  MAX_TTS_PREVIEW_CHARS,
+  formatVoiceOptionLabel,
+  normalizePreviewText,
+} from "./settings-simplification";
 
 export const TTS_UPDATED_EVENT = "pia:tts-updated";
 
@@ -166,6 +172,7 @@ export default function VoiceSelector({
   disabled = false,
   label = "Modelo e voz",
 }) {
+  const [previewPhrase, setPreviewPhrase] = useState(DEFAULT_TTS_PREVIEW_TEXT);
   const safeVal = value && typeof value === "object" ? value : null;
   const { provider, model } = findProviderAndModel(
     catalog,
@@ -222,7 +229,7 @@ export default function VoiceSelector({
           }
           data={voices.map((v) => ({
             value: v.id,
-            label: `${v.name}${v.lang ? ` · ${v.lang}` : ""}`,
+            label: formatVoiceOptionLabel(v),
           }))}
           value={selectedVoice}
           disabled={disabled || !voices.length}
@@ -249,21 +256,44 @@ export default function VoiceSelector({
               previewing ||
               !provider?.id ||
               !selectedVoice ||
-              !model?.available
+              !model?.available ||
+              !previewPhrase.trim()
             }
             onClick={() =>
-              onPreview({
-                provider: provider?.id || safeVal?.provider,
-                model: model?.id || safeVal?.model,
-                voice: selectedVoice,
-                speed,
-              })
+              onPreview(
+                {
+                  provider: provider?.id || safeVal?.provider,
+                  model: model?.id || safeVal?.model,
+                  voice: selectedVoice,
+                  speed,
+                },
+                normalizePreviewText(previewPhrase),
+              )
             }
           >
-            Testar voz
+            Ouvir
           </Button>
         )}
       </Group>
+      {onPreview && (
+        <TextInput
+          size="xs"
+          label="Texto de teste da voz"
+          placeholder={DEFAULT_TTS_PREVIEW_TEXT}
+          maxLength={MAX_TTS_PREVIEW_CHARS}
+          value={previewPhrase}
+          disabled={disabled}
+          onChange={(e) =>
+            setPreviewPhrase(normalizePreviewText(e.currentTarget.value))
+          }
+          rightSectionWidth={52}
+          rightSection={
+            <Text size="xs" c="dimmed">
+              {previewPhrase.length}/{MAX_TTS_PREVIEW_CHARS}
+            </Text>
+          }
+        />
+      )}
       <Stack gap={4}>
         <Group justify="space-between">
           <Text size="sm" fw={500}>
@@ -273,50 +303,28 @@ export default function VoiceSelector({
             {speed.toFixed(2)}×
           </Badge>
         </Group>
-        <Group gap="md" align="center" wrap="nowrap">
-          <Slider
-            style={{ flex: 1 }}
-            aria-label="Velocidade da fala"
-            min={bounds.min}
-            max={bounds.max}
-            step={bounds.step}
-            value={speed}
-            disabled={disabled}
-            marks={[
-              { value: bounds.min, label: `${bounds.min}×` },
-              { value: 1.0, label: "1.0×" },
-              { value: bounds.max, label: `${bounds.max}×` },
-            ]}
-            onChange={(nextSpeed) =>
-              onChange?.({
-                provider: provider?.id || safeVal?.provider || "",
-                model: model?.id || safeVal?.model || "",
-                voice: selectedVoice || "",
-                speed: clampSpeed(nextSpeed, bounds),
-              })
-            }
-          />
-          <NumberInput
-            aria-label="Velocidade numérica"
-            w={90}
-            size="xs"
-            min={bounds.min}
-            max={bounds.max}
-            step={bounds.step}
-            decimalScale={2}
-            value={speed}
-            disabled={disabled}
-            onChange={(val) => {
-              if (val === "" || val === null || val === undefined) return;
-              onChange?.({
-                provider: provider?.id || safeVal?.provider || "",
-                model: model?.id || safeVal?.model || "",
-                voice: selectedVoice || "",
-                speed: clampSpeed(val, bounds),
-              });
-            }}
-          />
-        </Group>
+        <Slider
+          style={{ width: "100%" }}
+          aria-label="Velocidade da fala"
+          min={bounds.min}
+          max={bounds.max}
+          step={bounds.step}
+          value={speed}
+          disabled={disabled}
+          marks={[
+            { value: bounds.min, label: `${bounds.min}×` },
+            { value: 1.0, label: "1.0×" },
+            { value: bounds.max, label: `${bounds.max}×` },
+          ]}
+          onChange={(nextSpeed) =>
+            onChange?.({
+              provider: provider?.id || safeVal?.provider || "",
+              model: model?.id || safeVal?.model || "",
+              voice: selectedVoice || "",
+              speed: clampSpeed(nextSpeed, bounds),
+            })
+          }
+        />
       </Stack>
     </Stack>
   );

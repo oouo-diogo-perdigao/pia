@@ -608,3 +608,46 @@ button:disabled {
   justify-content: flex-start;
   width: 100%;
 }
+.settings-section-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #a6a0b5;
+  margin-bottom: 6px;
+}
+.settings-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+}
+.settings-row + .settings-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.settings-row-info {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.settings-row-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 0 1 auto;
+}
+@media (max-width: 650px) {
+  .settings-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .settings-row-control {
+    justify-content: flex-start;
+    width: 100%;
+  }
+}

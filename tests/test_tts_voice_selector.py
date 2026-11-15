@@ -781,3 +781,56 @@ def test_supertonic3_onnx_pipeline_synthesizes_wav(api, tmp_path, monkeypatch):
     assert indexer[ord("\u0301")] in ids
     assert indexer[ord("<")] in ids
     assert indexer[ord(">")] in ids
+
+
+def test_music_providers_and_selection_persists_without_optional_fields(api):
+    request, port = api
+    origin = f"http://127.0.0.1:{port}"
+    st_s, _, hdrs = request(
+        payload={},
+        path="/api/pia/session",
+        method="POST",
+        headers={"Origin": origin},
+    )
+    assert st_s == 200
+    cookie = (hdrs.get("Set-Cookie") or hdrs.get("set-cookie")).split(";", 1)[0]
+
+    st_cat, cat_data, _ = request(
+        path="/api/pia/music/providers",
+        method="GET",
+        headers={"Cookie": cookie},
+    )
+    assert st_cat == 200
+    ids = [p["id"] for p in cat_data["providers"]]
+    assert ids == ["local", "gemini", "suno_mcp"]
+    assert cat_data["selection"]["provider"] == "local"
+
+    # Seleciona Suno (MCP) sem enviar campos técnicos de local/gemini
+    st_sel, sel_data, _ = request(
+        payload={
+            "provider": "suno_mcp",
+            "suno_mcp_url": "https://suno-mcp.example.com/generate",
+            "suno_mcp_token": "suno-secret-token",
+        },
+        path="/api/pia/music/select",
+        method="POST",
+        headers={"Cookie": cookie, "Origin": origin},
+    )
+    assert st_sel == 200
+    assert sel_data["selection"]["provider"] == "suno_mcp"
+    assert (
+        sel_data["selection"]["suno_mcp_url"] == "https://suno-mcp.example.com/generate"
+    )
+    assert sel_data["selection"]["suno_mcp_token_configured"] is True
+    assert "suno-secret-token" not in json.dumps(sel_data)
+
+    # Seleciona Gemini sem exigir campos de Suno ou local
+    st_gem, gem_data, _ = request(
+        payload={"provider": "gemini", "gemini_model": "lyria-3.5"},
+        path="/api/pia/music/select",
+        method="POST",
+        headers={"Cookie": cookie, "Origin": origin},
+    )
+    assert st_gem == 200
+    assert gem_data["selection"]["provider"] == "gemini"
+    assert gem_data["selection"]["gemini_model"] == "lyria-3.5"

@@ -68,6 +68,101 @@ def settings():
     return section_values("Apps/music")
 
 
+MUSIC_PROVIDERS = ("local", "gemini", "suno_mcp")
+
+
+def providers_catalog():
+    cfg = settings()
+    selected = str(cfg.get("MUSIC_PROVIDER") or "local").strip().lower()
+    if selected not in MUSIC_PROVIDERS:
+        selected = "local"
+    local_installed = (CACHE / "ace-step/.venv").is_dir()
+    from src.config import STT_GEMINI_API_KEY, setting
+
+    gemini_key = bool(
+        setting("GEMINI_API_KEY") or setting("AGE_GEMINI_API_KEY") or STT_GEMINI_API_KEY
+    )
+    suno_url = str(cfg.get("MUSIC_SUNO_MCP_URL") or "").strip()
+    suno_cmd = str(cfg.get("MUSIC_SUNO_MCP_COMMAND") or "").strip()
+    suno_token = bool(str(cfg.get("MUSIC_SUNO_MCP_TOKEN") or "").strip())
+    suno_configured = bool(suno_url or suno_cmd)
+    return {
+        "providers": [
+            {
+                "id": "local",
+                "name": "Criador de músicas local",
+                "kind": "local",
+                "description": "ACE-Step local offline",
+                "installed": local_installed,
+                "available": True,
+            },
+            {
+                "id": "gemini",
+                "name": "Gemini",
+                "kind": "remote",
+                "description": "Geração de música via Gemini (Lyria)",
+                "model": str(cfg.get("MUSIC_GEMINI_MODEL") or "lyria-3.5"),
+                "credential_state": "configured" if gemini_key else "missing",
+                "available": gemini_key,
+            },
+            {
+                "id": "suno_mcp",
+                "name": "Suno (MCP)",
+                "kind": "mcp",
+                "description": "Conexão com servidor MCP do Suno",
+                "url": suno_url,
+                "command": suno_cmd,
+                "credential_state": "configured" if suno_configured else "missing",
+                "token_configured": suno_token,
+                "available": suno_configured,
+            },
+        ],
+        "selection": {
+            "provider": selected,
+            "gemini_model": str(cfg.get("MUSIC_GEMINI_MODEL") or "lyria-3.5"),
+            "suno_mcp_url": suno_url,
+            "suno_mcp_command": suno_cmd,
+            "suno_mcp_token_configured": suno_token,
+        },
+    }
+
+
+def select_provider(
+    *,
+    provider: str | None = None,
+    gemini_model: str | None = None,
+    suno_mcp_url: str | None = None,
+    suno_mcp_command: str | None = None,
+    suno_mcp_token: str | None = None,
+):
+    from src.settings_store import get_store
+
+    updates = {}
+    if provider is not None:
+        norm = str(provider).strip().lower()
+        if norm not in MUSIC_PROVIDERS:
+            raise ValueError(
+                "Provedor de música inválido. Escolha local, gemini ou suno_mcp."
+            )
+        updates["MUSIC_PROVIDER"] = norm
+    if gemini_model is not None and str(gemini_model).strip():
+        updates["MUSIC_GEMINI_MODEL"] = str(gemini_model).strip()
+    if suno_mcp_url is not None:
+        raw_url = str(suno_mcp_url).strip()
+        if raw_url:
+            parsed = urlsplit(raw_url)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                raise ValueError("URL do Suno MCP deve usar http:// ou https://.")
+        updates["MUSIC_SUNO_MCP_URL"] = raw_url
+    if suno_mcp_command is not None:
+        updates["MUSIC_SUNO_MCP_COMMAND"] = str(suno_mcp_command).strip()
+    if suno_mcp_token is not None:
+        updates["MUSIC_SUNO_MCP_TOKEN"] = str(suno_mcp_token).strip()
+    if updates:
+        get_store().save("Apps/music", updates)
+    return providers_catalog()
+
+
 def output_directory():
     return OUTPUT
 
@@ -280,11 +375,13 @@ def library():
 def generate(
     prompt,
     lyrics="",
-    provider="local",
+    provider=None,
     duration=30,
     progress=lambda text: None,
     cancelled=lambda: False,
 ):
+    if provider is None:
+        provider = str(settings().get("MUSIC_PROVIDER") or "local").strip().lower()
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 8000:
         raise ValueError("Descrição obrigatória (até 8000 caracteres).")
     if not isinstance(lyrics, str) or len(lyrics) > 16000:
@@ -295,9 +392,9 @@ def generate(
         or not 10 <= duration <= 180
     ):
         raise ValueError("Duração deve estar entre 10 e 180 segundos.")
-    if provider not in ("local", "gemini"):
+    if provider not in MUSIC_PROVIDERS:
         raise ValueError(
-            "Escolha local ou gemini. Flow Music é usado na interface oficial."
+            "Escolha local, gemini ou suno_mcp. Flow Music é usado na interface oficial."
         )
     if not _generation_lock.acquire(blocking=False):
         raise RuntimeError("Já existe uma geração musical em andamento.")
@@ -375,6 +472,50 @@ def generate(
                 else:
                     raise RuntimeError("O motor musical excedeu 30 minutos.")
                 extension = "mp3"
+            elif provider == "suno_mcp":
+                cfg = settings()
+                suno_url = str(cfg.get("MUSIC_SUNO_MCP_URL") or "").strip()
+                suno_cmd = str(cfg.get("MUSIC_SUNO_MCP_COMMAND") or "").strip()
+                suno_tok = str(cfg.get("MUSIC_SUNO_MCP_TOKEN") or "").strip()
+                if not suno_url and not suno_cmd:
+                    raise RuntimeError(
+                        "Suno (MCP) não configurado: informe a URL ou comando do servidor MCP do Suno."
+                    )
+                if not suno_url:
+                    raise RuntimeError(
+                        "Suno (MCP) via comando stdio requer execução pelo agente MCP; configure uma URL HTTP/HTTPS para geração direta."
+                    )
+                progress("Gerando música via Suno (MCP)…")
+                req_headers = {"Content-Type": "application/json"}
+                if suno_tok:
+                    req_headers["Authorization"] = f"Bearer {suno_tok}"
+                data = _json(
+                    session.post(
+                        suno_url,
+                        headers=req_headers,
+                        json={
+                            "prompt": prompt,
+                            "lyrics": lyrics,
+                            "duration": duration,
+                        },
+                        timeout=300,
+                        allow_redirects=False,
+                    )
+                )
+                if isinstance(data.get("audio_base64"), str):
+                    raw = base64.b64decode(data["audio_base64"], validate=True)
+                    extension = "wav" if data.get("format") == "wav" else "mp3"
+                elif isinstance(data.get("audio_url"), str) and data[
+                    "audio_url"
+                ].startswith(("http://", "https://")):
+                    raw = session.get(
+                        data["audio_url"], timeout=120, allow_redirects=False
+                    ).content
+                    extension = "wav" if data["audio_url"].endswith(".wav") else "mp3"
+                else:
+                    raise RuntimeError(
+                        "Resposta do servidor Suno (MCP) não trouxe áudio."
+                    )
             else:
                 from src.config import STT_GEMINI_API_KEY
 

@@ -1,905 +1,699 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Accordion,
   Alert,
   Badge,
   Button,
   Group,
   Loader,
-  Paper,
   Progress,
-  SegmentedControl,
   Select,
-  SimpleGrid,
+  Slider,
   Stack,
+  Switch,
   Text,
-  Title,
+  TextInput,
 } from "@mantine/core";
 import {
   AlertTriangle,
   Check,
   Download,
   KeyRound,
+  Play,
   RefreshCw,
   Trash2,
-  Volume2,
-  X,
 } from "lucide-react";
-import { api, report, safe, watchJob } from "./api";
-import { notify } from "./toasts";
+import { api, safe } from "./api";
 import { usePia } from "./shared";
-import VoiceSelector, {
+import { notify } from "./toasts";
+import {
   notifyTtsUpdated,
   useTtsCatalog,
   useTtsPreview,
 } from "./VoiceSelector";
 import {
+  clampSpeed,
+  decodeModelKey,
+  encodeModelKey,
   formatBytes,
   formatReferenceLabel,
-  groupProviders,
   mergeInstallJob,
   normalizeInstallJob,
   resolveDraftForModel,
-  resolveLocalModelBadges,
+  speedBounds,
 } from "./tts-helpers";
+import {
+  DEFAULT_TTS_PREVIEW_TEXT,
+  MAX_TTS_PREVIEW_CHARS,
+  formatVoiceOptionLabel,
+  normalizePreviewText,
+} from "./settings-simplification";
 
-function LocalModelCard({
-  provider,
-  model,
-  isDraftSelected,
-  isSavedActive,
-  jobSnapshot,
-  uninstallError,
-  onSelect,
-  onInstall,
-  onCancelInstall,
-  onUninstall,
-}) {
-  const [confirmingUninstall, setConfirmingUninstall] = useState(false);
-  const effectiveJob =
-    normalizeInstallJob(jobSnapshot) ||
-    (model.installation?.state === "installing"
-      ? normalizeInstallJob(model.installation)
-      : null);
-  const {
-    instState,
-    isInstalling,
-    isReady,
-    activeBadge,
-    statusBadge,
-    pendingSelectionBadge,
-  } = resolveLocalModelBadges(model, {
-    isSavedActive,
-    jobSnapshot: effectiveJob,
-  });
-  const percent = effectiveJob?.progress?.percent ?? null;
-  const completedBytes = effectiveJob?.progress?.completed_bytes ?? null;
-  const totalBytes = effectiveJob?.progress?.total_bytes ?? null;
-
-  useEffect(() => {
-    setConfirmingUninstall(false);
-  }, [model.id, isReady]);
-
-  const phaseLabel =
-    effectiveJob?.phase === "verifying"
-      ? "Verificando arquivos do modelo…"
-      : effectiveJob?.phase === "downloading"
-        ? "Baixando arquivos do modelo…"
-        : "Preparando instalação…";
-
+function sameProfile(a, b) {
+  if (!a || !b) return false;
   return (
-    <Paper
-      withBorder
-      p="md"
-      radius="md"
-      style={{
-        borderColor: isDraftSelected
-          ? "var(--mantine-color-violet-6)"
-          : undefined,
-      }}
-    >
-      <Stack gap="xs">
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <div style={{ minWidth: 0 }}>
-            <Group gap="xs" wrap="wrap">
-              <Text fw={600} size="sm">
-                {model.name || provider.name}
-              </Text>
-              {model.size_mb ? (
-                <Text size="xs" c="dimmed">
-                  ~
-                  {model.size_mb >= 1000
-                    ? `${(model.size_mb / 1024).toFixed(1)} GB`
-                    : `${model.size_mb} MB`}
-                </Text>
-              ) : null}
-            </Group>
-            <Text size="xs" c="dimmed">
-              {model.description || provider.description}
-            </Text>
-          </div>
-          <Group gap={6} wrap="wrap" justify="flex-end">
-            {activeBadge && (
-              <Badge
-                color={activeBadge.color}
-                variant={activeBadge.variant}
-                size="sm"
-              >
-                {activeBadge.label}
-              </Badge>
-            )}
-            {pendingSelectionBadge && (
-              <Badge
-                color={pendingSelectionBadge.color}
-                variant={pendingSelectionBadge.variant}
-                size="sm"
-              >
-                {pendingSelectionBadge.label}
-              </Badge>
-            )}
-            <Badge
-              color={statusBadge.color}
-              variant={statusBadge.variant}
-              size="sm"
-              leftSection={statusBadge.loading ? <Loader size={10} /> : null}
-            >
-              {statusBadge.label}
-            </Badge>
-          </Group>
-        </Group>
-
-        {isInstalling && (
-          <Stack gap={4}>
-            <Progress
-              value={percent !== null ? percent : 100}
-              striped={percent === null}
-              animated={percent === null || percent < 100}
-              color="violet"
-              size="sm"
-            />
-            <Group justify="space-between">
-              <Text size="xs" c="dimmed" role="status" aria-live="polite">
-                {phaseLabel}
-                {completedBytes !== null || totalBytes !== null
-                  ? ` (${formatBytes(completedBytes) || "0 B"}${
-                      totalBytes ? ` / ${formatBytes(totalBytes)}` : ""
-                    })`
-                  : ""}
-              </Text>
-              {percent !== null && (
-                <Text size="xs" fw={600}>
-                  {percent.toFixed(0)}%
-                </Text>
-              )}
-            </Group>
-          </Stack>
-        )}
-
-        {instState === "error" &&
-          (effectiveJob?.error?.message || model.installation?.error) && (
-            <Text size="xs" c="red">
-              {effectiveJob?.error?.message || model.installation?.error}
-            </Text>
-          )}
-
-        {uninstallError && (
-          <Alert color="yellow" p="xs" icon={<AlertTriangle size={14} />}>
-            <Text size="xs" fw={500}>
-              {uninstallError.message}
-            </Text>
-            {uninstallError.references?.length > 0 && (
-              <Text size="xs" c="dimmed" mt={2}>
-                Troque antes em:{" "}
-                {uninstallError.references.map(formatReferenceLabel).join(", ")}
-              </Text>
-            )}
-          </Alert>
-        )}
-
-        <Group justify="space-between" wrap="wrap" gap="xs" mt={4}>
-          {isReady ? (
-            <Button
-              size="xs"
-              variant={isDraftSelected ? "filled" : "light"}
-              color="violet"
-              leftSection={isDraftSelected ? <Check size={14} /> : null}
-              onClick={() => onSelect(provider.id, model.id)}
-            >
-              {isDraftSelected ? "Selecionado" : "Usar este modelo"}
-            </Button>
-          ) : isInstalling ? (
-            <Button
-              size="xs"
-              variant="subtle"
-              color="red"
-              leftSection={<X size={14} />}
-              onClick={() =>
-                onCancelInstall(
-                  effectiveJob?.job_id || model.installation?.job_id,
-                )
-              }
-            >
-              Cancelar instalação
-            </Button>
-          ) : (
-            <Button
-              size="xs"
-              variant="light"
-              leftSection={<Download size={14} />}
-              onClick={() => onInstall(provider.id, model.id)}
-            >
-              Instalar
-            </Button>
-          )}
-
-          {isReady &&
-            !isInstalling &&
-            (confirmingUninstall ? (
-              <Group gap={6}>
-                <Text size="xs" c="red">
-                  Remover {model.name || provider.name}?
-                </Text>
-                <Button
-                  size="xs"
-                  color="red"
-                  onClick={() => {
-                    setConfirmingUninstall(false);
-                    onUninstall(provider.id, model.id);
-                  }}
-                >
-                  Confirmar
-                </Button>
-                <Button
-                  size="xs"
-                  variant="subtle"
-                  onClick={() => setConfirmingUninstall(false)}
-                >
-                  Cancelar
-                </Button>
-              </Group>
-            ) : (
-              <Button
-                size="xs"
-                variant="subtle"
-                color="red"
-                leftSection={<Trash2 size={14} />}
-                onClick={() => setConfirmingUninstall(true)}
-              >
-                Desinstalar
-              </Button>
-            ))}
-        </Group>
-      </Stack>
-    </Paper>
+    (a.provider || "") === (b.provider || "") &&
+    (a.model || "") === (b.model || "") &&
+    (a.voice || "") === (b.voice || "") &&
+    Math.abs(Number(a.speed ?? 1) - Number(b.speed ?? 1)) < 0.001
   );
 }
 
-function RemoteProviderCard({
-  provider,
-  draft,
-  savedProfile,
-  onSelect,
-  onOpenVault,
-  onRefreshVoices,
-}) {
-  const configured =
-    provider.credential_state === "configured" || provider.available;
-  const models = provider.models || [];
-  const isDraftProvider = draft?.provider === provider.id;
-  const isSavedProvider = savedProfile?.provider === provider.id;
-
-  return (
-    <Paper
-      withBorder
-      p="md"
-      radius="md"
-      style={{
-        borderColor: isDraftProvider
-          ? "var(--mantine-color-violet-6)"
-          : undefined,
-      }}
-    >
-      <Stack gap="xs">
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <div>
-            <Text fw={600} size="sm">
-              {provider.name}
-            </Text>
-            <Text size="xs" c="dimmed">
-              {provider.description}
-            </Text>
-          </div>
-          <Group gap={6} wrap="wrap" justify="flex-end">
-            {isSavedProvider && configured && (
-              <Badge color="blue" variant="filled" size="sm">
-                Ativo
-              </Badge>
-            )}
-            {isSavedProvider && !configured && (
-              <Badge color="yellow" variant="light" size="sm">
-                Selecionado (requer chave no cofre)
-              </Badge>
-            )}
-            <Badge
-              color={configured ? "green" : "gray"}
-              variant="light"
-              size="sm"
-            >
-              {configured ? "Chave no cofre" : "Sem chave no cofre"}
-            </Badge>
-          </Group>
-        </Group>
-
-        {provider.error && (
-          <Text size="xs" c="red">
-            {provider.error}
-          </Text>
-        )}
-
-        <Group justify="space-between" wrap="wrap" gap="xs">
-          {configured ? (
-            <Group gap="xs">
-              <Button
-                size="xs"
-                variant={isDraftProvider ? "filled" : "light"}
-                color="violet"
-                onClick={() =>
-                  onSelect(
-                    provider.id,
-                    isDraftProvider
-                      ? draft.model
-                      : models[0]?.id || provider.id,
-                  )
-                }
-              >
-                {isDraftProvider ? "Selecionado" : "Usar este modelo"}
-              </Button>
-              {provider.id === "elevenlabs" && (
-                <Button
-                  size="xs"
-                  variant="subtle"
-                  leftSection={<RefreshCw size={13} />}
-                  onClick={() =>
-                    onRefreshVoices(
-                      provider.id,
-                      isDraftProvider ? draft.model : models[0]?.id,
-                    )
-                  }
-                >
-                  Atualizar vozes
-                </Button>
-              )}
-            </Group>
-          ) : (
-            <Button
-              size="xs"
-              variant="light"
-              color="yellow"
-              leftSection={<KeyRound size={14} />}
-              onClick={onOpenVault}
-            >
-              Gerenciar Cofre
-            </Button>
-          )}
-        </Group>
-      </Stack>
-    </Paper>
-  );
-}
-
-export default function TTSSettingsPanel({ ttsFields = [] }) {
-  const { navigate } = usePia();
-  const { providers, selection, revision, warnings, loading, error, refresh } =
+export default function TTSSettingsPanel() {
+  const { navigate, refresh } = usePia();
+  const { catalog, selection, revision, loading, error, reload } =
     useTtsCatalog();
   const { preview, previewing } = useTtsPreview();
 
-  const [draft, setDraft] = useState(null);
-  const [savedProfile, setSavedProfile] = useState(null);
-  const [savedRevision, setSavedRevision] = useState(1);
+  const [draft, setDraft] = useState({
+    provider: "",
+    model: "",
+    voice: "",
+    speed: 1.0,
+  });
+  const [previewText, setPreviewText] = useState(DEFAULT_TTS_PREVIEW_TEXT);
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
-  const [activeJobs, setActiveJobs] = useState({});
+  const [jobs, setJobs] = useState({});
   const [uninstallErrors, setUninstallErrors] = useState({});
-  const watchersRef = useRef({});
-
-  // Advanced settings state (non-voice hardware/timeout fields)
-  const initialAdv = () => {
-    const map = Object.fromEntries(
-      ttsFields.map((f) => [f.name, f.value ?? ""]),
-    );
-    return {
-      TTS_DEVICE: map.TTS_DEVICE || "cuda",
-      TTS_KOKORO_IDLE_TIMEOUT: map.TTS_KOKORO_IDLE_TIMEOUT || "600",
-      TTS_QWEN_IDLE_TIMEOUT: map.TTS_QWEN_IDLE_TIMEOUT || "600",
-      TTS_LLM_MODEL: map.TTS_LLM_MODEL || "free",
-    };
-  };
-  const [adv, setAdv] = useState(initialAdv);
-  const [savedAdv, setSavedAdv] = useState(initialAdv);
-  const [savingAdv, setSavingAdv] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [refreshingVoices, setRefreshingVoices] = useState(false);
+  const [notifSettings, setNotifSettings] = useState({
+    read_aloud: false,
+    muted: [],
+  });
+  const [notifLoaded, setNotifLoaded] = useState(false);
+  const [savingReadAloud, setSavingReadAloud] = useState(false);
+  const pollers = useRef({});
 
   useEffect(() => {
-    const next = initialAdv();
-    setAdv(next);
-    setSavedAdv(next);
-  }, [ttsFields]);
-
-  useEffect(() => {
-    if (!selection) return;
-    setSavedProfile(selection);
-    setSavedRevision(revision);
-    setDraft((prev) => prev || selection);
-  }, [selection, revision]);
-
-  const attachJob = (providerId, modelId, jobId) => {
-    if (!jobId) return;
-    const key = `${providerId}::${modelId}`;
-    if (watchersRef.current[key]) return;
-
-    const cleanup = () => {
-      if (watchersRef.current[key]) {
-        watchersRef.current[key].source?.close();
-        clearInterval(watchersRef.current[key].poll);
-        delete watchersRef.current[key];
-      }
-    };
-
-    const handleSnap = (rawSnap) => {
-      const snap = normalizeInstallJob(rawSnap, jobId);
-      if (!snap) return;
-      setActiveJobs((old) => ({
-        ...old,
-        [key]: mergeInstallJob(old[key], snap),
-      }));
-      if (snap.state === "done" || snap.state === "error") {
-        cleanup();
-        refresh()
-          .catch(() => {})
-          .finally(() => {
-            if (snap.state === "done") {
-              setActiveJobs((old) => {
-                if (old[key]?.job_id !== jobId) return old;
-                const copy = { ...old };
-                delete copy[key];
-                return copy;
-              });
-            }
+    api("/notifications/settings")
+      .then((res) => {
+        if (res && typeof res === "object") {
+          setNotifSettings({
+            read_aloud: Boolean(res.read_aloud),
+            muted: Array.isArray(res.muted) ? res.muted : [],
           });
-        notifyTtsUpdated();
-        if (snap.state === "done") {
-          notify(`Modelo ${modelId} instalado com sucesso.`);
         }
-      }
-    };
-
-    const source = watchJob(jobId, (ev) => {
-      if (ev.type === "progress" || ev.type === "done" || ev.type === "error") {
-        handleSnap(ev);
-      }
-    });
-
-    const poll = setInterval(async () => {
-      try {
-        const snap = await api(`/tts/jobs/${jobId}`);
-        handleSnap(snap);
-      } catch {}
-    }, 1000);
-
-    watchersRef.current[key] = { source, poll };
-  };
+        setNotifLoaded(true);
+      })
+      .catch(() => setNotifLoaded(true));
+  }, []);
 
   useEffect(() => {
-    for (const p of providers) {
-      if (p.kind !== "local") continue;
-      for (const m of p.models || []) {
-        if (m.installation?.state === "installing" && m.installation?.job_id) {
-          attachJob(p.id, m.id, m.installation.job_id);
+    if (selection) {
+      setDraft({
+        provider: selection.provider || "",
+        model: selection.model || "",
+        voice: selection.voice || "",
+        speed: Number(selection.speed ?? 1.0),
+      });
+    }
+  }, [selection]);
+
+  useEffect(() => {
+    setConfirmRemove(false);
+  }, [draft.provider, draft.model]);
+
+  const attachJob = useCallback(
+    (providerId, modelId, jobId) => {
+      if (!jobId) return;
+      const key = encodeModelKey(providerId, modelId);
+      if (pollers.current[key]) clearInterval(pollers.current[key]);
+      const poll = async () => {
+        try {
+          const snap = await api(`/tts/jobs/${jobId}`);
+          setJobs((old) => ({
+            ...old,
+            [key]: mergeInstallJob(old[key], snap),
+          }));
+          if (
+            ["completed", "done", "failed", "error", "cancelled"].includes(
+              snap.status,
+            )
+          ) {
+            clearInterval(pollers.current[key]);
+            delete pollers.current[key];
+            await reload();
+            notifyTtsUpdated();
+            if (snap.status === "completed" || snap.status === "done") {
+              notify(`Modelo ${modelId} instalado com sucesso.`);
+            }
+          }
+        } catch {
+          clearInterval(pollers.current[key]);
+          delete pollers.current[key];
+        }
+      };
+      pollers.current[key] = setInterval(poll, 1200);
+      poll();
+    },
+    [reload],
+  );
+
+  useEffect(() => {
+    for (const provider of catalog) {
+      for (const model of provider.models || []) {
+        if (
+          model.installation?.state === "installing" &&
+          model.installation?.job_id
+        ) {
+          attachJob(provider.id, model.id, model.installation.job_id);
         }
       }
     }
-  }, [providers]);
+  }, [catalog, attachJob]);
 
   useEffect(() => {
+    const active = pollers.current;
     return () => {
-      for (const key of Object.keys(watchersRef.current)) {
-        watchersRef.current[key].source?.close();
-        clearInterval(watchersRef.current[key].poll);
-      }
-      watchersRef.current = {};
+      Object.values(active).forEach(clearInterval);
     };
   }, []);
 
-  if (loading && !providers.length) {
+  if (loading && !catalog.length) {
     return (
-      <Group gap="xs">
-        <Loader size="sm" />
-        <Text size="sm">Carregando modelos de voz…</Text>
-      </Group>
+      <Text size="sm" c="dimmed">
+        Carregando vozes e modelos…
+      </Text>
+    );
+  }
+  if (error) {
+    return (
+      <Alert color="red" title="Erro ao carregar vozes">
+        {String(error.message || error)}
+      </Alert>
     );
   }
 
-  const { local, remote } = groupProviders(providers);
-  const currentDraft = draft || savedProfile;
-  const dirty =
-    currentDraft &&
-    savedProfile &&
-    (currentDraft.provider !== savedProfile.provider ||
-      currentDraft.model !== savedProfile.model ||
-      currentDraft.voice !== savedProfile.voice ||
-      Number(currentDraft.speed) !== Number(savedProfile.speed));
+  const localProviders = catalog.filter((p) => p.kind !== "remote");
+  const remoteProviders = catalog.filter((p) => p.kind === "remote");
 
-  const advDirty = JSON.stringify(adv) !== JSON.stringify(savedAdv);
+  const modelGroups = [];
+  if (localProviders.length) {
+    modelGroups.push({
+      group: "Modelos locais",
+      items: localProviders.flatMap((p) =>
+        (p.models || []).map((m) => ({
+          value: encodeModelKey(p.id, m.id),
+          label: m.name || `${p.name} · ${m.id}`,
+        })),
+      ),
+    });
+  }
+  if (remoteProviders.length) {
+    modelGroups.push({
+      group: "Provedores na nuvem",
+      items: remoteProviders.flatMap((p) =>
+        (p.models || []).map((m) => ({
+          value: encodeModelKey(p.id, m.id),
+          label: `${p.name} · ${m.name || m.id}`,
+        })),
+      ),
+    });
+  }
 
-  const timeoutOptions = [
-    { value: "120", label: "2 minutos" },
-    { value: "300", label: "5 minutos" },
-    { value: "600", label: "10 minutos (Padrão)" },
-    { value: "1800", label: "30 minutos" },
-    { value: "0", label: "Manter sempre carregado" },
-  ];
-  const withCustomOption = (options, currentValue) => {
-    const str = String(currentValue ?? "");
-    if (!str || options.some((o) => o.value === str)) return options;
-    return [...options, { value: str, label: `${str} (personalizado)` }];
-  };
+  const activeProvider =
+    catalog.find((p) => p.id === draft.provider) || catalog[0] || {};
+  const activeModels = activeProvider.models || [];
+  const activeModel =
+    activeModels.find((m) => m.id === draft.model) || activeModels[0] || {};
 
-  const llmTierOptions = withCustomOption(
-    [
-      { value: "free", label: "Automático · Gratuito" },
-      { value: "fast", label: "Rápido" },
-      { value: "smart", label: "Avançado" },
-    ],
-    adv.TTS_LLM_MODEL,
+  const currentModelKey =
+    activeProvider.id && activeModel.id
+      ? encodeModelKey(activeProvider.id, activeModel.id)
+      : "";
+  const activeJob =
+    jobs[currentModelKey] ||
+    (activeModel.installation?.state === "installing"
+      ? normalizeInstallJob(activeModel.installation)
+      : null);
+  const isInstalling = ["pending", "running", "installing"].includes(
+    activeJob?.status || "",
+  );
+  const isLocal = activeProvider.kind !== "remote";
+  const isInstalled = Boolean(activeModel.installed || activeModel.available);
+  const isRemovable = isLocal && isInstalled && activeModel.removable !== false;
+  const remoteConfigured =
+    activeProvider.kind !== "remote" ||
+    Boolean(
+      activeProvider.configured ??
+      activeProvider.available ??
+      activeProvider.credential_state === "configured",
+    );
+
+  const voices = activeModel.voices || [];
+  const selectedVoice = voices.some((v) => v.id === draft.voice)
+    ? draft.voice
+    : voices[0]?.id || "";
+  const bounds = speedBounds(activeModel, activeProvider);
+  const speed = clampSpeed(draft.speed, bounds);
+  const dirty = !sameProfile(
+    {
+      provider: activeProvider.id,
+      model: activeModel.id,
+      voice: selectedVoice,
+      speed,
+    },
+    selection,
   );
 
+  const uninstallError = uninstallErrors[currentModelKey];
+  const pct = Number(activeJob?.progress ?? 0);
+  const bytesText =
+    activeJob?.total_bytes > 0
+      ? `${formatBytes(activeJob.downloaded_bytes)} / ${formatBytes(activeJob.total_bytes)}`
+      : "";
+
+  async function toggleReadAloud(next) {
+    setSavingReadAloud(true);
+    try {
+      const updated = { ...notifSettings, read_aloud: next };
+      await api("/notifications/settings", updated);
+      setNotifSettings(updated);
+      await refresh().catch(() => {});
+    } finally {
+      setSavingReadAloud(false);
+    }
+  }
+
+  async function installActiveModel() {
+    if (!activeProvider.id || !activeModel.id) return;
+    setUninstallErrors((old) => ({ ...old, [currentModelKey]: null }));
+    const res = await api("/tts/install", {
+      provider: activeProvider.id,
+      model: activeModel.id,
+    });
+    setJobs((old) => ({
+      ...old,
+      [currentModelKey]: mergeInstallJob(old[currentModelKey], {
+        ...res,
+        job_id: res.job_id,
+        status: res.status || "running",
+      }),
+    }));
+    attachJob(activeProvider.id, activeModel.id, res.job_id);
+  }
+
+  async function cancelInstall() {
+    const jobId = activeJob?.job_id || activeModel.installation?.job_id;
+    if (!jobId) return;
+    await api(`/tts/jobs/${jobId}/cancel`, {});
+    await reload();
+  }
+
+  async function uninstallActiveModel() {
+    if (!activeProvider.id || !activeModel.id) return;
+    setUninstallErrors((old) => ({ ...old, [currentModelKey]: null }));
+    try {
+      await api("/tts/uninstall", {
+        provider: activeProvider.id,
+        model: activeModel.id,
+      });
+      setConfirmRemove(false);
+      notify(`Modelo ${activeModel.name || activeModel.id} removido.`);
+      await reload();
+      notifyTtsUpdated();
+    } catch (err) {
+      if (err?.status === 409) {
+        setConfirmRemove(false);
+        setUninstallErrors((old) => ({
+          ...old,
+          [currentModelKey]: {
+            message:
+              err.message ||
+              "Este modelo está em uso e não pode ser removido agora.",
+            references: err.data?.references || [],
+          },
+        }));
+        return;
+      }
+      throw err;
+    }
+  }
+
+  async function refreshVoices() {
+    if (!activeProvider.id) return;
+    setRefreshingVoices(true);
+    try {
+      await api(
+        `/tts/voices?provider=${encodeURIComponent(activeProvider.id)}&model=${encodeURIComponent(activeModel.id || "")}&refresh=true`,
+      );
+      await reload();
+      notify("Lista de vozes atualizada.");
+    } finally {
+      setRefreshingVoices(false);
+    }
+  }
+
+  async function save() {
+    setSaving(true);
+    setConflict(false);
+    try {
+      await api("/tts/select", {
+        provider: activeProvider.id,
+        model: activeModel.id,
+        voice: selectedVoice,
+        speed,
+        revision,
+      });
+      await reload();
+      notify("Voz Geral da PIA salva com sucesso.");
+      notifyTtsUpdated();
+    } catch (err) {
+      if (err?.status === 409) {
+        setConflict(true);
+        return;
+      }
+      throw err;
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <Stack gap="lg">
-      {error && (
-        <Alert color="red" title="Não foi possível carregar os modelos de voz">
-          <Group justify="space-between">
-            <Text size="sm">{error}</Text>
+    <Stack gap="md">
+      {conflict && (
+        <Alert
+          color="orange"
+          icon={<AlertTriangle size={16} />}
+          title="Alteração concorrente detectada"
+        >
+          <Group justify="space-between" align="center" wrap="wrap">
+            <Text size="sm">
+              Outra janela ou bot atualizou a voz da PIA. Recarregue antes de
+              salvar.
+            </Text>
             <Button
               size="xs"
               variant="light"
-              leftSection={<RefreshCw size={14} />}
-              onClick={safe(() => refresh())}
+              onClick={safe(async () => {
+                setConflict(false);
+                await reload();
+              })}
             >
-              Tentar novamente
+              Recarregar agora
             </Button>
           </Group>
         </Alert>
       )}
 
-      {warnings.map((w, idx) => (
-        <Alert key={idx} color="yellow" title="Aviso de migração TTS">
-          <Text size="xs">{w}</Text>
-        </Alert>
-      ))}
-
-      <Paper withBorder p="md" radius="md">
-        <Group justify="space-between" wrap="wrap" gap="sm">
-          <div>
-            <Text size="xs" c="dimmed" fw={600} tt="uppercase">
-              Voz Geral da PIA
-            </Text>
-            <Group gap="xs" mt={4}>
-              <Text fw={600}>
-                {savedProfile
-                  ? `${savedProfile.provider} · ${savedProfile.model} · ${savedProfile.voice}`
-                  : "Nenhuma voz selecionada"}
+      <div>
+        <div className="settings-section-title">Respostas faladas</div>
+        <div className="settings-card">
+          <div className="settings-row">
+            <div className="settings-row-info">
+              <Text size="sm" fw={600}>
+                Modelo
               </Text>
-              {savedProfile?.speed != null && (
-                <Badge variant="light" color="violet">
-                  {Number(savedProfile.speed).toFixed(2)}×
-                </Badge>
-              )}
-            </Group>
-          </div>
-          <Group gap="xs">
-            <Button
-              size="xs"
-              variant="light"
-              leftSection={
-                previewing ? <Loader size={14} /> : <Volume2 size={15} />
-              }
-              disabled={previewing || !currentDraft?.voice}
-              onClick={() => preview(currentDraft)}
-            >
-              Ouvir prévia
-            </Button>
-            <Button
-              size="xs"
-              variant="subtle"
-              leftSection={<RefreshCw size={14} />}
-              onClick={safe(() => refresh())}
-            >
-              Atualizar
-            </Button>
-          </Group>
-        </Group>
-      </Paper>
-
-      <Stack gap="xs">
-        <Title order={5}>Modelos Locais</Title>
-        <Text size="xs" c="dimmed">
-          Executam no seu computador, sem custo de API. Instale e gerencie cada
-          modelo individualmente.
-        </Text>
-        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="sm">
-          {local.flatMap((provider) =>
-            (provider.models || []).map((model) => {
-              const key = `${provider.id}::${model.id}`;
-              return (
-                <LocalModelCard
-                  key={key}
-                  provider={provider}
-                  model={model}
-                  isDraftSelected={
-                    currentDraft?.provider === provider.id &&
-                    currentDraft?.model === model.id
-                  }
-                  isSavedActive={
-                    savedProfile?.provider === provider.id &&
-                    savedProfile?.model === model.id
-                  }
-                  jobSnapshot={activeJobs[key]}
-                  uninstallError={uninstallErrors[key]}
-                  onSelect={(pid, mid) =>
-                    setDraft((old) =>
-                      resolveDraftForModel(providers, pid, mid, old),
-                    )
-                  }
-                  onInstall={safe(async (pid, mid) => {
-                    setUninstallErrors((old) => ({ ...old, [key]: null }));
-                    const res = await api("/tts/install", {
-                      provider: pid,
-                      model: mid,
-                      request_id: crypto.randomUUID(),
-                    });
-                    setActiveJobs((old) => ({
-                      ...old,
-                      [key]: normalizeInstallJob(
-                        {
-                          job_id: res.job_id,
-                          state: res.state || "queued",
-                          phase: "queued",
-                          progress: {
-                            completed_bytes: 0,
-                            total_bytes: null,
-                            percent: 0,
-                          },
-                        },
-                        res.job_id,
-                      ),
-                    }));
-                    attachJob(pid, mid, res.job_id);
-                    await refresh();
-                  })}
-                  onCancelInstall={safe(async (jobId) => {
-                    if (!jobId) return;
-                    await api(`/tts/jobs/${jobId}/cancel`, {});
-                  })}
-                  onUninstall={safe(async (pid, mid) => {
-                    setUninstallErrors((old) => ({ ...old, [key]: null }));
-                    try {
-                      await api("/tts/uninstall", {
-                        provider: pid,
-                        model: mid,
-                        request_id: crypto.randomUUID(),
-                      });
-                      notify(`Modelo ${model.name || mid} desinstalado.`);
-                      await refresh();
-                      notifyTtsUpdated();
-                    } catch (err) {
-                      if (err?.status === 409) {
-                        setUninstallErrors((old) => ({
-                          ...old,
-                          [key]: {
-                            message: err.message,
-                            references: err.details?.references || [],
-                          },
-                        }));
-                        return;
-                      }
-                      throw err;
-                    }
-                  })}
-                />
-              );
-            }),
-          )}
-        </SimpleGrid>
-      </Stack>
-
-      <Stack gap="xs">
-        <Title order={5}>Modelos Remotos</Title>
-        <Text size="xs" c="dimmed">
-          Serviços na nuvem que usam suas chaves configuradas no Cofre da PIA.
-        </Text>
-        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="sm">
-          {remote.map((provider) => (
-            <RemoteProviderCard
-              key={provider.id}
-              provider={provider}
-              draft={currentDraft}
-              savedProfile={savedProfile}
-              onSelect={(pid, mid) =>
-                setDraft((old) =>
-                  resolveDraftForModel(providers, pid, mid, old),
-                )
-              }
-              onOpenVault={() =>
-                navigate({ view: "settings", section: "credentials" })
-              }
-              onRefreshVoices={safe(async (pid, mid) => {
-                await api(
-                  `/tts/voices?provider=${encodeURIComponent(pid)}&model=${encodeURIComponent(mid || "")}&refresh=true`,
-                );
-                await refresh();
-                notify("Lista de vozes atualizada.");
-              })}
-            />
-          ))}
-        </SimpleGrid>
-      </Stack>
-
-      <Paper withBorder p="md" radius="md">
-        <Stack gap="md">
-          <Title order={5}>Voz e Velocidade Padrão da PIA</Title>
-          <VoiceSelector
-            catalog={providers}
-            value={currentDraft}
-            onChange={(next) => setDraft(next)}
-            previewing={previewing}
-            onPreview={(prof) => preview(prof)}
-          />
-
-          {conflict && (
-            <Alert color="yellow" title="Conflito de revisão">
-              <Group justify="space-between">
-                <Text size="xs">
-                  A configuração de voz foi atualizada fora desta tela.
-                  Recarregue a seleção atual antes de salvar.
-                </Text>
+              <Text size="xs" c="dimmed">
+                {activeModel.description ||
+                  activeProvider.description ||
+                  "Escolha o sintetizador de voz usado pela PIA."}
+              </Text>
+            </div>
+            <div className="settings-row-control">
+              {isLocal && !isInstalled && !isInstalling && (
                 <Button
                   size="xs"
-                  variant="light"
-                  leftSection={<RefreshCw size={12} />}
-                  onClick={safe(async () => {
-                    const res = await refresh();
-                    const sel = res.selection?.profile || res.selected;
-                    if (sel) setDraft(sel);
-                    setConflict(false);
-                  })}
+                  variant="subtle"
+                  leftSection={<Download size={14} />}
+                  onClick={safe(installActiveModel)}
                 >
-                  Recarregar
+                  Instalar
                 </Button>
-              </Group>
-            </Alert>
+              )}
+              {isInstalling && (
+                <Button
+                  size="xs"
+                  color="red"
+                  variant="subtle"
+                  onClick={safe(cancelInstall)}
+                >
+                  Cancelar
+                </Button>
+              )}
+              {isRemovable &&
+                !isInstalling &&
+                (confirmRemove ? (
+                  <Group gap={6}>
+                    <Button
+                      size="xs"
+                      color="red"
+                      variant="light"
+                      onClick={safe(uninstallActiveModel)}
+                    >
+                      Confirmar remoção
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="subtle"
+                      onClick={() => setConfirmRemove(false)}
+                    >
+                      Voltar
+                    </Button>
+                  </Group>
+                ) : (
+                  <Button
+                    size="xs"
+                    color="gray"
+                    variant="subtle"
+                    leftSection={<Trash2 size={14} />}
+                    onClick={() => setConfirmRemove(true)}
+                  >
+                    Remover
+                  </Button>
+                ))}
+              {!isLocal && !remoteConfigured && (
+                <Button
+                  size="xs"
+                  color="yellow"
+                  variant="light"
+                  leftSection={<KeyRound size={14} />}
+                  onClick={() =>
+                    navigate({ view: "settings", section: "credentials" })
+                  }
+                >
+                  Cofre
+                </Button>
+              )}
+              <Select
+                w={240}
+                aria-label="Modelo de voz"
+                data={modelGroups}
+                value={currentModelKey}
+                onChange={(val) => {
+                  const decoded = decodeModelKey(val);
+                  if (!decoded) return;
+                  const p =
+                    catalog.find((item) => item.id === decoded.provider) ||
+                    activeProvider;
+                  const m =
+                    (p.models || []).find(
+                      (item) => item.id === decoded.model,
+                    ) || (p.models || [])[0];
+                  setDraft((old) => resolveDraftForModel(p, m, old.speed));
+                }}
+              />
+            </div>
+          </div>
+
+          {isInstalling && (
+            <div className="settings-row">
+              <Stack gap={6} style={{ width: "100%" }}>
+                <Group justify="space-between">
+                  <Text size="xs" c="dimmed" role="status" aria-live="polite">
+                    {activeJob?.message ||
+                      activeJob?.step ||
+                      "Baixando arquivos do modelo…"}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {pct > 0 ? `${Math.round(pct)}%` : ""}
+                    {bytesText ? ` · ${bytesText}` : ""}
+                  </Text>
+                </Group>
+                <Progress
+                  size="sm"
+                  color="violet"
+                  value={pct > 0 ? pct : 25}
+                  animated
+                />
+              </Stack>
+            </div>
           )}
 
-          <Group>
-            <Button
-              loading={saving}
-              disabled={
-                !dirty || !currentDraft?.provider || !currentDraft?.voice
-              }
-              onClick={safe(async () => {
-                setSaving(true);
-                try {
-                  const res = await api("/tts/select", {
-                    revision: savedRevision,
-                    provider: currentDraft.provider,
-                    model: currentDraft.model,
-                    voice: currentDraft.voice,
-                    speed: currentDraft.speed,
-                  });
-                  setSavedProfile(res.profile);
-                  setSavedRevision(res.revision);
-                  setDraft(res.profile);
-                  setConflict(false);
-                  notify("Voz Geral da PIA salva com sucesso.");
-                  notifyTtsUpdated();
-                  await refresh();
-                } catch (err) {
-                  if (err?.status === 409) setConflict(true);
-                  throw err;
-                } finally {
-                  setSaving(false);
+          {uninstallError && (
+            <div className="settings-row">
+              <Alert
+                color="orange"
+                style={{ width: "100%" }}
+                title="Não foi possível remover o modelo"
+              >
+                <Text size="xs">{uninstallError.message}</Text>
+                {uninstallError.references?.length > 0 && (
+                  <Text size="xs" mt={4} c="dimmed">
+                    Em uso por:{" "}
+                    {uninstallError.references
+                      .map(formatReferenceLabel)
+                      .join(", ")}
+                  </Text>
+                )}
+              </Alert>
+            </div>
+          )}
+
+          <div className="settings-row">
+            <div className="settings-row-info">
+              <Text size="sm" fw={600}>
+                Ler respostas em voz alta
+              </Text>
+              <Text size="xs" c="dimmed">
+                Quando você dita uma mensagem, a resposta é lida em voz alta.
+                Dite de novo para parar.
+              </Text>
+            </div>
+            <div className="settings-row-control">
+              <Switch
+                aria-label="Ler respostas em voz alta"
+                checked={Boolean(notifSettings.read_aloud)}
+                disabled={!notifLoaded || savingReadAloud}
+                onChange={(e) => toggleReadAloud(e.currentTarget.checked)}
+              />
+            </div>
+          </div>
+
+          <div className="settings-row">
+            <div className="settings-row-info">
+              <Text size="sm" fw={600} mb={6}>
+                Voz
+              </Text>
+              <TextInput
+                size="xs"
+                aria-label="Texto de teste da voz"
+                placeholder={DEFAULT_TTS_PREVIEW_TEXT}
+                maxLength={MAX_TTS_PREVIEW_CHARS}
+                value={previewText}
+                onChange={(e) =>
+                  setPreviewText(normalizePreviewText(e.currentTarget.value))
                 }
-              })}
-            >
-              Salvar Voz Geral da PIA
-            </Button>
-          </Group>
-        </Stack>
-      </Paper>
-
-      <Accordion variant="separated" radius="md">
-        <Accordion.Item value="advanced-tts">
-          <Accordion.Control>
-            Opções avançadas de hardware e memória
-          </Accordion.Control>
-          <Accordion.Panel>
-            <Stack gap="md">
-              <div>
-                <Text size="sm" fw={500} mb={6}>
-                  Dispositivo de processamento local
-                </Text>
-                <SegmentedControl
-                  value={adv.TTS_DEVICE}
-                  data={[
-                    { value: "auto", label: "Auto" },
-                    { value: "cuda", label: "GPU (CUDA)" },
-                    { value: "cpu", label: "CPU" },
-                  ]}
-                  onChange={(val) =>
-                    setAdv((old) => ({ ...old, TTS_DEVICE: val }))
-                  }
-                />
-              </div>
-
-              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
-                <Select
-                  label="Liberar Kokoro da memória após inatividade"
-                  data={withCustomOption(
-                    timeoutOptions,
-                    adv.TTS_KOKORO_IDLE_TIMEOUT,
-                  )}
-                  value={adv.TTS_KOKORO_IDLE_TIMEOUT}
-                  onChange={(val) =>
-                    val &&
-                    setAdv((old) => ({ ...old, TTS_KOKORO_IDLE_TIMEOUT: val }))
-                  }
-                />
-                <Select
-                  label="Liberar Qwen3 da memória após inatividade"
-                  data={withCustomOption(
-                    timeoutOptions,
-                    adv.TTS_QWEN_IDLE_TIMEOUT,
-                  )}
-                  value={adv.TTS_QWEN_IDLE_TIMEOUT}
-                  onChange={(val) =>
-                    val &&
-                    setAdv((old) => ({ ...old, TTS_QWEN_IDLE_TIMEOUT: val }))
-                  }
-                />
-              </SimpleGrid>
-
-              <Select
-                label="Modelo de IA para vozes em storytelling"
-                data={llmTierOptions}
-                value={adv.TTS_LLM_MODEL}
-                onChange={(val) =>
-                  val && setAdv((old) => ({ ...old, TTS_LLM_MODEL: val }))
+                rightSectionWidth={52}
+                rightSection={
+                  <Text size="xs" c="dimmed">
+                    {previewText.length}/{MAX_TTS_PREVIEW_CHARS}
+                  </Text>
                 }
               />
-
-              <Group>
+            </div>
+            <div className="settings-row-control">
+              <Button
+                size="xs"
+                variant="subtle"
+                leftSection={
+                  previewing ? <Loader size={14} /> : <Play size={14} />
+                }
+                disabled={
+                  previewing ||
+                  !activeProvider.id ||
+                  !selectedVoice ||
+                  !activeModel.available ||
+                  !previewText.trim()
+                }
+                onClick={() =>
+                  preview(
+                    {
+                      provider: activeProvider.id,
+                      model: activeModel.id,
+                      voice: selectedVoice,
+                      speed,
+                    },
+                    normalizePreviewText(previewText),
+                  )
+                }
+              >
+                Ouvir
+              </Button>
+              {!isLocal && (
                 <Button
                   size="xs"
-                  loading={savingAdv}
-                  disabled={!advDirty}
-                  onClick={safe(async () => {
-                    setSavingAdv(true);
-                    try {
-                      await api("/settings/save", {
-                        section: "general",
-                        values: adv,
-                      });
-                      setSavedAdv(adv);
-                    } finally {
-                      setSavingAdv(false);
-                    }
-                  })}
+                  variant="subtle"
+                  px={8}
+                  aria-label="Atualizar lista de vozes"
+                  loading={refreshingVoices}
+                  onClick={safe(refreshVoices)}
                 >
-                  Salvar opções avançadas
+                  <RefreshCw size={14} />
                 </Button>
+              )}
+              <Select
+                w={240}
+                aria-label="Voz"
+                placeholder={
+                  voices.length
+                    ? "Escolha a voz"
+                    : "Nenhuma voz disponível para este modelo"
+                }
+                data={voices.map((v) => ({
+                  value: v.id,
+                  label: formatVoiceOptionLabel(v),
+                }))}
+                value={selectedVoice}
+                disabled={!voices.length}
+                searchable
+                nothingFoundMessage="Nenhuma voz encontrada"
+                onChange={(nextVoice) => {
+                  if (!nextVoice) return;
+                  setDraft((old) => ({
+                    ...old,
+                    provider: activeProvider.id,
+                    model: activeModel.id,
+                    voice: nextVoice,
+                  }));
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="settings-row">
+            <div className="settings-row-info">
+              <Group gap="xs">
+                <Text size="sm" fw={600}>
+                  Velocidade
+                </Text>
+                <Badge size="xs" variant="light" color="violet">
+                  {speed.toFixed(2)}×
+                </Badge>
               </Group>
-            </Stack>
-          </Accordion.Panel>
-        </Accordion.Item>
-      </Accordion>
+            </div>
+            <div className="settings-row-control" style={{ minWidth: 240 }}>
+              <Slider
+                style={{ width: 240 }}
+                aria-label="Velocidade da fala"
+                min={bounds.min}
+                max={bounds.max}
+                step={bounds.step}
+                label={(v) => `${v.toFixed(2)}×`}
+                value={speed}
+                onChange={(nextSpeed) =>
+                  setDraft((old) => ({
+                    ...old,
+                    speed: clampSpeed(nextSpeed, bounds),
+                  }))
+                }
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <Group justify="flex-end">
+        <Button
+          disabled={!dirty || saving}
+          loading={saving}
+          leftSection={<Check size={16} />}
+          onClick={safe(save)}
+        >
+          Salvar voz da PIA
+        </Button>
+      </Group>
     </Stack>
   );
 }

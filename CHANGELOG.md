@@ -5,6 +5,8 @@
 ### Added
 - Supertonic 3 atualizado para o pipeline ONNX multilíngue (`Supertone/supertonic-2`, 31 idiomas incluindo português `<pt>...</pt>` com acentuação NFKD preservada) e catálogo completo com 10 vozes (`F1..F5` `Voz feminina 1..5` e `M1..M5` `Voz masculina 1..5`).
 - Suporte a texto customizado no preview de TTS (`POST /api/pia/tts/preview`) com fallback automático para a frase padrão da PIA.
+- Configuração estruturada de Música (`GET /api/pia/music/providers` e `POST /api/pia/music/select`) com 3 provedores (`local`, `gemini`, `suno_mcp`) e integração com `Apps/music`.
+- UI das 7 abas de Configurações (`Geral`, `STT`, `TTS`, `Música`, `Imagens · ICE`, `LLMs`, `Voz e áudio`) reformulada em padrão limpo de cards: removidos parâmetros técnicos redundantes preservando defaults do backend, campo editável de texto de teste no preview TTS (até 300 caracteres), catálogo completo de 10 vozes no Supertonic 3, slider único de velocidade, toggle para sons de gravação (`START_SOUND`/`END_SOUND`), links para o Cofre e painel simplificado de Música com Local (ACE-Step), Gemini e Suno MCP.
 - Serviço central `TTSService` (`src/tts_service.py`) unificando catálogo, seleção, instalação/desinstalação por modelo local (`kokoro`, `qwen`, `supertonic3`, `piper`), preview com TTL e síntese em `/v1/tts/*`, `/api/pia/tts/*`, `/v1/audio/speech` e `/tts/speak`.
 - Voz própria por speaker/bot (`GET/PUT /api/pia/speakers/{speaker_id}/voice`), propagação de `speaker_id` em `NotificationCenter.publish` e contexto de reprodução (`utterance_id`, `speaker_id`, `avatar_url`, `phase`) em `/tts/status` e `/tts/status/stream`.
 - Avatar da Secretária (`Plugins/Bot/secretaria/avatar.svg`) atualizado com classes `.enable-mouth` e `.animation-talking`.

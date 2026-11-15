@@ -9,6 +9,16 @@ _job_lock = threading.Lock()
 
 def handle(action, data, context):
     global _latest
+    if action == "providers":
+        return service.providers_catalog()
+    if action == "select":
+        return service.select_provider(
+            provider=data.get("provider"),
+            gemini_model=data.get("gemini_model"),
+            suno_mcp_url=data.get("suno_mcp_url"),
+            suno_mcp_command=data.get("suno_mcp_command"),
+            suno_mcp_token=data.get("suno_mcp_token"),
+        )
     if action == "library":
         return {
             "items": service.library(),
