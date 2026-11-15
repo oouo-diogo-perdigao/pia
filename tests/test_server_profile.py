@@ -179,7 +179,8 @@ def test_automatic_profile_preserves_conflicting_legacy_message_ids(isolated_pro
     chat = workspace.new_chat("Conversa")
     with workspace.connect() as db:
         db.execute(
-            "INSERT INTO messages VALUES(1,?,?,?,NULL)", (chat, "user", "Texto local")
+            "INSERT INTO messages(id, chat, role, text, parent) VALUES(1,?,?,?,NULL)",
+            (chat, "user", "Texto local"),
         )
         db.execute("UPDATE chats SET leaf=1,read_message=1 WHERE id=?", (chat,))
     local = records(snapshot(workspace))

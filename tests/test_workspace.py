@@ -275,6 +275,7 @@ class DesktopBackendTests(unittest.TestCase):
             backend.chat_lock = threading.Lock()
             backend.voice_stop = threading.Event()
             backend.agent = Mock()
+            backend.agent.last_meta.return_value = {}
             backend.agent.complete.return_value = types.SimpleNamespace(
                 choices=[
                     types.SimpleNamespace(
