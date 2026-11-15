@@ -1,5 +1,21 @@
 # PIA Changelog
 
+## [Nova Arquitetura Modular — Fases 0 a 8] - 2026-11-15
+
+### Added
+- CI para lint, testes Python/frontend e build; lockfiles de dependências e inicialização com build do workspace quando necessário.
+- Router declarativo por tabela com módulos de rotas por domínio e compatibilidade com o despacho legado.
+- UnifiedVault como fachada de credenciais e PluginHost/PluginContext para descoberta e injeção de serviços nas extensões.
+- Ferramentas de música, podcast/RPG, screenshots e object storage extraídas para seus plugins, declaradas nos manifestos.
+- Pacotes por domínio em `app`, `core`, `api`, `ai`, `voice`, `integrations` e `desktop`, com adaptadores para preservar imports existentes durante a migração incremental.
+- Frontend organizado em `features`, cliente de API compartilhado e registry dinâmico de painéis via `import.meta.glob`.
+- Contrato `X-PIA-Protocol: 1` documentado para integração com pia-server e enviado pelo conector local.
+- UX de Conectores MCP: presets de configuração, explicações dos modos multi-conta e inspeção de ferramentas com descrição/schema e re-inspeção.
+
+### Changed
+- Bundle do workspace reconstruído; source map `workspace.js.map` removido do versionamento e ignorado pelo Git.
+- Testes de fronteiras arquiteturais, registry de plugins e presets MCP. A estrutura modular mantém partes legadas por compatibilidade; não representa remoção integral do legado.
+
 ## [TTS Unificado, Voz por Bot e Bots Dinâmicos (OpenBot)] - 2026-11-14
 
 ### Added

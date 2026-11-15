@@ -495,6 +495,13 @@ class WorkspaceService:
         return result
 
     def _dispatch(self, method, path, data, query):
+        from src.api.router import get_workspace_router
+
+        matched, routed = get_workspace_router().dispatch(
+            method, path, self, data, query
+        )
+        if matched:
+            return routed
         if path == "/settings/storage":
             from src.settings_store import get_store, document
 

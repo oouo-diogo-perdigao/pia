@@ -142,9 +142,24 @@ test("formatMessageInfo extracts model, provider, and tools_used cleanly", () =>
     { name: "suno_music", detail: "ok" },
   ]);
 
+  const mcpTagged = formatMessageInfo({
+    role: "assistant",
+    content: "Concluído",
+    meta: {
+      mcp_server: "Suno",
+      account_mode: "distributed",
+      mcp_account: "Conta 2",
+    },
+  });
+  assert.equal(mcpTagged.hasMetadata, true);
+  assert.equal(mcpTagged.accountMode, "distributed");
+  assert.equal(mcpTagged.accountModeLabel, "Distribuído");
+  assert.equal(mcpTagged.mcpBadge, "MCP • Suno · Distribuído · Conta 2");
+
   const legacy = formatMessageInfo({ role: "assistant", content: "Oi" });
   assert.equal(legacy.hasMetadata, false);
   assert.equal(legacy.modelDisplay, "");
+  assert.equal(legacy.mcpBadge, "");
   assert.deepEqual(legacy.tools, []);
 });
 

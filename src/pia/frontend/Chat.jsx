@@ -40,6 +40,10 @@ import {
 } from "lucide-react";
 import { api, watchJob, safe, report, copy } from "./api";
 import { Icon, usePia } from "./shared";
+import MessageInfoPopover, {
+  McpUsageBadge,
+} from "./features/chat/MessageInfoPopover";
+import SuggestionChips from "./features/chat/SuggestionChips";
 import {
   CHAT_AUTO_MODEL_SENTINEL,
   buildChatModelOptions,
@@ -273,38 +277,31 @@ function Message({
                 ))}
               </div>
             )}
-            {record.role === "assistant" && info.tools.length > 0 && (
-              <Group className="message-tools" gap={6}>
-                {info.tools.map((tool) => (
-                  <Badge key={tool.name} size="xs" variant="dot" color="violet">
-                    {tool.detail ? `${tool.name} · ${tool.detail}` : tool.name}
-                  </Badge>
-                ))}
-              </Group>
-            )}
-            {record.role === "assistant" && suggestions.length > 0 && (
-              <div
-                className="chat-suggestions"
-                role="group"
-                aria-label={t("Sugestões rápidas")}
-              >
-                {suggestions.map((item) => (
-                  <Button
-                    key={item.prompt}
-                    size="xs"
-                    variant="light"
-                    color="violet"
-                    radius="xl"
-                    className="chat-suggestion-btn"
-                    disabled={busy}
-                    title={item.prompt}
-                    rightSection={<ArrowUpRight size={13} />}
-                    onClick={safe(() => onSendSuggestion?.(item.prompt))}
-                  >
-                    {item.label}
-                  </Button>
-                ))}
-              </div>
+            {record.role === "assistant" &&
+              (info.tools.length > 0 || info.mcpBadge) && (
+                <Group className="message-tools" gap={6}>
+                  <McpUsageBadge info={info} />
+                  {info.tools.map((tool) => (
+                    <Badge
+                      key={tool.name}
+                      size="xs"
+                      variant="dot"
+                      color="violet"
+                    >
+                      {tool.detail
+                        ? `${tool.name} · ${tool.detail}`
+                        : tool.name}
+                    </Badge>
+                  ))}
+                </Group>
+              )}
+            {record.role === "assistant" && (
+              <SuggestionChips
+                suggestions={suggestions}
+                busy={busy}
+                label={t("Sugestões rápidas")}
+                onSendSuggestion={onSendSuggestion}
+              />
             )}
           </>
         )}
@@ -342,62 +339,13 @@ function Message({
           onClick={() => onToggleSpeak?.(record)}
         />
         {record.role === "assistant" && (
-          <Popover
+          <MessageInfoPopover
+            info={info}
             opened={infoOpen}
             onChange={setInfoOpen}
-            width={290}
-            position="top"
-            withArrow
-            shadow="md"
-          >
-            <Popover.Target>
-              <ActionIcon
-                aria-label={t("Informações do modelo e ferramentas")}
-                variant="subtle"
-                color="gray"
-                onClick={() => setInfoOpen((open) => !open)}
-                onMouseEnter={() => setInfoOpen(true)}
-                onMouseLeave={() => setInfoOpen(false)}
-              >
-                <Info size={17} />
-              </ActionIcon>
-            </Popover.Target>
-            <Popover.Dropdown
-              onMouseEnter={() => setInfoOpen(true)}
-              onMouseLeave={() => setInfoOpen(false)}
-            >
-              <Stack gap={6}>
-                <Text size="xs" fw={600}>
-                  {t("Detalhes da resposta")}
-                </Text>
-                <Text size="xs" c="dimmed">
-                  {t("Modelo")}: {info.modelDisplay || t("Padrão do sistema")}
-                </Text>
-                {info.tools.length > 0 && (
-                  <>
-                    <Divider />
-                    <Text size="xs" fw={600}>
-                      {t("Ferramentas / MCPs")}
-                    </Text>
-                    <Group gap={4}>
-                      {info.tools.map((tool) => (
-                        <Badge
-                          key={tool.name}
-                          size="xs"
-                          variant="light"
-                          color="violet"
-                        >
-                          {tool.detail
-                            ? `${tool.name} (${tool.detail})`
-                            : tool.name}
-                        </Badge>
-                      ))}
-                    </Group>
-                  </>
-                )}
-              </Stack>
-            </Popover.Dropdown>
-          </Popover>
+            onToggle={() => setInfoOpen((open) => !open)}
+            t={t}
+          />
         )}
         <Icon
           icon={RotateCcw}
@@ -636,7 +584,15 @@ export default function Chat({ chat }) {
             : event;
         load()
           .then(() => {
-            if (doneMeta?.model || doneMeta?.provider || doneMeta?.tools_used) {
+            if (
+              doneMeta?.model ||
+              doneMeta?.provider ||
+              doneMeta?.tools_used ||
+              doneMeta?.mcp_account ||
+              doneMeta?.account_mode ||
+              doneMeta?.mcp_server ||
+              doneMeta?.active_context
+            ) {
               setMessages((prev) => {
                 const copyList = [...prev];
                 for (let idx = copyList.length - 1; idx >= 0; idx--) {
@@ -651,6 +607,19 @@ export default function Chat({ chat }) {
                         : {}),
                       ...(doneMeta.tools_used && !copyList[idx].tools_used
                         ? { tools_used: doneMeta.tools_used }
+                        : {}),
+                      ...(doneMeta.mcp_account && !copyList[idx].mcp_account
+                        ? { mcp_account: doneMeta.mcp_account }
+                        : {}),
+                      ...(doneMeta.account_mode && !copyList[idx].account_mode
+                        ? { account_mode: doneMeta.account_mode }
+                        : {}),
+                      ...(doneMeta.mcp_server && !copyList[idx].mcp_server
+                        ? { mcp_server: doneMeta.mcp_server }
+                        : {}),
+                      ...(doneMeta.active_context &&
+                      !copyList[idx].active_context
+                        ? { active_context: doneMeta.active_context }
                         : {}),
                     };
                     break;

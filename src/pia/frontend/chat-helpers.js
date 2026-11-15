@@ -250,8 +250,22 @@ function normalizeToolsList(rawTools) {
   return result;
 }
 
+const ACCOUNT_MODE_LABELS = {
+  distributed: "Distribuído",
+  incremental: "Incremental",
+  alternating: "Alternado",
+};
+
+export function formatAccountModeLabel(mode) {
+  const key = String(mode || "")
+    .trim()
+    .toLowerCase();
+  if (!key) return "";
+  return ACCOUNT_MODE_LABELS[key] || key;
+}
+
 /**
- * Formats model, provider, and tool usage metadata for the assistant "i" popover.
+ * Formats model, provider, MCP account/mode, and tool usage metadata for assistant messages.
  */
 export function formatMessageInfo(record) {
   const meta =
@@ -279,6 +293,27 @@ export function formatMessageInfo(record) {
       ? `Automático (${providerLabel})`
       : "";
 
+  const mcpAccount = String(
+    record?.mcp_account ?? meta.mcp_account ?? "",
+  ).trim();
+  const accountMode = String(
+    record?.account_mode ?? meta.account_mode ?? meta.mcp_account_mode ?? "",
+  )
+    .trim()
+    .toLowerCase();
+  const accountModeLabel = formatAccountModeLabel(accountMode);
+  const mcpServer = String(record?.mcp_server ?? meta.mcp_server ?? "").trim();
+  const activeContext = String(
+    record?.active_context ?? meta.active_context ?? "",
+  ).trim();
+
+  const mcpParts = [];
+  if (mcpServer) mcpParts.push(mcpServer);
+  if (accountModeLabel) mcpParts.push(accountModeLabel);
+  if (mcpAccount) mcpParts.push(mcpAccount);
+  else if (activeContext) mcpParts.push(activeContext);
+  const mcpBadge = mcpParts.length > 0 ? `MCP • ${mcpParts.join(" · ")}` : "";
+
   return {
     model: rawModel,
     shortModel,
@@ -286,7 +321,13 @@ export function formatMessageInfo(record) {
     providerLabel,
     modelDisplay,
     tools,
-    hasMetadata: Boolean(rawModel || provider || tools.length > 0),
+    mcpAccount,
+    accountMode,
+    accountModeLabel,
+    mcpServer,
+    activeContext,
+    mcpBadge,
+    hasMetadata: Boolean(rawModel || provider || tools.length > 0 || mcpBadge),
   };
 }
 

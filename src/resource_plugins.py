@@ -31,15 +31,7 @@ def save_json(path, value):
     temporary.replace(path)
 
 
-from .settings_store import SystemVault
-
-
-class KeyringVault(SystemVault):
-    def set(self, name, value):
-        super().set(name, value)
-        from .settings_store import get_store
-
-        get_store().register_secret(name)
+from .core.secrets.vault import KeyringVault  # noqa: E402, F401
 
 
 class ResourcePlugins:

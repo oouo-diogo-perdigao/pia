@@ -67,7 +67,10 @@ def server_request(method, path, payload=None):
             method,
             f"{base}/device/{path}",
             json=payload,
-            headers={"Authorization": "Bearer " + token},
+            headers={
+                "Authorization": "Bearer " + token,
+                "X-PIA-Protocol": "1",
+            },
             allow_redirects=False,
             timeout=15,
         )

@@ -28,6 +28,7 @@ def _post(base, action, data):
         response = requests.post(
             base + "/device/login/" + action,
             json=data,
+            headers={"X-PIA-Protocol": "1"},
             timeout=12,
             allow_redirects=False,
         )

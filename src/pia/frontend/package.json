@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "test": "node --test navigation.test.js forms.test.js resources.test.js tts-helpers.test.js mini.test.js openbot-helpers.test.js settings-simplification.test.js chat-helpers.test.js extensions-helpers.test.js",
+    "test": "node --test navigation.test.js forms.test.js resources.test.js tts-helpers.test.js mini.test.js openbot-helpers.test.js settings-simplification.test.js chat-helpers.test.js extensions-helpers.test.js plugins/registry.test.js features/mcp/mcp-presets.test.js",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write ."
   },

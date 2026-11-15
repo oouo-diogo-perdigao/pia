@@ -183,29 +183,11 @@ def _normalize_args(args: Any) -> list[str]:
     return []
 
 
-class _MemoryVault:
-    """In-memory fallback vault used only when OS keyring is unavailable in tests."""
-
-    def __init__(self):
-        self._data: dict[str, Any] = {}
-
-    def get(self, name: str) -> Any:
-        return self._data.get(name)
-
-    def set(self, name: str, value: Any) -> None:
-        self._data[name] = value
-
-    def delete(self, name: str) -> None:
-        self._data.pop(name, None)
+from .core.secrets.vault import MemoryVault as _MemoryVault, get_vault
 
 
 def _default_vault():
-    try:
-        from .settings_store import get_store
-
-        return get_store().vault
-    except Exception:
-        return _MemoryVault()
+    return get_vault()
 
 
 def _infer_known_tools(server: dict[str, Any]) -> list[dict[str, Any]]:

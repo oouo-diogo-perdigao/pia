@@ -85,4 +85,8 @@ if [[ "$(id -u)" -eq 0 && -n "${SUDO_USER:-}" && "${SUDO_USER}" != root ]]; then
   fi
 fi
 
+if [[ ! -f "$ROOT/src/pia/assets/workspace.js" ]] && command -v npm >/dev/null 2>&1; then
+  npm --prefix "$ROOT/src/pia/frontend" run build
+fi
+
 exec "$PYTHON" -m src.launcher "$@"

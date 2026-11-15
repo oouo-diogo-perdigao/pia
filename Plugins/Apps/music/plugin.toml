@@ -5,3 +5,6 @@ icon = "music"
 [web]
 entrypoint = "index.html"
 api = "web_api.py"
+
+[tools]
+module = "tools.py"

@@ -108,6 +108,9 @@ SYNC=(uv sync --python 3.12 --group dev)
 if (( PODCAST )); then SYNC+=(--extra podcast); fi
 run "${SYNC[@]}"
 run npm --prefix "$ROOT/src/pia/frontend" ci
+if [[ ! -f "$ROOT/src/pia/assets/workspace.js" ]]; then
+  run npm --prefix "$ROOT/src/pia/frontend" run build
+fi
 run bash "$ROOT/scripts/install-hooks.sh"
 run uv run --no-sync python -m src.config_paths
 if (( AUTOSTART )); then

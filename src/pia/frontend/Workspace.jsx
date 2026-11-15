@@ -3,7 +3,6 @@ import NotificationMenu, { CountBadge } from "./NotificationMenu";
 import Notifications from "./Notifications";
 import MediaPlayer from "./MediaPlayer";
 import { Bell } from "lucide-react";
-import Music from "../../../Plugins/Apps/music/web/Panel.jsx";
 import { Music2 } from "lucide-react";
 import { notify } from "./toasts";
 import Connectors, { connectors } from "./Connectors";
@@ -61,14 +60,12 @@ import { ScreenHistory } from "./navigation";
 import Chat from "./Chat";
 import SettingsPanel from "./Settings";
 import ServerLogin from "./ServerLogin";
-import Podcast from "../../../Plugins/Apps/podcast_automation/web/Panel.jsx";
-import Screenshots from "../../../Plugins/Apps/screenshots/web/Panel.jsx";
-import Storage from "../../../Plugins/Apps/object_storage/web/Panel.jsx";
-import Secretary from "../../../Plugins/Bot/secretaria/web/Panel.jsx";
-import {
-  BotRunPanel,
-  SafeSvgAvatar,
-} from "../../../Plugins/OpenBot/web/Panel.jsx";
+import PluginHost from "./features/plugins/PluginHost";
+import { resolvePluginPanel } from "./plugins/registry";
+
+const openbotExports = resolvePluginPanel("openbot")?.exports || {};
+const BotRunPanel = openbotExports.BotRunPanel;
+const SafeSvgAvatar = openbotExports.SafeSvgAvatar;
 const appIcons = {
   podcast_automation: AudioLines,
   music: Music2,
@@ -509,23 +506,22 @@ export default function Workspace({ standalone = null }) {
     ) : route.view === "bots" ? (
       !route.bot ? (
         <Bots />
-      ) : route.bot === "secretaria" ? (
-        <Secretary />
-      ) : currentBot?.kind === "dynamic" ? (
+      ) : currentBot?.kind === "dynamic" && BotRunPanel ? (
         <BotRunPanel botId={currentBot.id} />
       ) : (
-        <iframe title={currentBot?.name || "Bot"} src={currentBot?.url} />
+        <PluginHost
+          pluginId={route.bot}
+          fallbackUrl={currentBot?.url}
+          title={currentBot?.name || "Bot"}
+        />
       )
-    ) : route.app === "music" ? (
-      <Music sub={route.sub} />
-    ) : route.app === "podcast_automation" ? (
-      <Podcast sub={route.sub} />
-    ) : route.app === "screenshots" ? (
-      <Screenshots sub={route.sub} />
-    ) : route.app === "object_storage" ? (
-      <Storage sub={route.sub} />
     ) : (
-      <iframe title={currentApp?.name || "Aplicativo"} src={currentApp?.url} />
+      <PluginHost
+        pluginId={route.app}
+        props={{ sub: route.sub }}
+        fallbackUrl={currentApp?.url}
+        title={currentApp?.name || "Aplicativo"}
+      />
     );
   if (account && !account.authenticated)
     return <ServerLogin server={account.server} />;
@@ -1066,7 +1062,7 @@ export default function Workspace({ standalone = null }) {
                           >
                             {bot.id === "secretaria" ? (
                               <Avatar />
-                            ) : bot.kind === "dynamic" ? (
+                            ) : bot.kind === "dynamic" && SafeSvgAvatar ? (
                               <SafeSvgAvatar
                                 src={bot.avatar_url || bot.avatar}
                                 colors={bot.avatar_colors}
@@ -1143,14 +1139,16 @@ export default function Workspace({ standalone = null }) {
                   {route.view === "bots" && route.bot === "secretaria" && (
                     <Avatar />
                   )}
-                  {route.view === "bots" && currentBot?.kind === "dynamic" && (
-                    <SafeSvgAvatar
-                      src={currentBot.avatar_url || currentBot.avatar}
-                      colors={currentBot.avatar_colors}
-                      size={24}
-                      alt={currentBot.name}
-                    />
-                  )}
+                  {route.view === "bots" &&
+                    currentBot?.kind === "dynamic" &&
+                    SafeSvgAvatar && (
+                      <SafeSvgAvatar
+                        src={currentBot.avatar_url || currentBot.avatar}
+                        colors={currentBot.avatar_colors}
+                        size={24}
+                        alt={currentBot.name}
+                      />
+                    )}
                   {title}
                 </Text>
               </Group>

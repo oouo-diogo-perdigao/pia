@@ -9,9 +9,9 @@ __pycache__
 keywords.txt
 models.yaml
 shortcuts.yaml
-uv.lock
 *.spec
 *.pyc
+src/pia/assets/*.map
 
 
 # Projetos pessoais/externos ficam em repositórios próprios; exemplos distribuídos são versionados.
