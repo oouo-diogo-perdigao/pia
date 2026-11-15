@@ -1,5 +1,18 @@
 # PIA Changelog
 
+## [v0.2.1] - 2026-11-15
+
+### Added
+- Presets de 18 cores e 12 rostos para bots dinâmicos; autorização Suno MCP com registro automático de cliente e PKCE S256.
+
+### Fixed
+- Criação musical direta pelo chat sem depender de LLM, com áudio quando o provedor conclui a geração e erro legível quando falha.
+- Cópia de mensagens e erros com fallback para HTTP local e confirmação visual; estado OAuth vinculado à conta/servidor, expiração e uso único.
+- Indicadores de credenciais baseados no cofre e proteção contra repetição de geração em respostas ambíguas do Suno.
+
+### Notes
+- A autorização Suno requer login/consentimento. O callback público da release pia-server apresenta o código para conclusão manual na PIA; abrir a autorização não significa que a conta já esteja conectada.
+
 ## [Correção — Autorização Suno MCP] - 2026-11-15
 
 ### Fixed
