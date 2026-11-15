@@ -155,3 +155,142 @@ export function formatReferenceLabel(ref) {
     return `Bot Dinâmico (${ref.slice("dynamic:".length)})`;
   return String(ref || "");
 }
+
+export function normalizeInstallJob(raw, fallbackJobId = "") {
+  if (!raw || typeof raw !== "object") return null;
+  const progress =
+    raw.progress && typeof raw.progress === "object" ? raw.progress : {};
+  const completedBytes = Number.isFinite(Number(progress.completed_bytes))
+    ? Number(progress.completed_bytes)
+    : null;
+  const totalBytes =
+    Number.isFinite(Number(progress.total_bytes)) &&
+    Number(progress.total_bytes) > 0
+      ? Number(progress.total_bytes)
+      : null;
+  let percent = Number.isFinite(Number(progress.percent))
+    ? Number(progress.percent)
+    : null;
+  if (percent === null && completedBytes !== null && totalBytes !== null) {
+    percent = Math.min(
+      100,
+      Math.round((completedBytes / totalBytes) * 1000) / 10,
+    );
+  }
+  if (raw.type === "done" || raw.state === "done") {
+    return {
+      job_id: raw.job_id || fallbackJobId,
+      state: "done",
+      phase: "done",
+      progress: {
+        completed_bytes: completedBytes ?? totalBytes,
+        total_bytes: totalBytes,
+        percent: 100,
+      },
+      error: null,
+    };
+  }
+  if (raw.type === "error" || raw.state === "error") {
+    return {
+      job_id: raw.job_id || fallbackJobId,
+      state: "error",
+      phase:
+        raw.code === "cancelled" || raw.phase === "cancelled"
+          ? "cancelled"
+          : "error",
+      progress: {
+        completed_bytes: completedBytes,
+        total_bytes: totalBytes,
+        percent,
+      },
+      error:
+        typeof raw.error === "object" && raw.error
+          ? raw.error
+          : {
+              code: raw.code || "error",
+              message: raw.error || "Erro na instalação.",
+            },
+    };
+  }
+  return {
+    job_id: raw.job_id || fallbackJobId,
+    state: raw.state || "running",
+    phase: raw.phase || "downloading",
+    progress: {
+      completed_bytes: completedBytes,
+      total_bytes: totalBytes,
+      percent,
+    },
+    error: raw.error || null,
+  };
+}
+
+export function mergeInstallJob(prev, next) {
+  if (!next) return prev || null;
+  if (!prev || (prev.job_id && next.job_id && prev.job_id !== next.job_id)) {
+    return next;
+  }
+  if (next.state === "done" || next.state === "error") return next;
+  if (prev.state === "done" || prev.state === "error") return prev;
+  const prevBytes = prev.progress?.completed_bytes ?? -1;
+  const nextBytes = next.progress?.completed_bytes ?? -1;
+  if (prevBytes >= 0 && nextBytes >= 0 && nextBytes < prevBytes) {
+    return prev;
+  }
+  if (prev.state === "running" && next.state === "queued") {
+    return prev;
+  }
+  return next;
+}
+
+export function resolveLocalModelBadges(
+  model = {},
+  { isSavedActive = false, jobSnapshot = null } = {},
+) {
+  const instState =
+    jobSnapshot?.state === "running" || jobSnapshot?.state === "queued"
+      ? "installing"
+      : model.installation?.state ||
+        (model.installed ? "installed" : "not_installed");
+  const isInstalling = instState === "installing" || Boolean(model.installing);
+  const isReady = Boolean(model.installed && model.available);
+
+  const activeBadge =
+    isSavedActive && isReady
+      ? { label: "Ativo", color: "blue", variant: "filled" }
+      : null;
+
+  let statusBadge;
+  if (isInstalling) {
+    statusBadge = {
+      label: "Instalando…",
+      color: "violet",
+      variant: "light",
+      loading: true,
+    };
+  } else if (isReady) {
+    statusBadge = { label: "Instalado", color: "green", variant: "light" };
+  } else if (instState === "error") {
+    statusBadge = { label: "Erro", color: "red", variant: "light" };
+  } else if (isSavedActive) {
+    statusBadge = {
+      label: "Selecionado (requer instalação)",
+      color: "yellow",
+      variant: "light",
+    };
+  } else {
+    statusBadge = { label: "Não instalado", color: "gray", variant: "light" };
+  }
+
+  return {
+    instState,
+    isInstalling,
+    isReady,
+    activeBadge,
+    statusBadge,
+    pendingSelectionBadge:
+      isSavedActive && !isReady && isInstalling
+        ? { label: "Selecionado", color: "yellow", variant: "light" }
+        : null,
+  };
+}

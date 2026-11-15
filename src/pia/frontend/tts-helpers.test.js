@@ -12,6 +12,9 @@ import {
   buildVoiceSelectGroups,
   formatBytes,
   formatReferenceLabel,
+  normalizeInstallJob,
+  mergeInstallJob,
+  resolveLocalModelBadges,
 } from "./tts-helpers.js";
 
 const SAMPLE_PROVIDERS = [
@@ -181,5 +184,103 @@ describe("tts-helpers", () => {
       formatReferenceLabel("dynamic:abc-123"),
       "Bot Dinâmico (abc-123)",
     );
+  });
+
+  it("normalizes SSE and polling progress snapshots and avoids stale regressions", () => {
+    const sseProg = normalizeInstallJob(
+      {
+        type: "progress",
+        state: "running",
+        phase: "downloading",
+        progress: {
+          completed_bytes: 52428800,
+          total_bytes: 104857600,
+          percent: 50.0,
+        },
+      },
+      "job-1",
+    );
+    assert.equal(sseProg.job_id, "job-1");
+    assert.equal(sseProg.progress.percent, 50.0);
+    assert.equal(sseProg.progress.completed_bytes, 52428800);
+
+    const stalePoll = normalizeInstallJob({
+      job_id: "job-1",
+      state: "running",
+      phase: "downloading",
+      progress: {
+        completed_bytes: 10485760,
+        total_bytes: 104857600,
+        percent: 10.0,
+      },
+    });
+    const merged = mergeInstallJob(sseProg, stalePoll);
+    assert.equal(merged.progress.percent, 50.0);
+
+    const doneEvt = normalizeInstallJob(
+      {
+        type: "done",
+        progress: {
+          completed_bytes: 104857600,
+          total_bytes: 104857600,
+          percent: 100,
+        },
+      },
+      "job-1",
+    );
+    assert.equal(mergeInstallJob(merged, doneEvt).state, "done");
+    assert.equal(mergeInstallJob(merged, doneEvt).progress.percent, 100);
+  });
+
+  it("only shows Ativo when installed && available, otherwise Selecionado (requer instalação)", () => {
+    const readySelected = resolveLocalModelBadges(
+      {
+        installed: true,
+        available: true,
+        installation: { state: "installed" },
+      },
+      { isSavedActive: true },
+    );
+    assert.equal(readySelected.activeBadge?.label, "Ativo");
+    assert.equal(readySelected.statusBadge?.label, "Instalado");
+
+    const missingSelected = resolveLocalModelBadges(
+      {
+        installed: false,
+        available: false,
+        installation: { state: "not_installed" },
+      },
+      { isSavedActive: true },
+    );
+    assert.equal(missingSelected.activeBadge, null);
+    assert.equal(
+      missingSelected.statusBadge?.label,
+      "Selecionado (requer instalação)",
+    );
+
+    const halfMissing = resolveLocalModelBadges(
+      {
+        installed: true,
+        available: false,
+        installation: { state: "not_installed" },
+      },
+      { isSavedActive: true },
+    );
+    assert.equal(halfMissing.activeBadge, null);
+    assert.equal(
+      halfMissing.statusBadge?.label,
+      "Selecionado (requer instalação)",
+    );
+
+    const missingUnselected = resolveLocalModelBadges(
+      {
+        installed: false,
+        available: false,
+        installation: { state: "not_installed" },
+      },
+      { isSavedActive: false },
+    );
+    assert.equal(missingUnselected.activeBadge, null);
+    assert.equal(missingUnselected.statusBadge?.label, "Não instalado");
   });
 });

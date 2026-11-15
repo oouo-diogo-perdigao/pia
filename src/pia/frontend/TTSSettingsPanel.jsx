@@ -37,7 +37,10 @@ import {
   formatBytes,
   formatReferenceLabel,
   groupProviders,
+  mergeInstallJob,
+  normalizeInstallJob,
   resolveDraftForModel,
+  resolveLocalModelBadges,
 } from "./tts-helpers";
 
 function LocalModelCard({
@@ -53,19 +56,36 @@ function LocalModelCard({
   onUninstall,
 }) {
   const [confirmingUninstall, setConfirmingUninstall] = useState(false);
-  const instState =
-    jobSnapshot?.state === "running" || jobSnapshot?.state === "queued"
-      ? "installing"
-      : model.installation?.state ||
-        (model.installed ? "installed" : "not_installed");
-  const isInstalling = instState === "installing" || model.installing;
-  const isInstalled = Boolean(model.installed || model.available);
-  const percent =
-    jobSnapshot?.progress?.percent ?? (isInstalling ? null : undefined);
+  const effectiveJob =
+    normalizeInstallJob(jobSnapshot) ||
+    (model.installation?.state === "installing"
+      ? normalizeInstallJob(model.installation)
+      : null);
+  const {
+    instState,
+    isInstalling,
+    isReady,
+    activeBadge,
+    statusBadge,
+    pendingSelectionBadge,
+  } = resolveLocalModelBadges(model, {
+    isSavedActive,
+    jobSnapshot: effectiveJob,
+  });
+  const percent = effectiveJob?.progress?.percent ?? null;
+  const completedBytes = effectiveJob?.progress?.completed_bytes ?? null;
+  const totalBytes = effectiveJob?.progress?.total_bytes ?? null;
 
   useEffect(() => {
     setConfirmingUninstall(false);
-  }, [model.id, isInstalled]);
+  }, [model.id, isReady]);
+
+  const phaseLabel =
+    effectiveJob?.phase === "verifying"
+      ? "Verificando arquivos do modelo…"
+      : effectiveJob?.phase === "downloading"
+        ? "Baixando arquivos do modelo…"
+        : "Preparando instalação…";
 
   return (
     <Paper
@@ -98,59 +118,55 @@ function LocalModelCard({
               {model.description || provider.description}
             </Text>
           </div>
-          <Group gap={6} wrap="nowrap">
-            {isSavedActive && (
-              <Badge color="violet" variant="filled" size="sm">
-                Ativo na PIA
-              </Badge>
-            )}
-            {isInstalling ? (
+          <Group gap={6} wrap="wrap" justify="flex-end">
+            {activeBadge && (
               <Badge
-                color="violet"
-                variant="light"
+                color={activeBadge.color}
+                variant={activeBadge.variant}
                 size="sm"
-                leftSection={<Loader size={10} />}
               >
-                Instalando…
-              </Badge>
-            ) : isInstalled ? (
-              <Badge color="green" variant="light" size="sm">
-                Instalado
-              </Badge>
-            ) : instState === "error" ? (
-              <Badge color="red" variant="light" size="sm">
-                Erro
-              </Badge>
-            ) : (
-              <Badge color="gray" variant="light" size="sm">
-                Não instalado
+                {activeBadge.label}
               </Badge>
             )}
+            {pendingSelectionBadge && (
+              <Badge
+                color={pendingSelectionBadge.color}
+                variant={pendingSelectionBadge.variant}
+                size="sm"
+              >
+                {pendingSelectionBadge.label}
+              </Badge>
+            )}
+            <Badge
+              color={statusBadge.color}
+              variant={statusBadge.variant}
+              size="sm"
+              leftSection={statusBadge.loading ? <Loader size={10} /> : null}
+            >
+              {statusBadge.label}
+            </Badge>
           </Group>
         </Group>
 
         {isInstalling && (
           <Stack gap={4}>
             <Progress
-              value={percent != null ? percent : 100}
-              animated
+              value={percent !== null ? percent : 100}
+              striped={percent === null}
+              animated={percent === null || percent < 100}
               color="violet"
               size="sm"
             />
             <Group justify="space-between">
               <Text size="xs" c="dimmed" role="status" aria-live="polite">
-                {jobSnapshot?.phase === "downloading"
-                  ? "Baixando arquivos do modelo…"
-                  : "Preparando instalação…"}
-                {jobSnapshot?.progress?.completed_bytes
-                  ? ` (${formatBytes(jobSnapshot.progress.completed_bytes)}${
-                      jobSnapshot.progress.total_bytes
-                        ? ` / ${formatBytes(jobSnapshot.progress.total_bytes)}`
-                        : ""
+                {phaseLabel}
+                {completedBytes !== null || totalBytes !== null
+                  ? ` (${formatBytes(completedBytes) || "0 B"}${
+                      totalBytes ? ` / ${formatBytes(totalBytes)}` : ""
                     })`
                   : ""}
               </Text>
-              {percent != null && (
+              {percent !== null && (
                 <Text size="xs" fw={600}>
                   {percent.toFixed(0)}%
                 </Text>
@@ -160,9 +176,9 @@ function LocalModelCard({
         )}
 
         {instState === "error" &&
-          (jobSnapshot?.error?.message || model.installation?.error) && (
+          (effectiveJob?.error?.message || model.installation?.error) && (
             <Text size="xs" c="red">
-              {jobSnapshot?.error?.message || model.installation?.error}
+              {effectiveJob?.error?.message || model.installation?.error}
             </Text>
           )}
 
@@ -181,7 +197,7 @@ function LocalModelCard({
         )}
 
         <Group justify="space-between" wrap="wrap" gap="xs" mt={4}>
-          {isInstalled ? (
+          {isReady ? (
             <Button
               size="xs"
               variant={isDraftSelected ? "filled" : "light"}
@@ -199,7 +215,7 @@ function LocalModelCard({
               leftSection={<X size={14} />}
               onClick={() =>
                 onCancelInstall(
-                  jobSnapshot?.job_id || model.installation?.job_id,
+                  effectiveJob?.job_id || model.installation?.job_id,
                 )
               }
             >
@@ -216,7 +232,7 @@ function LocalModelCard({
             </Button>
           )}
 
-          {isInstalled &&
+          {isReady &&
             !isInstalling &&
             (confirmingUninstall ? (
               <Group gap={6}>
@@ -293,18 +309,23 @@ function RemoteProviderCard({
               {provider.description}
             </Text>
           </div>
-          <Group gap={6}>
-            {isSavedProvider && (
-              <Badge color="violet" variant="filled" size="sm">
-                Ativo na PIA
+          <Group gap={6} wrap="wrap" justify="flex-end">
+            {isSavedProvider && configured && (
+              <Badge color="blue" variant="filled" size="sm">
+                Ativo
+              </Badge>
+            )}
+            {isSavedProvider && !configured && (
+              <Badge color="yellow" variant="light" size="sm">
+                Selecionado (requer chave no cofre)
               </Badge>
             )}
             <Badge
-              color={configured ? "green" : "yellow"}
+              color={configured ? "green" : "gray"}
               variant="light"
               size="sm"
             >
-              {configured ? "Chave no cofre" : "Requer chave no cofre"}
+              {configured ? "Chave no cofre" : "Sem chave no cofre"}
             </Badge>
           </Group>
         </Group>
@@ -423,11 +444,27 @@ export default function TTSSettingsPanel({ ttsFields = [] }) {
       }
     };
 
-    const handleSnap = (snap) => {
-      setActiveJobs((old) => ({ ...old, [key]: snap }));
+    const handleSnap = (rawSnap) => {
+      const snap = normalizeInstallJob(rawSnap, jobId);
+      if (!snap) return;
+      setActiveJobs((old) => ({
+        ...old,
+        [key]: mergeInstallJob(old[key], snap),
+      }));
       if (snap.state === "done" || snap.state === "error") {
         cleanup();
-        refresh().catch(() => {});
+        refresh()
+          .catch(() => {})
+          .finally(() => {
+            if (snap.state === "done") {
+              setActiveJobs((old) => {
+                if (old[key]?.job_id !== jobId) return old;
+                const copy = { ...old };
+                delete copy[key];
+                return copy;
+              });
+            }
+          });
         notifyTtsUpdated();
         if (snap.state === "done") {
           notify(`Modelo ${modelId} instalado com sucesso.`);
@@ -436,28 +473,8 @@ export default function TTSSettingsPanel({ ttsFields = [] }) {
     };
 
     const source = watchJob(jobId, (ev) => {
-      if (ev.type === "progress") {
-        handleSnap({
-          job_id: jobId,
-          state: ev.state || "running",
-          phase: ev.phase || "downloading",
-          progress: ev.progress || {},
-          error: ev.error || null,
-        });
-      } else if (ev.type === "done") {
-        handleSnap({
-          job_id: jobId,
-          state: "done",
-          phase: "installed",
-          progress: { percent: 100 },
-        });
-      } else if (ev.type === "error") {
-        handleSnap({
-          job_id: jobId,
-          state: "error",
-          phase: ev.code === "cancelled" ? "cancelled" : "error",
-          error: { code: ev.code, message: ev.error },
-        });
+      if (ev.type === "progress" || ev.type === "done" || ev.type === "error") {
+        handleSnap(ev);
       }
     });
 
@@ -639,6 +656,22 @@ export default function TTSSettingsPanel({ ttsFields = [] }) {
                       model: mid,
                       request_id: crypto.randomUUID(),
                     });
+                    setActiveJobs((old) => ({
+                      ...old,
+                      [key]: normalizeInstallJob(
+                        {
+                          job_id: res.job_id,
+                          state: res.state || "queued",
+                          phase: "queued",
+                          progress: {
+                            completed_bytes: 0,
+                            total_bytes: null,
+                            percent: 0,
+                          },
+                        },
+                        res.job_id,
+                      ),
+                    }));
                     attachJob(pid, mid, res.job_id);
                     await refresh();
                   })}
