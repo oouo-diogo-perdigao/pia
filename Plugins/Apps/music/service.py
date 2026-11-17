@@ -4,6 +4,7 @@ from src.settings_store import get as setting
 import atexit
 import base64
 import binascii
+import ipaddress
 import json
 import math
 import os
@@ -22,6 +23,7 @@ import requests
 from src.config_paths import BASE_DIR
 from src.settings_store import values as section_values, document, save_document
 from src.resource_plugins import save_json
+from src.mcp_connectors import AUTH_ERROR_CODES as _AUTH_ERROR_CODES
 from src.mcp_connectors import keep_if_masked as _keep_if_masked
 from src.mcp_connectors import mask_url as _mask_url
 
@@ -156,8 +158,15 @@ class SunoIncompleteBatchError(MusicProviderError):
 
 
 SUNO_SETTINGS_ROUTE = {"view": "settings", "section": "Apps/music"}
+# RN08: cancel stops the wait; a generation already sent keeps going there.
+SUNO_CANCEL_MESSAGE = (
+    "A espera foi cancelada. O Suno pode continuar a geração já enviada e "
+    "consumir créditos."
+)
+SUNO_CANCEL_BEFORE_SEND_MESSAGE = (
+    "Geração cancelada antes de enviar ao Suno; nenhum crédito foi consumido."
+)
 _SECRET_ENV_KEY = re.compile(r"(TOKEN|SECRET|KEY|PASSWORD|AUTH|BEARER|COOKIE)", re.I)
-_AUTH_ERROR_CODES = ("401", "403")
 _CMD_SECRET_FLAG = re.compile(
     r"(?i)(--?(?:token|access[-_]?token|api[-_]?key|key|secret|password|bearer)(?:=|\s+))"
     r"(\"[^\"]*\"|'[^']*'|\S+)"
@@ -939,7 +948,7 @@ MAX_AUDIO_BYTES = 100 * 1024**2
 _ALLOW_LOOPBACK_HTTP_AUDIO = False
 _LOOPBACK_AUDIO_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _AUDIO_MAX_REDIRECTS = 3
-_AUDIO_TIMEOUT = (10, 60)  # (connect, read) per request
+_AUDIO_TIMEOUT = (10, 30)  # (connect, read) per request
 _SUNO_SLEEP_SLICE = 0.25  # polling waits in Event slices, checking cancel
 _AUDIO_CHUNK = 64 * 1024
 _AUDIO_REDIRECT_CODES = (301, 302, 303, 307, 308)
@@ -955,25 +964,37 @@ _AUDIO_CONTENT_EXTENSIONS = {
 _AUDIO_EXTENSIONS = ("mp3", "wav", "flac")
 
 
+def _is_non_public_host(host: str) -> bool:
+    """Literal IPs that are not global (private, loopback, link-local...) and
+    ``localhost``. Hostnames are not resolved here (see pending DNS note)."""
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return not address.is_global
+
+
 def _validate_audio_url(url: Any) -> str:
-    """https only; http just for loopback with the private test flag on."""
+    """https to a public host only (URL and every redirect).
+
+    The single exception is the private test flag: loopback hosts, http or
+    https, for the local mock.
+    """
     raw = str(url or "").strip()
     try:
         parts = urlsplit(raw)
         host = (parts.hostname or "").lower()
     except ValueError:
         raise SunoDownloadError() from None
-    if not host:
+    if not host or parts.scheme not in ("http", "https"):
         raise SunoDownloadError()
-    if parts.scheme == "https":
+    if _ALLOW_LOOPBACK_HTTP_AUDIO is True and host in _LOOPBACK_AUDIO_HOSTS:
         return raw
-    if (
-        parts.scheme == "http"
-        and _ALLOW_LOOPBACK_HTTP_AUDIO is True
-        and host in _LOOPBACK_AUDIO_HOSTS
-    ):
-        return raw
-    raise SunoDownloadError()
+    if parts.scheme != "https" or _is_non_public_host(host):
+        raise SunoDownloadError()
+    return raw
 
 
 def _audio_extension(url: str, content_type: str) -> str:
@@ -982,6 +1003,14 @@ def _audio_extension(url: str, content_type: str) -> str:
         return ext
     suffix = Path(urlsplit(url).path).suffix.lower().lstrip(".")
     return suffix if suffix in _AUDIO_EXTENSIONS else "mp3"
+
+
+def _discard(path: Path) -> None:
+    """Best-effort removal of a temp/orphan file (never masks the real error)."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _download_audio(
@@ -1036,7 +1065,10 @@ def _download_audio(
                         raise SunoDownloadError() from None
                     if declared > MAX_AUDIO_BYTES:
                         raise SunoDownloadError()
-                destination.mkdir(parents=True, exist_ok=True)
+                try:
+                    destination.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    raise SunoDownloadError() from None
                 final = destination / (
                     uuid.uuid4().hex + "." + _audio_extension(current, ctype)
                 )
@@ -1046,10 +1078,7 @@ def _download_audio(
                     with open(part, "wb") as handle:
                         for chunk in response.iter_content(_AUDIO_CHUNK):
                             if cancelled():
-                                raise InterruptedError(
-                                    "Download do áudio cancelado; o arquivo "
-                                    "parcial foi descartado."
-                                )
+                                raise InterruptedError(SUNO_CANCEL_MESSAGE)
                             if not chunk:
                                 continue
                             size += len(chunk)
@@ -1062,7 +1091,10 @@ def _download_audio(
                     raise SunoDownloadError() from None
                 if size == 0 or (declared is not None and size != declared):
                     raise SunoDownloadError()
-                os.replace(part, final)
+                try:
+                    os.replace(part, final)
+                except OSError:
+                    raise SunoDownloadError() from None
                 part = None
                 return final
             finally:
@@ -1070,7 +1102,7 @@ def _download_audio(
         raise SunoDownloadError()  # too many redirects
     finally:
         if part is not None:
-            part.unlink(missing_ok=True)
+            _discard(part)
         if own:
             session.close()
 
@@ -1078,16 +1110,16 @@ def _download_audio(
 def _write_audio_bytes(raw: bytes, destination: Path, extension: str) -> Path:
     if not raw or len(raw) > MAX_AUDIO_BYTES:
         raise SunoDownloadError()
-    destination.mkdir(parents=True, exist_ok=True)
     final = destination / (uuid.uuid4().hex + "." + extension)
     part = final.with_name(final.name + ".part")
     try:
+        destination.mkdir(parents=True, exist_ok=True)
         part.write_bytes(raw)
         os.replace(part, final)
     except OSError:
         raise SunoDownloadError() from None
     finally:
-        part.unlink(missing_ok=True)
+        _discard(part)
     return final
 
 
@@ -1107,8 +1139,12 @@ def _save_suno_clip(
 
     destination = output_directory()
     if isinstance(clip.get("audio_base64"), str) and clip["audio_base64"]:
+        encoded = clip["audio_base64"]
+        # Reject before decoding: base64 of MAX_AUDIO_BYTES is ~4/3 bigger.
+        if len(encoded) > 4 * math.ceil(MAX_AUDIO_BYTES / 3) + 4:
+            raise SunoDownloadError()
         try:
-            raw = base64.b64decode(clip["audio_base64"], validate=True)
+            raw = base64.b64decode(encoded, validate=True)
         except (binascii.Error, ValueError):
             raise SunoDownloadError() from None
         fmt = str(clip.get("format") or "").strip().lower()
@@ -1135,7 +1171,14 @@ def _save_suno_clip(
     title = str(clip.get("title") or "").strip()
     if title:
         result["title"] = title[:200]
-    save_json(destination / (name + ".json"), result)
+    metadata = destination / (name + ".json")
+    try:
+        save_json(metadata, result)
+    except Exception:
+        # No orphan audio without metadata.
+        _discard(path)
+        _discard(metadata)
+        raise SunoDownloadError() from None
     from Plugins.Connectors.pia_server.media import enqueue
 
     enqueue(path)
@@ -1244,7 +1287,7 @@ def _suno_batch_locked(
 
         try:
             if cancelled():
-                raise InterruptedError("Geração musical cancelada antes de iniciar.")
+                raise InterruptedError(SUNO_CANCEL_BEFORE_SEND_MESSAGE)
             if adapter is None:
                 status = suno_status()
                 if not status.get("available"):
@@ -1275,26 +1318,30 @@ def _suno_batch_locked(
             for _call in range(math.ceil(count / 2)):
                 needed = min(2, count - len(saved))
                 if cancelled():
-                    raise InterruptedError("Geração musical cancelada.")
+                    raise InterruptedError(SUNO_CANCEL_MESSAGE)
                 progress("Gerando música via Suno (MCP)…")
                 try:
                     result = adapter.generate(
                         prompt, lyrics=lyrics, duration=duration, cancelled=cancelled
                     )
                 except BaseException as exc:
-                    # Keep clips that already have audio (timeout/cancel/error).
-                    for clip in select_suno_clips(
-                        getattr(exc, "partial_clips", None) or [], needed
-                    ):
-                        try:
-                            save(clip)
-                        except Exception:
-                            break
+                    # Timeout/error: keep the clips that already have audio.
+                    # Cancel: keep only what was saved, start no new download.
+                    if not (isinstance(exc, InterruptedError) or cancelled()):
+                        for clip in select_suno_clips(
+                            getattr(exc, "partial_clips", None) or [], needed
+                        ):
+                            try:
+                                save(clip)
+                            except Exception:
+                                break
                     raise
                 clips = select_suno_clips(result.get("clips") or [], needed)
                 for clip in clips:
                     if clip.get("state", "ready") != "ready":
                         raise SunoClipFailedError()  # Q8: stop, no extra call
+                    if cancelled():
+                        raise InterruptedError(SUNO_CANCEL_MESSAGE)
                     save(clip)
                 if len(clips) < needed:  # Q1: keep what came, no extra call
                     raise SunoIncompleteBatchError(len(saved), count)

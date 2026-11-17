@@ -301,9 +301,13 @@ _AUTH_MESSAGE_RE = re.compile(
     r"\b(401|403)\b|\bunauthori[sz]ed\b|\bforbidden\b|\boauth\b|token (expired|invalid)",
     re.I,
 )
+# RN08: cancelling stops the wait, not a generation already sent to the Suno.
 _CANCEL_MESSAGE = (
     "A espera foi cancelada. O Suno pode continuar a geração já enviada e "
     "consumir créditos."
+)
+_CANCEL_BEFORE_SEND_MESSAGE = (
+    "Geração cancelada antes de enviar ao Suno; nenhum crédito foi consumido."
 )
 
 
@@ -365,11 +369,14 @@ def translate_suno_error(exc: BaseException) -> Exception:
     if isinstance(exc, KeyError):  # servidor/conta MCP não registrado
         return service.SunoUnavailableError()
     if isinstance(exc, MCPRpcError):
+        # Same conservative classification the manager persists (no loose
+        # "forbidden"/"oauth" matching for JSON-RPC errors).
         code = safe_error(exc)[0]
         if code == "401":
             return service.SunoAuthError()
         if code == "402":
             return service.SunoNoCreditsError()
+        return service.SunoProtocolError()
     message = str(exc)
     if _AUTH_MESSAGE_RE.search(message):
         return service.SunoAuthError()
@@ -545,7 +552,7 @@ class SunoMcpAdapter:
         self._pin_account()
         tools, tool, args = self._discover(prompt, lyrics, duration)
         if cancelled():
-            raise InterruptedError("Geração cancelada antes de enviar ao Suno.")
+            raise InterruptedError(_CANCEL_BEFORE_SEND_MESSAGE)
         data = self._call(_tool_name(tool), args, timeout=self._remaining(deadline))
         clips = extract_clips(data)
         if not clips:

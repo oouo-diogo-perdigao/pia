@@ -837,3 +837,302 @@ def test_cancel_during_poll_is_fast_even_with_long_interval(polling_env, monkeyp
         service.generate_suno_batch("lofi", count=1, cancelled=cancelled)
     assert time.monotonic() - start < 3
     assert err.value.completed == 0
+
+
+# ==========================================================================
+# T3 follow-up (review 18:35)
+# ==========================================================================
+def _ok_resp(chunks=(b"ID3abc",), on_chunk=None):
+    return _Resp(200, {"Content-Type": "audio/mpeg"}, list(chunks), on_chunk=on_chunk)
+
+
+# --- DEVE 1: OSError of mkdir/os.replace becomes download_failed ----------
+def test_f1_os_replace_failure_is_download_failed_without_part(tmp_path, monkeypatch):
+    def boom(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(service.os, "replace", boom)
+    session = _Session({"https://cdn.suno.test/a.mp3": _ok_resp()})
+    with pytest.raises(service.SunoDownloadError) as err:
+        service._download_audio(
+            "https://cdn.suno.test/a.mp3", tmp_path, session=session
+        )
+    assert err.value.code == "download_failed"
+    with pytest.raises(service.SunoDownloadError):
+        service._write_audio_bytes(b"ID3abc", tmp_path, "mp3")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_f1_mkdir_failure_is_download_failed(tmp_path):
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x")
+    session = _Session({"https://cdn.suno.test/a.mp3": _ok_resp()})
+    with pytest.raises(service.SunoDownloadError):
+        service._download_audio("https://cdn.suno.test/a.mp3", blocker, session=session)
+    with pytest.raises(service.SunoDownloadError):
+        service._write_audio_bytes(b"ID3abc", blocker / "sub", "mp3")
+    assert [p.name for p in tmp_path.iterdir()] == ["not-a-dir"]
+
+
+# --- DEVE 2: after cancel keep only what was saved; no new download -------
+def _url_clip(cid):
+    return {
+        "id": cid,
+        "audio_url": f"https://cdn.suno.test/{cid}.mp3",
+        "state": "ready",
+    }
+
+
+def test_f2_cancel_does_not_download_partial_clips(music_out, monkeypatch):
+    downloads = []
+    monkeypatch.setattr(
+        service, "_download_audio", lambda *a, **k: downloads.append(a) or None
+    )
+    exc = InterruptedError(service.SUNO_CANCEL_MESSAGE)
+    exc.partial_clips = [_url_clip("a"), _url_clip("b")]
+    with pytest.raises(InterruptedError) as err:
+        service.generate_suno_batch("lofi", count=2, adapter=_StubAdapter([exc]))
+    assert downloads == []
+    assert err.value.completed == 0 and _files(music_out) == []
+
+
+def test_f2_cancelled_flag_with_timeout_also_skips_partials(music_out, monkeypatch):
+    downloads = []
+    monkeypatch.setattr(
+        service, "_download_audio", lambda *a, **k: downloads.append(a) or None
+    )
+    state = {"cancel": False}
+
+    class Adapter(_StubAdapter):
+        def generate(self, prompt, **kwargs):
+            state["cancel"] = True
+            exc = service.SunoTimeoutError()
+            exc.partial_clips = [_url_clip("a")]
+            raise exc
+
+    with pytest.raises(service.SunoTimeoutError) as err:
+        service.generate_suno_batch(
+            "lofi", count=1, adapter=Adapter([]), cancelled=lambda: state["cancel"]
+        )
+    assert downloads == [] and err.value.completed == 0
+
+
+def test_f2_cancel_between_clips_keeps_saved_ones(music_out):
+    state = {"cancel": False}
+    stub = _StubAdapter([{"clips": [_b64_clip("a"), _b64_clip("b")]}])
+
+    def on_track(item, k, n):
+        state["cancel"] = True
+
+    with pytest.raises(InterruptedError) as err:
+        service.generate_suno_batch(
+            "lofi",
+            count=2,
+            adapter=stub,
+            on_track=on_track,
+            cancelled=lambda: state["cancel"],
+        )
+    assert str(err.value) == service.SUNO_CANCEL_MESSAGE
+    assert err.value.completed == 1 and len(_audio_files(music_out)) == 1
+
+
+def test_f2_cancel_mid_download_leaves_no_part(tmp_path):
+    state = {"n": 0}
+
+    def on_chunk():
+        state["n"] += 1
+
+    resp = _ok_resp([b"x" * 100] * 5, on_chunk=on_chunk)
+    session = _Session({"https://cdn.suno.test/a.mp3": resp})
+    with pytest.raises(InterruptedError) as err:
+        service._download_audio(
+            "https://cdn.suno.test/a.mp3",
+            tmp_path,
+            session=session,
+            cancelled=lambda: state["n"] >= 2,
+        )
+    assert str(err.value) == service.SUNO_CANCEL_MESSAGE
+    assert list(tmp_path.iterdir()) == [] and resp.closed
+
+
+# --- DEVE 3: a policy "forbidden" never becomes 401 -----------------------
+def test_f3_policy_forbidden_is_not_401(tmp_path, monkeypatch):
+    policy = MCPRpcError("Forbidden: lyrics violate content policy", -32000)
+    assert safe_error(policy)[0] != "401"
+    assert isinstance(
+        music_tools.translate_suno_error(policy), service.SunoProtocolError
+    )
+    assert safe_error(MCPRpcError("Unauthorized: token expired", -32000))[0] == "401"
+    assert safe_error(MCPRpcError("nope", -32001))[0] == "401"
+
+    monkeypatch.setattr(service, "settings", lambda: {})
+    mgr = _tool_server(tmp_path, monkeypatch)
+
+    def raise_policy(*_a, **_k):
+        raise policy
+
+    monkeypatch.setattr(mgr, "_exec_single", raise_policy)
+    with pytest.raises(MCPRpcError):
+        mgr.call_tool("suno_mcp", "generate_music", {}, retry_other_accounts=False)
+    assert mgr._find_raw("suno_mcp")["last_error_code"] != "401"
+    assert service.suno_status()["available"] is True
+
+
+# --- S1: block non-public IP literals (URL and redirects) -----------------
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://10.0.0.1/a.mp3",
+        "https://192.168.1.2/a.mp3",
+        "https://172.16.0.9/a.mp3",
+        "https://169.254.169.254/latest/meta-data",
+        "https://127.0.0.1/a.mp3",
+        "https://[::1]/a.mp3",
+        "https://[fe80::1]/a.mp3",
+        "https://[fd00::1]/a.mp3",
+        "https://0.0.0.0/a.mp3",
+        "https://localhost/a.mp3",
+    ],
+)
+def test_s1_non_public_ip_literals_rejected(url):
+    with pytest.raises(service.SunoDownloadError):
+        service._validate_audio_url(url)
+
+
+def test_s1_public_hosts_allowed_and_flag_only_opens_loopback(monkeypatch):
+    assert service._validate_audio_url("https://8.8.8.8/a.mp3")
+    assert service._validate_audio_url("https://cdn1.suno.ai/a.mp3")
+    monkeypatch.setattr(service, "_ALLOW_LOOPBACK_HTTP_AUDIO", True)
+    assert service._validate_audio_url("https://127.0.0.1:9/a.mp3")
+    for url in ("https://10.0.0.1/a.mp3", "http://192.168.0.1/a.mp3"):
+        with pytest.raises(service.SunoDownloadError):
+            service._validate_audio_url(url)
+
+
+def test_s1_redirect_to_private_ip_rejected(tmp_path):
+    session = _Session(
+        {
+            "https://cdn.suno.test/a.mp3": _Resp(
+                302, {"Location": "https://169.254.169.254/latest/meta-data"}
+            )
+        }
+    )
+    with pytest.raises(service.SunoDownloadError):
+        service._download_audio(
+            "https://cdn.suno.test/a.mp3", tmp_path, session=session
+        )
+    assert len(session.calls) == 1 and list(tmp_path.iterdir()) == []
+
+
+# --- S2: RN08 cancel texts ------------------------------------------------
+def test_s2_cancel_messages_follow_rn08(polling_env, monkeypatch):
+    assert music_tools._CANCEL_MESSAGE == service.SUNO_CANCEL_MESSAGE
+    assert "consumir créditos" in service.SUNO_CANCEL_MESSAGE
+    assert music_tools._CANCEL_BEFORE_SEND_MESSAGE == (
+        service.SUNO_CANCEL_BEFORE_SEND_MESSAGE
+    )
+    with pytest.raises(InterruptedError) as err:
+        service.generate_suno_batch("lofi", count=1, cancelled=lambda: True)
+    assert str(err.value) == service.SUNO_CANCEL_BEFORE_SEND_MESSAGE
+    monkeypatch.setattr(music_tools, "DEFAULT_POLL_INTERVAL", 30)
+    polling_env.ready_after = 10**6
+    calls = {"n": 0}
+
+    def cancelled():
+        calls["n"] += 1
+        return calls["n"] > 3
+
+    with pytest.raises(InterruptedError) as err:
+        service.generate_suno_batch("lofi", count=1, cancelled=cancelled)
+    assert str(err.value) == service.SUNO_CANCEL_MESSAGE
+
+
+# --- S3: base64 size checked before decoding ------------------------------
+def test_s3_base64_too_big_rejected_before_decode(music_out, monkeypatch):
+    import base64
+
+    monkeypatch.setattr(service, "MAX_AUDIO_BYTES", 30)
+    clip = {"id": "a", "audio_base64": base64.b64encode(b"x" * 1000).decode()}
+
+    def no_decode(*_a, **_k):
+        raise AssertionError("não deveria decodificar")
+
+    monkeypatch.setattr(service.base64, "b64decode", no_decode)
+    stub = _StubAdapter([{"clips": [dict(clip, state="ready")]}])
+    with pytest.raises(service.SunoDownloadError):
+        service.generate_suno_batch("lofi", count=1, adapter=stub)
+    assert _files(music_out) == []
+
+
+# --- S4: no orphan audio when save_json fails -----------------------------
+def test_s4_audio_removed_when_save_json_fails(music_out, monkeypatch):
+    def broken_save(path, data):
+        path.write_text("{partial")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(service, "save_json", broken_save)
+    stub = _StubAdapter([{"clips": [_b64_clip("a")]}])
+    with pytest.raises(service.SunoDownloadError):
+        service.generate_suno_batch("lofi", count=1, adapter=stub)
+    assert _files(music_out) == [] and _ENQUEUED == []
+
+
+# --- S5: AUTH_ERROR_CODES imported, not duplicated ------------------------
+def test_s5_auth_error_codes_single_source():
+    assert service._AUTH_ERROR_CODES is mcp_connectors.AUTH_ERROR_CODES
+
+
+# --- S6: redirect loop above the limit ------------------------------------
+def test_s6_redirect_loop_above_limit_is_rejected(tmp_path):
+    responses = {
+        f"https://cdn.suno.test/{i}": _Resp(302, {"Location": f"/{i + 1}"})
+        for i in range(10)
+    }
+    session = _Session(responses)
+    with pytest.raises(service.SunoDownloadError):
+        service._download_audio("https://cdn.suno.test/0", tmp_path, session=session)
+    assert len(session.calls) == service._AUDIO_MAX_REDIRECTS + 1 == 4
+    assert all(r.closed for r in list(responses.values())[:4])
+    assert list(tmp_path.iterdir()) == []
+
+
+# --- S7: save_server/start_oauth/complete_oauth share _store_lock ---------
+@pytest.mark.parametrize("method", ["save_server", "start_oauth", "complete_oauth"])
+def test_s7_store_writers_take_the_store_lock(tmp_path, monkeypatch, method):
+    mgr = _tool_server(tmp_path, monkeypatch)
+    calls = {
+        "save_server": lambda: mgr.save_server({"name": "X"}, server_id="suno_mcp"),
+        "start_oauth": lambda: mgr.start_oauth(
+            "suno_mcp", payload={"client_id": "c", "auth_url": "https://a.test/auth"}
+        ),
+        "complete_oauth": lambda: mgr.complete_oauth(
+            "suno_mcp", {"state": "nope", "code": "x"}
+        ),
+    }
+    done = threading.Event()
+
+    def run():
+        try:
+            calls[method]()
+        except Exception:
+            pass
+        finally:
+            done.set()
+
+    mgr._store_lock.acquire()
+    worker = threading.Thread(target=run)
+    try:
+        worker.start()
+        assert not done.wait(0.2)  # blocked on the lock
+    finally:
+        mgr._store_lock.release()
+    worker.join(5)
+    assert done.is_set() and not worker.is_alive()
+
+
+# --- S8: download read timeout 30 s ---------------------------------------
+def test_s8_download_read_timeout_is_30s(tmp_path):
+    assert service._AUDIO_TIMEOUT == (10, 30)
+    session = _Session({"https://cdn.suno.test/a.mp3": _ok_resp()})
+    service._download_audio("https://cdn.suno.test/a.mp3", tmp_path, session=session)
+    assert session.calls[0][1]["timeout"] == (10, 30)

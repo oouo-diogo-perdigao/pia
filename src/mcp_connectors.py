@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import json
 import logging
@@ -95,10 +96,6 @@ AUTH_ERROR_CODES = ("401", "403")
 # JSON-RPC codes some MCP servers use for auth/credits (non-standard range).
 _RPC_AUTH_CODES = (-32001, 401, 403)
 _RPC_CREDIT_CODES = (402,)
-_AUTH_MESSAGE_RE = re.compile(
-    r"\bunauthori[sz]ed\b|\bforbidden\b|token (expired|invalid)|invalid[_ ]token",
-    re.I,
-)
 _CREDIT_MESSAGE_RE = re.compile(
     r"insufficient[_ ]credits?|no credits|out of credits|not enough credits"
     r"|credits? (exhausted|insufficient)|payment required|insufficient[_ ]balance",
@@ -182,9 +179,11 @@ def safe_error(exc: BaseException) -> tuple[str, str]:
     if isinstance(exc, requests.HTTPError) and status:
         code = str(int(status))
     elif isinstance(exc, MCPRpcError) and (
-        exc.rpc_code in _RPC_AUTH_CODES or _AUTH_MESSAGE_RE.search(message)
+        exc.rpc_code in _RPC_AUTH_CODES or _TOOL_AUTH_ERROR_RE.search(message)
     ):
-        code = "401"  # JSON-RPC authorization error counts as HTTP 401
+        # JSON-RPC authorization error counts as HTTP 401. Conservative rule
+        # (same as tool isError): a policy "forbidden" does not expire.
+        code = "401"
     elif isinstance(exc, MCPRpcError) and (
         exc.rpc_code in _RPC_CREDIT_CODES or _CREDIT_MESSAGE_RE.search(message)
     ):
@@ -388,6 +387,21 @@ def _infer_known_tools(server: dict[str, Any]) -> list[dict[str, Any]]:
         if any(kw in haystack for kw in keywords):
             return [dict(t) for t in tools]
     return []
+
+
+def _with_store_lock(method: Any) -> Any:
+    """Run a read-modify-write of the server store under ``_store_lock``.
+
+    Note: start_oauth/complete_oauth may do an OAuth HTTP call (timeout 15 s)
+    while holding it; runtime merges of in-flight calls wait meanwhile.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+        with self._store_lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
 
 
 class MCPConnectorManager:
@@ -612,6 +626,7 @@ class MCPConnectorManager:
             else (existing_acc or {}).get("last_error_code"),
         }
 
+    @_with_store_lock
     def save_server(
         self, payload: dict[str, Any], server_id: str | None = None
     ) -> dict[str, Any]:
@@ -1460,6 +1475,7 @@ class MCPConnectorManager:
             "Nenhuma conta MCP ativa conseguiu executar a ferramenta."
         )
 
+    @_with_store_lock
     def start_oauth(
         self,
         server_id: str,
@@ -1588,6 +1604,7 @@ class MCPConnectorManager:
         self._save_raw_servers(servers)
         return {"ok": True, "state": state, "auth_url": auth_url, "account": acc}
 
+    @_with_store_lock
     def complete_oauth(
         self,
         server_id: str,
