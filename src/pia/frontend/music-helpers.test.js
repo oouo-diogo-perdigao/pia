@@ -18,6 +18,8 @@ import {
   isSunoCatalogProvider,
   maskedEditedFieldError,
   notifyMusicProvidersUpdated,
+  finalStateForError,
+  interruptedProgressLabel,
   partialBatchLabel,
   buildMusicSelectPayload,
   buildSunoOAuthStartPayload,
@@ -971,5 +973,80 @@ describe("music-helpers seletor dinâmico (Suno no app de Música)", () => {
 
   it("evento de atualização do catálogo", () => {
     assert.equal(MUSIC_PROVIDERS_UPDATED_EVENT, "pia:music-providers-updated");
+  });
+
+  it("interruptedProgressLabel prefere o ready_text do backend", () => {
+    assert.equal(
+      interruptedProgressLabel({
+        completed: 2,
+        total: 3,
+        ready_text: "2 de 3 músicas prontas",
+      }),
+      "Geração interrompida · 2 de 3 músicas prontas",
+    );
+    assert.equal(
+      interruptedProgressLabel({ ready_text: "  1 de 4 músicas prontas " }),
+      "Geração interrompida · 1 de 4 músicas prontas",
+    );
+  });
+
+  it("interruptedProgressLabel cai no partialBatchLabel sem ready_text", () => {
+    assert.equal(
+      interruptedProgressLabel({ completed: 1, total: 3 }),
+      "Geração interrompida · 1 de 3 músicas prontas",
+    );
+    assert.equal(
+      interruptedProgressLabel({ completed: 1, total: 1, ready_text: "" }),
+      "Geração interrompida · 1 de 1 música pronta",
+    );
+  });
+
+  it("interruptedProgressLabel sem faixa pronta ou sem dados mostra só o título", () => {
+    assert.equal(
+      interruptedProgressLabel({
+        completed: 0,
+        total: 3,
+        ready_text: "0 de 3 músicas prontas",
+      }),
+      "Geração interrompida",
+    );
+    assert.equal(interruptedProgressLabel({}), "Geração interrompida");
+    assert.equal(interruptedProgressLabel(null), "Geração interrompida");
+    assert.equal(
+      interruptedProgressLabel({ completed: "x", total: 3, ready_text: 5 }),
+      "Geração interrompida",
+    );
+  });
+
+  it("finalStateForError usa interrupted com faixa pronta", () => {
+    assert.equal(
+      finalStateForError({ state: "running" }, { completed: 1, total: 3 }),
+      "interrupted",
+    );
+    assert.equal(finalStateForError(null, { completed: "2" }), "interrupted");
+  });
+
+  it("finalStateForError mantém interrupted vindo do progress", () => {
+    assert.equal(
+      finalStateForError({ state: "interrupted" }, { completed: 0 }),
+      "interrupted",
+    );
+    assert.equal(
+      finalStateForError({ state: "interrupted" }, {}),
+      "interrupted",
+    );
+  });
+
+  it("finalStateForError usa error sem faixa pronta", () => {
+    assert.equal(
+      finalStateForError({ state: "running" }, { completed: 0, total: 3 }),
+      "error",
+    );
+    assert.equal(finalStateForError(null, {}), "error");
+    assert.equal(finalStateForError(undefined, undefined), "error");
+    assert.equal(
+      finalStateForError({ state: "running" }, { completed: "x" }),
+      "error",
+    );
   });
 });

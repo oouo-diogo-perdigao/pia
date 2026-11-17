@@ -458,3 +458,26 @@ export function partialBatchLabel(completed, total) {
   if (!Number.isInteger(done) || !Number.isInteger(all) || all < 1) return "";
   return `${done} de ${all} ${all === 1 ? "música pronta" : "músicas prontas"}`;
 }
+
+// Label da barra quando o job termina com erro no meio do lote.
+// Prefere o `ready_text` do backend (T4) e cai no partialBatchLabel sem ele.
+// Sem nenhuma faixa pronta, mostra só "Geração interrompida".
+export const INTERRUPTED_LABEL = "Geração interrompida";
+export function interruptedProgressLabel(event) {
+  const completed = Number(event?.completed);
+  if (event?.completed != null && completed === 0) return INTERRUPTED_LABEL;
+  const ready =
+    typeof event?.ready_text === "string" ? event.ready_text.trim() : "";
+  const detail =
+    ready || (completed > 0 ? partialBatchLabel(completed, event?.total) : "");
+  return detail ? `${INTERRUPTED_LABEL} · ${detail}` : INTERRUPTED_LABEL;
+}
+
+// Estado final da barra quando o job termina com evento `error`.
+// Com pelo menos uma faixa pronta, ou se o backend já marcou `interrupted`,
+// a geração é tratada como interrompida (amarelo); sem nada pronto, é erro (vermelho).
+export function finalStateForError(prev, event) {
+  const completed = Number(event?.completed);
+  if (completed >= 1 || prev?.state === "interrupted") return "interrupted";
+  return "error";
+}

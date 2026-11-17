@@ -33,7 +33,8 @@ import {
   SUNO_HINT_TEXT,
   buildGeneratorOptions,
   generatorHints,
-  partialBatchLabel,
+  finalStateForError,
+  interruptedProgressLabel,
   providerLabel,
   resolveInitialProvider,
   resolveProviderAfterRefresh,
@@ -120,14 +121,8 @@ export default function Music({ sub = "principal" }) {
             old
               ? {
                   ...old,
-                  state: "error",
-                  label: [
-                    "Geração interrompida",
-                    event.completed > 0 &&
-                      partialBatchLabel(event.completed, event.total),
-                  ]
-                    .filter(Boolean)
-                    .join(" · "),
+                  state: finalStateForError(old, event),
+                  label: interruptedProgressLabel(event),
                 }
               : null,
           );
