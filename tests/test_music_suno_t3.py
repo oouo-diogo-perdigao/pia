@@ -1432,3 +1432,110 @@ def test_g3_cancel_after_a_call_uses_rn08_message(music_out):
         )
     assert str(err.value) == service.SUNO_CANCEL_MESSAGE
     assert state["calls"] == 1 and err.value.completed == 2
+
+
+# ==========================================================================
+# inspect_server / delete_server vs. the store lock (pre-existing bug)
+# ==========================================================================
+def _blocking_tools_list(monkeypatch, mgr):
+    """tools/list blocks on ``release`` (no sleep); tools/call answers 401."""
+    state = {"entered": threading.Event(), "release": threading.Event()}
+
+    def exec_single(server, account, method, params, timeout=None):
+        if method == "tools/list":
+            state["entered"].set()
+            state["release"].wait(10)
+            return {"tools": [{"name": "fresh_tool", "description": "nova"}]}
+        raise _http_error(401)
+
+    monkeypatch.setattr(mgr, "_exec_single", exec_single)
+    return state
+
+
+def test_inspect_does_not_undo_oauth_connection_made_during_tools_list(
+    tmp_path, monkeypatch
+):
+    mgr = _manager(tmp_path, monkeypatch)
+    _oauth_srv(mgr)
+    fake = _blocking_tools_list(monkeypatch, mgr)
+    threads: list = []
+    try:
+        _inspect_t, inspect_box = _spawn(lambda: mgr.inspect_server("srv"), threads)
+        assert fake["entered"].wait(5)
+        oauth_t, oauth_box = _spawn(
+            lambda: mgr.complete_oauth(
+                "srv", {"account_id": "a1", "access_token": "tok-during-inspect"}
+            ),
+            threads,
+        )
+        oauth_t.join(5)
+        assert not fake["release"].is_set() and not oauth_t.is_alive()
+        assert "error" not in oauth_box
+    finally:
+        _join_all(fake, threads)
+    assert inspect_box["result"]["status"] == "online"
+    raw = mgr._find_raw("srv")
+    acc = raw["accounts"][0]
+    assert acc["oauth"]["connected"] is True  # not undone by the inspect
+    assert acc["oauth"]["token_masked"]
+    assert raw["last_status"] == "online"
+    assert [t["name"] for t in raw["cached_tools"]] == ["fresh_tool"]
+
+
+def test_inspect_does_not_erase_401_recorded_during_tools_list(tmp_path, monkeypatch):
+    mgr = _manager(tmp_path, monkeypatch)
+    _oauth_srv(mgr)
+    fake = _blocking_tools_list(monkeypatch, mgr)
+    threads: list = []
+    try:
+        _inspect_t, inspect_box = _spawn(lambda: mgr.inspect_server("srv"), threads)
+        assert fake["entered"].wait(5)
+        call_t, call_box = _spawn(
+            lambda: mgr.call_tool("srv", "generate", {}, account_id="a1"), threads
+        )
+        call_t.join(5)
+        assert not fake["release"].is_set() and not call_t.is_alive()
+        assert isinstance(call_box.get("error"), requests.HTTPError)
+    finally:
+        _join_all(fake, threads)
+    assert "error" not in inspect_box
+    acc = mgr._find_raw("srv")["accounts"][0]
+    assert acc["last_error_code"] == "401"  # still expired after the inspect
+    assert acc["usage_count"] == 0
+
+
+def test_inspect_offline_keeps_cached_tools_and_records_status(tmp_path, monkeypatch):
+    mgr = _manager(tmp_path, monkeypatch)
+    _oauth_srv(mgr)
+    mgr._merge_runtime("srv", None, lambda t: t.update(cached_tools=[{"name": "old"}]))
+
+    def offline(*_a, **_k):
+        raise requests.ConnectionError("down")
+
+    monkeypatch.setattr(mgr, "_exec_single", offline)
+    result = mgr.inspect_server("srv")
+    assert result["status"] == "offline" and result["connection_error"]
+    raw = mgr._find_raw("srv")
+    assert raw["last_status"] == "offline" and raw["last_inspected_at"]
+    assert raw["cached_tools"] == [{"name": "old"}]
+    assert not raw.get("last_error_code")  # inspect does not persist errors
+
+
+def test_delete_server_takes_the_store_lock(tmp_path, monkeypatch):
+    mgr = _manager(tmp_path, monkeypatch)
+    _oauth_srv(mgr)
+    threads: list = []
+    done = threading.Event()
+    mgr._store_lock.acquire()
+    try:
+        delete_t, delete_box = _spawn(
+            lambda: (mgr.delete_server("srv"), done.set()), threads
+        )
+        assert not done.wait(0.2)  # blocked while the lock is held
+        assert delete_t.is_alive()
+    finally:
+        mgr._store_lock.release()
+    delete_t.join(5)
+    assert not delete_t.is_alive() and done.is_set()
+    assert "error" not in delete_box
+    assert all(s.get("id") != "srv" for s in mgr._raw_servers())

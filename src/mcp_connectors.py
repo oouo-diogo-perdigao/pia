@@ -812,6 +812,7 @@ class MCPConnectorManager:
         self._save_raw_servers(servers)
         return self._public_server(record)
 
+    @_with_store_lock
     def delete_server(self, server_id: str) -> dict[str, Any]:
         servers = self._raw_servers()
         filtered = [s for s in servers if s.get("id") != server_id]
@@ -1143,6 +1144,13 @@ class MCPConnectorManager:
         return self._rpc_http(url, method, params, headers, req_id=2, timeout=timeout)
 
     def inspect_server(self, server_id: str) -> dict[str, Any]:
+        """Health check (tools/list, 5 s) with offline fallback.
+
+        The HTTP runs without ``_store_lock`` on a read-only snapshot; only
+        cached_tools/last_inspected_at/last_status are then merged into a fresh
+        read (never the whole snapshot, which could undo an OAuth connection
+        or a 401 recorded meanwhile).
+        """
         servers = self._raw_servers()
         server = next((s for s in servers if s.get("id") == server_id), None)
         if server is None:
@@ -1171,7 +1179,6 @@ class MCPConnectorManager:
                     if isinstance(t, dict) and t.get("name")
                 ]
             status = "online"
-            server["cached_tools"] = tools
         except Exception as exc:
             connection_error = safe_error(exc)[1]
             status = "offline"
@@ -1179,9 +1186,18 @@ class MCPConnectorManager:
             if not tools:
                 tools = _infer_known_tools(server)
 
-        server["last_inspected_at"] = _now_iso()
+        inspected_at = _now_iso()
+        fresh_tools = list(tools) if status == "online" else None
+
+        def apply(target: dict[str, Any]) -> None:
+            if fresh_tools is not None:
+                target["cached_tools"] = fresh_tools
+            target["last_inspected_at"] = inspected_at
+            target["last_status"] = status
+
+        self._merge_runtime(server_id, None, apply)
+        server["last_inspected_at"] = inspected_at
         server["last_status"] = status
-        self._save_raw_servers(servers)
 
         return {
             "server_id": server["id"],
