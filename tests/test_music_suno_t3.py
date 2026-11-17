@@ -1,7 +1,6 @@
 """T3: generate()/generate_suno_batch via SunoMcpAdapter (mock fake_suno_mcp)."""
 
 import json
-import sys
 import threading
 
 import pytest
@@ -26,21 +25,6 @@ def _manager(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(mcp_connectors, "_manager", mgr)
     return mgr
-
-
-def _quiet_client_resets(server):
-    """Our client aborts bad downloads by closing the socket (RST); the mock's
-    keep-alive thread would print that ConnectionReset to stderr. Swallow only
-    reset/broken-pipe in the mock's handle_error (the mock file is untouched)."""
-    httpd = server._httpd
-    original = httpd.handle_error
-
-    def handle_error(request, client_address):
-        if isinstance(sys.exc_info()[1], (ConnectionResetError, BrokenPipeError)):
-            return
-        original(request, client_address)
-
-    httpd.handle_error = handle_error
 
 
 def _register(mgr, server):
@@ -79,7 +63,6 @@ def suno(tmp_path, monkeypatch, fake_suno_mcp, music_out):
     monkeypatch.setattr(service, "settings", lambda: {"MUSIC_SUNO_TIMEOUT": 20})
     mgr = _manager(tmp_path, monkeypatch)
     _register(mgr, fake_suno_mcp)
-    _quiet_client_resets(fake_suno_mcp)
     fake_suno_mcp.mgr = mgr
     fake_suno_mcp.out = music_out
     return fake_suno_mcp
@@ -348,7 +331,6 @@ def test_leaky_server_never_leaks_token_or_signed_url(tmp_path, monkeypatch, mus
     monkeypatch.setattr(service, "settings", lambda: {"MUSIC_SUNO_TIMEOUT": 20})
     monkeypatch.setattr(service, "_ALLOW_LOOPBACK_HTTP_AUDIO", True)
     with FakeSunoMcpServer(leaky=True, scenarios=["success", "503"]) as server:
-        _quiet_client_resets(server)
         mgr = _manager(tmp_path, monkeypatch)
         _register(mgr, server)
         item = service.generate("lofi", provider="suno_mcp")
