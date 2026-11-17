@@ -39,6 +39,10 @@ Com dependências Qt/Chromium instaladas, no Windows:
 
 No Linux, substitua o executável por `.venv/bin/python`; disponibilidade depende das bibliotecas gráficas. Esses scripts usam fixtures/simulações. Não confunda sucesso em offscreen com validação física de câmera, áudio, bandeja e múltiplos monitores.
 
+## Música / Suno
+
+Os testes do Suno usam o mock HTTP local `tests/fixtures/fake_suno_mcp.py` (fixture `fake_suno_mcp` no `conftest`). Não faça geração real nem chamada paga ao `api.suno.com` na suíte comum. O e2e `tests/test_music_suno_e2e.py` percorre `web_api.handle("generate", …)` com um `context` fake e cobre sucesso, 401, 503, timeout, falha parcial (parada no primeiro clip), lote incompleto, recusa antes do job (com `code` no JSON 400), `download_failed`, `suno_no_credits` e vazamento de token. O smoke manual do seletor (CA11) e das Configurações está em `docs/suno-music-roteiros.md`.
+
 ## Áreas críticas
 
 - Transcrição: json/text/verbose_json/srt/vtt, duração e timestamps reais, silêncio, fallback, repetição, emendas/pausas e arquivos longos; sem downloads de modelos na suite comum.

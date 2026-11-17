@@ -62,6 +62,8 @@ O app cria de 1 a 10 faixas por pedido, agrupadas em um card. Progresso percentu
 
 Destino fixo: `Documentos/pia/music`, dentro do perfil do usuário. As configurações e credenciais são gerenciadas pela interface e armazenadas no SQLite/cofre; consulte [perfil e migração](PROFILE_MIGRATION.md).
 
+O app oferece os geradores Local (ACE-Step), Gemini/Lyria e **Suno** (MCP). O Suno só entra no seletor quando o catálogo (`GET /api/pia/music/providers`) traz `available=true` (endpoint + credencial válida, inclusive um servidor com host `api.suno.com`). A configuração (URL, OAuth ou bearer, estados do selo) fica em Configurações → Música. Salvar o provedor Suno sem credencial é permitido, mas o app abre em Local até autorizar. Cancelar a espera não interrompe a geração já enviada ao Suno e pode consumir créditos. Detalhes e o roteiro manual: [README do app de Música](../Plugins/Apps/music/README.md) e [suno-music-roteiros.md](suno-music-roteiros.md).
+
 A PIA solicita o encerramento do processo ACE-Step iniciado por ela após cada geração, inclusive em erro/cancelamento. No Windows, o interpretador pode criar processos filhos que sobrevivem ao processo principal; o encerramento de toda a árvore e a liberação completa de VRAM ainda precisam de correção e validação com hardware. A próxima geração pode recarregar o motor. A PIA não encerra um servidor ACE-Step externo que já estava rodando; para ele, liberação de recursos depende de sua configuração. Não foi executado download de modelos ou geração paga para validar essas mudanças.
 
 ## Agentes externos

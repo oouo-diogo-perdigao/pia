@@ -1,5 +1,21 @@
 # PIA Changelog
 
+## [Não publicado — Suno como gerador no app de Música] - 2026-11-17
+
+### Added
+- Provedor `suno_mcp` no app de Música: seletor dinâmico (Suno só aparece quando `available=true`), Configurações → Música com selo de conexão (URL, OAuth/bearer, expirado, pendente) e deep link `Apps/music`.
+- Geração via servidor MCP (URL ou comando), com até 10 faixas; o backend faz `ceil(N/2)` chamadas (2 clips por chamada) e descarta o excedente.
+- Notificação de lote parcial no formato "k de N músicas prontas (geração interrompida)"; o lote para no primeiro clip que falha. Aviso de que cancelar a espera não interrompe a geração já enviada ao Suno (pode consumir créditos).
+- Recusa da geração antes de criar o job quando o Suno não está conectado ou a credencial expirou (`suno_not_connected`, `suno_credential_expired`); o HTTP 400 inclui o `code`. Códigos do job: `incomplete_batch`, `download_failed`, `suno_no_credits`, além de auth/unavailable/timeout. Download seguro (sem gravar URL remota). Campo `ready_text` no erro e no progresso; estado final `interrupted` no WorkProgress.
+- Mock HTTP local do MCP do Suno (`tests/fixtures/fake_suno_mcp.py`) e testes e2e (`tests/test_music_suno_e2e.py`) para sucesso, 401, 503, timeout, falha parcial, lote incompleto, recusa antes do job, download e créditos, e ausência de vazamento de token (CA05, CA06, CA07, CA10). Sem chamada paga ao Suno.
+
+### Notes
+- Salvar `MUSIC_PROVIDER=suno_mcp` sem credencial é permitido (RN04); o app abre em Local até autorizar.
+- A duração no Suno é indicativa. Não há fallback automático para Local/Gemini em caso de erro.
+- A mensagem de `incomplete_batch` não inclui "k de N"; esse texto fica na notificação, em `completed`/`total` e em `ready_text`.
+- Roteiro manual do seletor e das configurações: `docs/suno-music-roteiros.md`.
+
+
 ## [v0.2.1] - 2026-11-15
 
 ### Added

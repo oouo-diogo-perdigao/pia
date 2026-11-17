@@ -4,7 +4,7 @@ Sobe um servidor JSON-RPC em thread, na porta efêmera 127.0.0.1:0, e
 responde ``initialize``, ``notifications/initialized``, ``tools/list``,
 ``tools/call`` da tool de geração e um GET de áudio com bytes fake.
 
-Não faz nenhuma chamada real ou paga ao Suno.
+Não faz nenhuma chamada real ou paga ao Suno. ``ConnectionResetError`` e ``BrokenPipeError`` do cliente de teste são ignorados em ``handle_error`` do servidor HTTP (sem acesso externo a ``_httpd``).
 
 Por que um servidor HTTP de verdade (e não só monkeypatch de
 ``requests``): o cliente atual (``Plugins/Apps/music/tools.py`` e
@@ -39,12 +39,17 @@ Cenários (por chamada da tool de geração, em sequência configurável)
         ``threading.Event`` que o ``stop()`` sinaliza.
     ``partial``
         HTTP 200, 2 clips, mas o segundo vem sem áudio (falha parcial
-        dentro da chamada).
+        dentro da chamada). O lote da T3 (Q8) para no primeiro clip
+        que falha, então a 2ª chamada da sequência não é feita.
+    ``402``
+        HTTP 402 (sem créditos).
 
-    Exemplo CA07 (N=3, 1ª chamada ok, 2ª falha):
-    ``scenarios=["success", "503"]`` → 2 clips válidos e a 2ª chamada
-    falha; a notificação equivalente é "2 de 3 músicas prontas".
-    Para obter só 1 faixa válida: ``scenarios=["partial", "503"]``.
+    Exemplo CA07 + Q8 (N=3): ``scenarios=["partial", "503"]`` → 1
+    ``tools/call`` (o 503 não é usado), 1 faixa salva e a notificação
+    "1 de 3 músicas prontas (geração interrompida)". Para 2 faixas
+    válidas e falha na 2ª chamada: ``scenarios=["success", "503"]``.
+    Com ``clips_per_call=1`` e ``success``, N=3 dispara
+    ``incomplete_batch`` (1 clip quando o lote pedia 2).
 
 Download de áudio (``audio_behavior``, por clip)
     ``ok``
@@ -120,6 +125,7 @@ mascarar a falha do teste.
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import uuid
 import warnings
@@ -149,7 +155,7 @@ GENERATION_TOOL_CANDIDATES = (
 )
 
 # Já estava no arquivo original; mantido para documentação do contrato.
-ScenarioName = str  # success, 401, 503, 500, timeout, partial
+ScenarioName = str  # success, 401, 402, 503, 500, timeout, partial
 
 DEFAULT_TOOLS: list[dict[str, Any]] = [
     {
@@ -305,6 +311,15 @@ class RecordedRequest:
         return json.loads(self.body.decode("utf-8"))
 
 
+class _QuietThreadingHTTPServer(ThreadingHTTPServer):
+    """Ignora reset/broken-pipe do cliente de teste no keep-alive."""
+
+    def handle_error(self, request, client_address):
+        if isinstance(sys.exc_info()[1], (ConnectionResetError, BrokenPipeError)):
+            return
+        super().handle_error(request, client_address)
+
+
 @dataclass
 class FakeSunoMcpServer:
     """Servidor MCP HTTP fake do Suno (porta efêmera, uma thread).
@@ -338,6 +353,9 @@ class FakeSunoMcpServer:
         Catálogo explícito; se omitido, usa :func:`load_suno_tools_list`.
     credits
         Valor devolvido por ``get_credits``.
+    clips_per_call
+        Quantos clips a tool de geração devolve (padrão 2). Use 1
+        para exercitar ``incomplete_batch`` (Q1).
     """
 
     scenarios: str | Sequence[str] | None = "success"
@@ -350,6 +368,7 @@ class FakeSunoMcpServer:
     audio_behavior: Any = "ok"
     tools: list[dict[str, Any]] | None = None
     credits: int = 42
+    clips_per_call: int = CLIPS_PER_CALL
     host: str = "127.0.0.1"
 
     requests: list[RecordedRequest] = field(default_factory=list, init=False)
@@ -415,7 +434,7 @@ class FakeSunoMcpServer:
             return self
         self._stop_event.clear()
         handler = self._make_handler()
-        self._httpd = ThreadingHTTPServer((self.host, 0), handler)
+        self._httpd = _QuietThreadingHTTPServer((self.host, 0), handler)
         httpd = self._httpd
         self._thread = threading.Thread(
             target=httpd.serve_forever,
@@ -540,6 +559,8 @@ class FakeSunoMcpServer:
     def _error_message(self, kind: str) -> str:
         if kind == "unauthorized":
             message = "Unauthorized"
+        elif kind == "credits":
+            message = "Insufficient credits"
         else:
             message = "Suno unavailable"
         if self.leaky and self.required_token:
@@ -961,6 +982,21 @@ class FakeSunoMcpServer:
             self._record(handler, raw, payload, 401)
             self._send_401(handler, rpc_id)
             return
+        if scenario == "402":
+            self._record(handler, raw, payload, 402)
+            self._send_json(
+                handler,
+                402,
+                {
+                    "jsonrpc": "2.0",
+                    "id": rpc_id,
+                    "error": {
+                        "code": 402,
+                        "message": self._error_message("credits"),
+                    },
+                },
+            )
+            return
         if scenario in {"503", "500"}:
             status = int(scenario)
             self._record(handler, raw, payload, status)
@@ -1013,9 +1049,10 @@ class FakeSunoMcpServer:
             or ""
         )
         clips: list[dict[str, Any]] = []
-        for index in range(CLIPS_PER_CALL):
+        n_clips = max(0, int(self.clips_per_call))
+        for index in range(n_clips):
             clip_id = f"clip-{uuid.uuid4().hex[:10]}"
-            failed = partial and index == CLIPS_PER_CALL - 1
+            failed = partial and index == n_clips - 1
             clip: dict[str, Any] = {
                 "id": clip_id,
                 "title": prompt or f"fake-suno-{index + 1}",

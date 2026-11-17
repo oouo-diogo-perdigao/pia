@@ -49,3 +49,50 @@ def test_catalogue_matches_generated_artifact_and_real_dispatch():
     assert (
         next(v for v in collection["variable"] if v["key"] == "api_key")["value"] == ""
     )
+    # Shape T1 de /music/providers e /music/select (sem segredos em claro).
+    select = next(r for r in requests if r["url"].endswith("/api/pia/music/select"))
+    select_body = json.loads(select["body"]["raw"])
+    assert select_body["provider"] in {"local", "gemini", "suno_mcp"}
+    assert "suno_mcp_url" in select_body
+    assert "suno_mcp_auth_type" in select_body
+    assert select_body.get("suno_mcp_token") == ""
+    assert select_body.get("suno_mcp_client_secret") == ""
+    providers = next(
+        r for r in requests if r["url"].endswith("/api/pia/music/providers")
+    )
+    assert "credential_state" in providers.get("description", "")
+    assert "settings_route" in providers.get("description", "")
+    app_select = next(
+        r for r in requests if r["url"].endswith("/api/pia/apps/music/select")
+    )
+    app_body = json.loads(app_select["body"]["raw"])
+    assert app_body["provider"] in {"local", "gemini", "suno_mcp"}
+    assert app_body.get("suno_mcp_token") == ""
+
+    app_generate = next(
+        item
+        for folder in collection["item"]
+        for item in folder["item"]
+        if item["request"]["url"].endswith("/api/pia/apps/music/generate")
+    )
+    desc = app_generate["request"].get("description", "")
+    assert "suno_not_connected" in desc
+    assert "suno_credential_expired" in desc
+    assert "`code`" in desc or "code" in desc
+    examples = app_generate["response"]
+    assert examples and examples[0]["code"] == 400
+    example_body = json.loads(examples[0]["body"])
+    assert example_body == {
+        "error": "Conecte o Suno em Configurações → Música",
+        "code": "suno_not_connected",
+    }
+    v1_generate = next(
+        item
+        for folder in collection["item"]
+        for item in folder["item"]
+        if item["request"]["url"].endswith("/v1/music/generations")
+    )
+    assert "suno_not_connected" in v1_generate["request"].get("description", "")
+    assert json.loads(v1_generate["response"][0]["body"])["code"] == (
+        "suno_not_connected"
+    )

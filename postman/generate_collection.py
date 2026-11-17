@@ -71,6 +71,38 @@ BODIES = {
         "provider": "local",
         "duration": 30,
     },
+    # Catálogo T1: available, credential_state, endpoint_configured, settings_route.
+    # GET-like; o corpo fica vazio. A descrição do item documenta o shape.
+    "/music/providers": {},
+    "/music/select": {
+        "provider": "suno_mcp",
+        "gemini_model": "lyria-3.5",
+        "suno_mcp_url": "https://api.suno.com/mcp",
+        "suno_mcp_command": "",
+        "suno_mcp_token": "",
+        "suno_mcp_auth_type": "oauth",
+        "suno_mcp_client_id": "",
+        "suno_mcp_client_secret": "",
+        "suno_mcp_auth_url": "",
+        "suno_mcp_token_url": "",
+        "suno_mcp_scopes": "",
+        "suno_mcp_redirect_uri": "",
+    },
+    "/music/suno/oauth/start": {
+        "client_id": "",
+        "client_secret": "",
+        "auth_url": "",
+        "token_url": "",
+        "scopes": "",
+        "account_id": "",
+    },
+    "/music/suno/oauth/callback": {
+        "state": "{{state}}",
+        "account_id": "",
+        "code": "",
+        "access_token": "",
+    },
+    "/music/suno/oauth/disconnect": {},
     "/action/camera": {"device": 0, "width": 1280, "height": 720},
     "/action/text-at-cursor": {"text": "Texto de exemplo"},
     "/action/local-record": {"insert_at_cursor": False},
@@ -132,6 +164,10 @@ BODIES = {
 APP_BODIES = {
     "music/generate": BODIES["/v1/music/generations"] | {"count": 1},
     "music/cancel": {"job": "{{job_id}}"},
+    "music/select": BODIES["/music/select"],
+    "music/suno-oauth-start": BODIES["/music/suno/oauth/start"],
+    "music/suno-oauth-callback": BODIES["/music/suno/oauth/callback"],
+    "music/suno-oauth-disconnect": {},
     "podcast_automation/start": {
         "task": "process",
         "monitor": False,
@@ -170,6 +206,34 @@ APP_BODIES = {
         "data": "{{file_base64}}",
     },
 }
+
+
+MUSIC_GENERATE_400_DESCRIPTION = (
+    "Gera um lote de músicas. Sucesso devolve `{job}` e o progresso segue no SSE. "
+    "A recusa antes do job (Suno não conectado ou credencial expirada) responde "
+    "HTTP 400 com `{error, code}`, onde `code` é `suno_not_connected` ou "
+    "`suno_credential_expired`."
+)
+
+
+def music_generate_400_example(request):
+    """Exemplo salvo da recusa 400 com o `code` validado pelo http.py."""
+    return {
+        "name": "400 — Suno não conectado",
+        "originalRequest": request,
+        "status": "Bad Request",
+        "code": 400,
+        "_postman_previewlanguage": "json",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": json.dumps(
+            {
+                "error": "Conecte o Suno em Configurações → Música",
+                "code": "suno_not_connected",
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+    }
 
 
 def example_for_node(node, base):
@@ -384,7 +448,17 @@ def build():
         ("POST", "/action/camera"),
         ("POST", "/v1/music/generations"),
     ]:
-        add("05 · Câmera e música", method, path)
+        if path == "/v1/music/generations":
+            item = add(
+                "05 · Câmera e música",
+                method,
+                path,
+                description=MUSIC_GENERATE_400_DESCRIPTION,
+            )
+            if item:
+                item["response"] = [music_generate_400_example(item["request"])]
+        else:
+            add("05 · Câmera e música", method, path)
     for name, body in [
         (
             "initialize",
@@ -435,12 +509,37 @@ def build():
                 body = BODIES.get(path, {})
                 if path == "/bots/secretaria":
                     body = {"enabled": False}
+                description = ""
+                if path == "/music/providers":
+                    description = (
+                        "Catálogo dos geradores (T1). A entrada suno_mcp traz "
+                        "label, available, endpoint_configured, credential_state "
+                        "(missing|configured|expired), token_configured, "
+                        "auth_type, oauth_connected, campos OAuth mascarados, "
+                        "server_id e settings_route {view:settings, section:Apps/music}. "
+                        "selection traz o provedor salvo e os mesmos campos suno_mcp_* "
+                        "já mascarados. Sem segredos em claro."
+                    )
+                elif path == "/music/select":
+                    description = (
+                        "Salva o provedor (local, gemini ou suno_mcp) e a config "
+                        "do Suno. RN04: provider=suno_mcp pode ser gravado sem "
+                        "credencial; o app abre em Local até autorizar. Deixe "
+                        "token e segredos OAuth vazios se não for editá-los, "
+                        "para não reenviar valores mascarados."
+                    )
+                elif path == "/music/suno/oauth/start":
+                    description = (
+                        "Inicia OAuth do Suno (DCR + PKCE). Campos vazios usam "
+                        "os defaults oficiais. Não é geração paga."
+                    )
                 item = add(
                     "07 · Workspace e serviços",
                     method,
                     "/api/pia" + path,
                     body,
                     query="?chat={{chat_id}}" if path == "/chat/messages" else "",
+                    description=description,
                 )
                 if path == "/chat/new":
                     item["event"] = [
@@ -550,12 +649,19 @@ def build():
                         }
                     if action in ("saved-image", "open-saved", "copy-saved"):
                         body = {"name": "{{capture_name}}"}
-                add(
+                item = add(
                     "09 · Apps / " + app,
                     "POST",
                     "/api/pia/apps/" + app + "/" + action,
                     body,
+                    description=(
+                        MUSIC_GENERATE_400_DESCRIPTION
+                        if app == "music" and action == "generate"
+                        else ""
+                    ),
                 )
+                if item and app == "music" and action == "generate":
+                    item["response"] = [music_generate_400_example(item["request"])]
     add(
         "10 · Arquivos e eventos",
         "GET",

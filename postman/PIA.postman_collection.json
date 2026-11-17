@@ -211,6 +211,11 @@
       "type": "string"
     },
     {
+      "key": "state",
+      "value": "",
+      "type": "string"
+    },
+    {
       "key": "target",
       "value": "",
       "type": "string"
@@ -1984,7 +1989,7 @@
               }
             ],
             "url": "{{base_url}}/v1/music/generations",
-            "description": "Rota extraída do código atual. Consulte os contratos e limites no repositório.",
+            "description": "Gera um lote de músicas. Sucesso devolve `{job}` e o progresso segue no SSE. A recusa antes do job (Suno não conectado ou credencial expirada) responde HTTP 400 com `{error, code}`, onde `code` é `suno_not_connected` ou `suno_credential_expired`.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"prompt\": \"Piano instrumental tranquilo\",\n  \"lyrics\": \"\",\n  \"provider\": \"local\",\n  \"duration\": 30\n}",
@@ -1995,7 +2000,41 @@
               }
             }
           },
-          "response": []
+          "response": [
+            {
+              "name": "400 — Suno não conectado",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/v1/music/generations",
+                "description": "Gera um lote de músicas. Sucesso devolve `{job}` e o progresso segue no SSE. A recusa antes do job (Suno não conectado ou credencial expirada) responde HTTP 400 com `{error, code}`, onde `code` é `suno_not_connected` ou `suno_credential_expired`.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"prompt\": \"Piano instrumental tranquilo\",\n  \"lyrics\": \"\",\n  \"provider\": \"local\",\n  \"duration\": 30\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"Conecte o Suno em Configurações → Música\",\n  \"code\": \"suno_not_connected\"\n}"
+            }
+          ]
         }
       ]
     },
@@ -2887,7 +2926,7 @@
               }
             ],
             "url": "{{base_url}}/api/pia/music/providers",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "description": "Catálogo dos geradores (T1). A entrada suno_mcp traz label, available, endpoint_configured, credential_state (missing|configured|expired), token_configured, auth_type, oauth_connected, campos OAuth mascarados, server_id e settings_route {view:settings, section:Apps/music}. selection traz o provedor salvo e os mesmos campos suno_mcp_* já mascarados. Sem segredos em claro.",
             "auth": {
               "type": "noauth"
             },
@@ -2918,13 +2957,13 @@
               }
             ],
             "url": "{{base_url}}/api/pia/music/select",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "description": "Salva o provedor (local, gemini ou suno_mcp) e a config do Suno. RN04: provider=suno_mcp pode ser gravado sem credencial; o app abre em Local até autorizar. Deixe token e segredos OAuth vazios se não for editá-los, para não reenviar valores mascarados.",
             "auth": {
               "type": "noauth"
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"provider\": \"suno_mcp\",\n  \"gemini_model\": \"lyria-3.5\",\n  \"suno_mcp_url\": \"https://api.suno.com/mcp\",\n  \"suno_mcp_command\": \"\",\n  \"suno_mcp_token\": \"\",\n  \"suno_mcp_auth_type\": \"oauth\",\n  \"suno_mcp_client_id\": \"\",\n  \"suno_mcp_client_secret\": \"\",\n  \"suno_mcp_auth_url\": \"\",\n  \"suno_mcp_token_url\": \"\",\n  \"suno_mcp_scopes\": \"\",\n  \"suno_mcp_redirect_uri\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2955,7 +2994,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"state\": \"{{state}}\",\n  \"account_id\": \"\",\n  \"code\": \"\",\n  \"access_token\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3011,13 +3050,13 @@
               }
             ],
             "url": "{{base_url}}/api/pia/music/suno/oauth/start",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "description": "Inicia OAuth do Suno (DCR + PKCE). Campos vazios usam os defaults oficiais. Não é geração paga.",
             "auth": {
               "type": "noauth"
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"client_id\": \"\",\n  \"client_secret\": \"\",\n  \"auth_url\": \"\",\n  \"token_url\": \"\",\n  \"scopes\": \"\",\n  \"account_id\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4485,7 +4524,7 @@
               }
             ],
             "url": "{{base_url}}/api/pia/apps/music/generate",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "description": "Gera um lote de músicas. Sucesso devolve `{job}` e o progresso segue no SSE. A recusa antes do job (Suno não conectado ou credencial expirada) responde HTTP 400 com `{error, code}`, onde `code` é `suno_not_connected` ou `suno_credential_expired`.",
             "auth": {
               "type": "noauth"
             },
@@ -4499,7 +4538,48 @@
               }
             }
           },
-          "response": []
+          "response": [
+            {
+              "name": "400 — Suno não conectado",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/apps/music/generate",
+                "description": "Gera um lote de músicas. Sucesso devolve `{job}` e o progresso segue no SSE. A recusa antes do job (Suno não conectado ou credencial expirada) responde HTTP 400 com `{error, code}`, onde `code` é `suno_not_connected` ou `suno_credential_expired`.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"prompt\": \"Piano instrumental tranquilo\",\n  \"lyrics\": \"\",\n  \"provider\": \"local\",\n  \"duration\": 30,\n  \"count\": 1\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"Conecte o Suno em Configurações → Música\",\n  \"code\": \"suno_not_connected\"\n}"
+            }
+          ]
         },
         {
           "name": "POST /api/pia/apps/music/library",
@@ -4615,7 +4695,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"provider\": \"suno_mcp\",\n  \"gemini_model\": \"lyria-3.5\",\n  \"suno_mcp_url\": \"https://api.suno.com/mcp\",\n  \"suno_mcp_command\": \"\",\n  \"suno_mcp_token\": \"\",\n  \"suno_mcp_auth_type\": \"oauth\",\n  \"suno_mcp_client_id\": \"\",\n  \"suno_mcp_client_secret\": \"\",\n  \"suno_mcp_auth_url\": \"\",\n  \"suno_mcp_token_url\": \"\",\n  \"suno_mcp_scopes\": \"\",\n  \"suno_mcp_redirect_uri\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4646,7 +4726,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"state\": \"{{state}}\",\n  \"account_id\": \"\",\n  \"code\": \"\",\n  \"access_token\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4708,7 +4788,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"client_id\": \"\",\n  \"client_secret\": \"\",\n  \"auth_url\": \"\",\n  \"token_url\": \"\",\n  \"scopes\": \"\",\n  \"account_id\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
