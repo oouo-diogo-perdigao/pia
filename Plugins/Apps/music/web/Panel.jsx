@@ -27,6 +27,17 @@ import {
   Icon,
   usePia,
 } from "../../../../src/pia/frontend/shared";
+import {
+  SUNO_CANCEL_WARNING,
+  SUNO_HINT_TEXT,
+  buildGeneratorOptions,
+  providerLabel,
+  resolveInitialProvider,
+  resolveProviderAfterRefresh,
+  resolveReuseProvider,
+  shouldShowSunoHint,
+  sunoSettingsRoute,
+} from "../../../../src/pia/frontend/music-helpers";
 const call = (action, data = {}) => appApi("music", action, data);
 export default function Music({ sub = "principal" }) {
   const { navigate, route } = usePia();
@@ -43,7 +54,14 @@ export default function Music({ sub = "principal" }) {
     [count, setCount] = useState(1),
     [progress, setProgress] = useState(null),
     [folder, setFolder] = useState(""),
-    [scrollBatch, setScrollBatch] = useState(null);
+    [scrollBatch, setScrollBatch] = useState(null),
+    [catalog, setCatalog] = useState(null),
+    [notice, setNotice] = useState("");
+  const providerReady = useRef(false),
+    providerRef = useRef(provider),
+    busyRef = useRef(busy);
+  providerRef.current = provider;
+  busyRef.current = busy;
   const source = useRef(),
     form = useRef(),
     promptInput = useRef();
@@ -51,9 +69,10 @@ export default function Music({ sub = "principal" }) {
     const item = tracks[0];
     setPrompt(item.prompt || "");
     setLyrics(item.lyrics || "");
-    setProvider(
-      ["local", "gemini"].includes(item.provider) ? item.provider : "local",
-    );
+    const reused = resolveReuseProvider(item, catalog);
+    providerReady.current = true;
+    setProvider(reused.provider);
+    setNotice(reused.warning || "");
     setDuration(
       Number.isInteger(item.requested_duration)
         ? Math.max(10, Math.min(180, item.requested_duration))
@@ -103,9 +122,52 @@ export default function Music({ sub = "principal" }) {
       setFolder(value.folder || "");
       if (value.job && !source.current) follow(value.job);
     });
+  // Catálogo de provedores: fonte da verdade para o seletor (RN03/RN05).
+  // Em erro mantém o último catálogo válido; sem nenhum, o seletor cai em
+  // Local, Gemini e Flow sem quebrar a tela.
+  const loadProviders = () =>
+    call("providers")
+      .catch(() => null)
+      .then((value) => {
+        const valid = value && Array.isArray(value.providers) ? value : null;
+        if (valid) setCatalog(valid);
+        if (!providerReady.current) {
+          providerReady.current = true;
+          setProvider(resolveInitialProvider(valid));
+          return;
+        }
+        if (!valid) return;
+        const next = resolveProviderAfterRefresh(
+          providerRef.current,
+          valid,
+          busyRef.current,
+        );
+        if (next.provider !== providerRef.current) {
+          setProvider(next.provider);
+          setNotice(next.warning || "");
+        }
+      });
   useEffect(() => {
     refresh().catch(report);
     return () => source.current?.close();
+  }, []);
+  useEffect(() => {
+    let timer;
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = setTimeout(loadProviders, 500);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") schedule();
+    };
+    loadProviders();
+    window.addEventListener("focus", schedule);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("focus", schedule);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, []);
   useEffect(() => {
     if (scrollBatch && sub === "history")
@@ -142,9 +204,11 @@ export default function Music({ sub = "principal" }) {
           primeiro início baixa modelos. A qualidade e o tempo dependem da GPU.
           Gemini/Lyria usa a chave da PIA e a disponibilidade da API; o login do
           Gmail/Drive ou uma assinatura Gemini não substituem essa credencial.
-          Flow Music abre na interface oficial da sua conta, sem geração
-          automatizada pela PIA. Cancelar encerra a espera; uma tarefa já
-          enviada ao motor/provedor pode continuar nele.
+          Suno aparece no seletor quando o MCP do Suno está configurado e
+          autenticado em Configurações → Música; cada faixa gerada nele pode
+          consumir créditos da sua conta. Flow Music abre na interface oficial
+          da sua conta, sem geração automatizada pela PIA. Cancelar encerra a
+          espera; uma tarefa já enviada ao motor/provedor pode continuar nele.
         </Text>
       </About>
     );
@@ -157,17 +221,34 @@ export default function Music({ sub = "principal" }) {
               <Select
                 label="Gerador"
                 value={provider}
-                onChange={setProvider}
+                onChange={(value) => {
+                  if (!value) return;
+                  providerReady.current = true;
+                  setProvider(value);
+                  setNotice("");
+                }}
                 disabled={busy}
-                data={[
-                  { value: "local", label: "Local · ACE-Step" },
-                  { value: "gemini", label: "Gemini · Lyria API" },
-                  {
-                    value: "flow",
-                    label: "Google Flow Music · abrir interface oficial",
-                  },
-                ]}
+                allowDeselect={false}
+                data={buildGeneratorOptions(catalog)}
               />
+              {shouldShowSunoHint(catalog) && (
+                <Text size="xs" c="dimmed">
+                  {SUNO_HINT_TEXT}.{" "}
+                  <Anchor
+                    component="button"
+                    type="button"
+                    size="xs"
+                    onClick={() => navigate(sunoSettingsRoute(catalog))}
+                  >
+                    Abrir Configurações
+                  </Anchor>
+                </Text>
+              )}
+              {notice && (
+                <Text size="sm" c="yellow">
+                  {notice}
+                </Text>
+              )}
               <Textarea
                 label="Descrição musical"
                 ref={promptInput}
@@ -240,6 +321,11 @@ export default function Music({ sub = "principal" }) {
                   </Button>
                 )}
               </Group>
+              {provider === "suno_mcp" && (
+                <Text size="xs" c="yellow">
+                  {SUNO_CANCEL_WARNING}
+                </Text>
+              )}
               <Text size="sm" c="dimmed">
                 A PIA não usa cookies das contas para simular APIs. O motor
                 local fica separado do Whisper/TTS.
@@ -280,7 +366,8 @@ export default function Music({ sub = "principal" }) {
                   />
                 </Group>
                 <Text size="xs" c="dimmed">
-                  {tracks.length} música(s) · {tracks[0].provider}
+                  {tracks.length} música(s) ·{" "}
+                  {providerLabel(tracks[0].provider)}
                 </Text>
                 {tracks
                   .sort((a, b) => (a.variant || 0) - (b.variant || 0))
