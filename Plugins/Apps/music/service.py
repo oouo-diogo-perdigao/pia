@@ -964,15 +964,24 @@ _AUDIO_CONTENT_EXTENSIONS = {
 _AUDIO_EXTENSIONS = ("mp3", "wav", "flac")
 
 
+_NUMERIC_HOST_LABEL = re.compile(r"^(?:0x[0-9a-f]*|[0-9]+)$", re.I)
+
+
 def _is_non_public_host(host: str) -> bool:
-    """Literal IPs that are not global (private, loopback, link-local...) and
-    ``localhost``. Hostnames are not resolved here (see pending DNS note)."""
+    """Literal IPs that are not global (private, loopback, link-local...),
+    ``localhost`` and any non-canonical IPv4 form. Hostnames are not resolved
+    here (see pending DNS note)."""
+    host = host.rstrip(".")
     if host == "localhost" or host.endswith(".localhost"):
         return True
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
-        return False
+        # Short/numeric/hex/octal IPv4 (127.1, 2130706433, 0x7f000001,
+        # 0177.0.0.1): resolvers and URL parsers treat a host whose last label
+        # is numeric as IPv4, so it is never accepted as a hostname.
+        labels = host.split(".")
+        return bool(_NUMERIC_HOST_LABEL.match(labels[-1]))
     return not address.is_global
 
 
@@ -1318,7 +1327,12 @@ def _suno_batch_locked(
             for _call in range(math.ceil(count / 2)):
                 needed = min(2, count - len(saved))
                 if cancelled():
-                    raise InterruptedError(SUNO_CANCEL_MESSAGE)
+                    # Nothing sent yet on the 1st call: no credits at stake.
+                    raise InterruptedError(
+                        SUNO_CANCEL_BEFORE_SEND_MESSAGE
+                        if _call == 0
+                        else SUNO_CANCEL_MESSAGE
+                    )
                 progress("Gerando música via Suno (MCP)…")
                 try:
                     result = adapter.generate(

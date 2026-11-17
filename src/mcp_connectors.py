@@ -389,6 +389,11 @@ def _infer_known_tools(server: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
+OAUTH_ACCOUNT_REMOVED_MESSAGE = (
+    "A conta foi removida durante a conexão OAuth; conecte o Suno de novo."
+)
+
+
 def _with_store_lock(method: Any) -> Any:
     """Run a read-modify-write of the server store under ``_store_lock``.
 
@@ -1475,14 +1480,98 @@ class MCPConnectorManager:
             "Nenhuma conta MCP ativa conseguiu executar a ferramenta."
         )
 
-    @_with_store_lock
     def start_oauth(
         self,
         server_id: str,
         account_id: str | None = None,
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Prepare/persist OAuth config and return the authorization URL.
+
+        The Suno dynamic client registration (HTTP) runs OUTSIDE
+        ``_store_lock``: read/prepare under the lock, release it, POST, then
+        re-acquire and merge (client_id only if still empty).
+        """
         payload = payload or {}
+        with self._store_lock:
+            servers, server, acc, account_id = self._oauth_prepare_account(
+                server_id, account_id, payload
+            )
+            oauth = acc.setdefault("oauth", {})
+            need_dcr = (
+                _is_suno_server(server_id, server)
+                and not str(oauth.get("client_id") or "").strip()
+                and not payload.get("access_token")
+            )
+            if not need_dcr:
+                return self._oauth_finish_start(
+                    servers, server, acc, account_id, payload
+                )
+            redirect_uri = str(oauth.get("redirect_uri") or "")
+            self._save_raw_servers(servers)
+
+        cid = self._register_suno_client(redirect_uri)  # no lock held
+
+        with self._store_lock:
+            servers = self._raw_servers()
+            try:
+                server, acc = self._find_server_account(servers, server_id, account_id)
+            except KeyError:
+                raise ValueError(OAUTH_ACCOUNT_REMOVED_MESSAGE) from None
+            oauth = acc.setdefault("oauth", {})
+            # If another writer filled client_id during the DCR, it wins. The
+            # client registered here then stays unused at the Suno: it is a
+            # public client (PKCE, no secret) and there is no API to delete it.
+            if not str(oauth.get("client_id") or "").strip():
+                oauth["client_id"] = cid
+            return self._oauth_finish_start(servers, server, acc, account_id, payload)
+
+    @staticmethod
+    def _find_server_account(
+        servers: list[dict[str, Any]], server_id: str, account_id: str
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        server = next((s for s in servers if s.get("id") == server_id), None)
+        if server is None:
+            raise KeyError(f"Servidor MCP '{server_id}' não encontrado.")
+        acc = next(
+            (a for a in (server.get("accounts") or []) if a.get("id") == account_id),
+            None,
+        )
+        if acc is None:
+            raise KeyError(
+                f"Conta '{account_id}' não encontrada no servidor '{server_id}'."
+            )
+        return server, acc
+
+    @staticmethod
+    def _register_suno_client(redirect_uri: str) -> str:
+        """Suno dynamic client registration (DCR). Never call under the lock."""
+        reg_resp = requests.post(
+            SUNO_OAUTH_DEFAULTS["register_url"],
+            json={
+                "client_name": SUNO_OAUTH_DEFAULTS["client_name"],
+                "redirect_uris": [redirect_uri],
+            },
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            timeout=15,
+        )
+        reg_resp.raise_for_status()
+        reg_data = reg_resp.json() if reg_resp.content else {}
+        cid = str((reg_data or {}).get("client_id") or "").strip()
+        if not cid:
+            raise ValueError("Registro dinâmico (DCR) do Suno não retornou client_id.")
+        return cid
+
+    def _oauth_prepare_account(
+        self, server_id: str, account_id: str | None, payload: dict[str, Any]
+    ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any], str]:
+        """Resolve/create the account and apply payload + Suno defaults.
+
+        Caller must hold ``_store_lock``. No network I/O.
+        """
         servers = self._raw_servers()
         server = next((s for s in servers if s.get("id") == server_id), None)
         if server is None:
@@ -1533,31 +1622,19 @@ class MCPConnectorManager:
             for field in ("auth_url", "token_url", "scopes", "redirect_uri"):
                 if not str(oauth.get(field) or "").strip():
                     oauth[field] = SUNO_OAUTH_DEFAULTS[field]
-            if not str(oauth.get("client_id") or "").strip() and not payload.get(
-                "access_token"
-            ):
-                reg_url = SUNO_OAUTH_DEFAULTS["register_url"]
-                reg_resp = requests.post(
-                    reg_url,
-                    json={
-                        "client_name": SUNO_OAUTH_DEFAULTS["client_name"],
-                        "redirect_uris": [oauth["redirect_uri"]],
-                    },
-                    headers={
-                        "Accept": "application/json",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=15,
-                )
-                reg_resp.raise_for_status()
-                reg_data = reg_resp.json() if reg_resp.content else {}
-                cid = str((reg_data or {}).get("client_id") or "").strip()
-                if not cid:
-                    raise ValueError(
-                        "Registro dinâmico (DCR) do Suno não retornou client_id."
-                    )
-                oauth["client_id"] = cid
+        return servers, server, acc, account_id
 
+    def _oauth_finish_start(
+        self,
+        servers: list[dict[str, Any]],
+        server: dict[str, Any],
+        acc: dict[str, Any],
+        account_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Direct token or PKCE state + auth URL. Caller holds ``_store_lock``."""
+        server_id = str(server.get("id") or "")
+        oauth = acc.setdefault("oauth", {})
         if payload.get("access_token"):
             token = str(payload["access_token"]).strip()
             self._set_secret(server_id, account_id, "oauth_access_token", token)
@@ -1604,12 +1681,13 @@ class MCPConnectorManager:
         self._save_raw_servers(servers)
         return {"ok": True, "state": state, "auth_url": auth_url, "account": acc}
 
-    @_with_store_lock
     def complete_oauth(
         self,
         server_id: str,
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Finish OAuth: consume ``state`` atomically, exchange the code OUTSIDE
+        ``_store_lock`` and merge only the token fields afterwards."""
         payload = payload or {}
         req_account_id = str(payload.get("account_id") or "").strip()
         state = str(payload.get("state") or "").strip()
@@ -1625,50 +1703,46 @@ class MCPConnectorManager:
             if not state:
                 raise ValueError("State OAuth ausente ou inválido.")
 
-        if state:
-            states = self.store.get(OAUTH_STATE_KEY, {})
-            info = states.pop(state, None) if isinstance(states, dict) else None
-            if info is not None:
-                self.store.set(OAUTH_STATE_KEY, states)
-            if not isinstance(info, dict):
-                raise ValueError("State OAuth inválido ou já utilizado.")
-            if str(info.get("server_id") or "") != server_id:
-                raise ValueError("State OAuth não pertence a este servidor MCP.")
-            state_account_id = str(info.get("account_id") or "").strip()
-            if (
-                req_account_id
-                and state_account_id
-                and req_account_id != state_account_id
-            ):
-                raise ValueError("State OAuth não pertence à conta informada.")
-            created_raw = str(info.get("created_at") or "").strip()
-            if not created_raw:
-                raise ValueError("State OAuth expirado ou inválido.")
-            try:
-                created_dt = datetime.fromisoformat(created_raw)
-                if created_dt.tzinfo is None:
-                    created_dt = created_dt.replace(tzinfo=timezone.utc)
-                age = (datetime.now(timezone.utc) - created_dt).total_seconds()
-            except ValueError as exc:
-                raise ValueError("State OAuth expirado ou inválido.") from exc
-            if age < 0 or age > OAUTH_STATE_TTL_SECONDS:
-                raise ValueError("State OAuth expirado.")
-            account_id = account_id or state_account_id
-            code_verifier = str(info.get("code_verifier") or "").strip()
-            state_redirect_uri = str(info.get("redirect_uri") or "").strip()
+        with self._store_lock:
+            # 1st locked section: the state is popped here, so a duplicated
+            # callback can never reuse the same code.
+            if state:
+                states = self.store.get(OAUTH_STATE_KEY, {})
+                info = states.pop(state, None) if isinstance(states, dict) else None
+                if info is not None:
+                    self.store.set(OAUTH_STATE_KEY, states)
+                if not isinstance(info, dict):
+                    raise ValueError("State OAuth inválido ou já utilizado.")
+                if str(info.get("server_id") or "") != server_id:
+                    raise ValueError("State OAuth não pertence a este servidor MCP.")
+                state_account_id = str(info.get("account_id") or "").strip()
+                if (
+                    req_account_id
+                    and state_account_id
+                    and req_account_id != state_account_id
+                ):
+                    raise ValueError("State OAuth não pertence à conta informada.")
+                created_raw = str(info.get("created_at") or "").strip()
+                if not created_raw:
+                    raise ValueError("State OAuth expirado ou inválido.")
+                try:
+                    created_dt = datetime.fromisoformat(created_raw)
+                    if created_dt.tzinfo is None:
+                        created_dt = created_dt.replace(tzinfo=timezone.utc)
+                    age = (datetime.now(timezone.utc) - created_dt).total_seconds()
+                except ValueError as exc:
+                    raise ValueError("State OAuth expirado ou inválido.") from exc
+                if age < 0 or age > OAUTH_STATE_TTL_SECONDS:
+                    raise ValueError("State OAuth expirado.")
+                account_id = account_id or state_account_id
+                code_verifier = str(info.get("code_verifier") or "").strip()
+                state_redirect_uri = str(info.get("redirect_uri") or "").strip()
 
-        servers = self._raw_servers()
-        server = next((s for s in servers if s.get("id") == server_id), None)
-        if server is None:
-            raise KeyError(f"Servidor MCP '{server_id}' não encontrado.")
-        acc = next(
-            (a for a in (server.get("accounts") or []) if a["id"] == account_id), None
-        )
-        if acc is None:
-            raise KeyError(f"Conta '{account_id}' não encontrada.")
+            servers = self._raw_servers()
+            _server, acc = self._find_server_account(servers, server_id, account_id)
+            oauth_cfg = dict(acc.get("oauth") or {})
 
-        oauth_cfg = acc.setdefault("oauth", {})
-
+        # Token exchange (HTTP) and vault writes happen without the lock.
         if not token and code and oauth_cfg.get("token_url"):
             token_url = str(oauth_cfg["token_url"]).strip()
             client_secret = self._get_secret(
@@ -1716,12 +1790,29 @@ class MCPConnectorManager:
                 "oauth_refresh_token",
                 refresh_token,
             )
-        oauth_cfg["connected"] = True
-        oauth_cfg["token_masked"] = _mask_secret(token)
-        acc["auth_type"] = "oauth"
-        acc["last_error"] = None
-        acc["last_error_code"] = None
-        self._save_raw_servers(servers)
+
+        removed = False
+        with self._store_lock:
+            # 2nd locked section: merge only token fields into a fresh read.
+            servers = self._raw_servers()
+            try:
+                _server, acc = self._find_server_account(servers, server_id, account_id)
+            except KeyError:
+                removed = True
+            else:
+                oauth = acc.setdefault("oauth", {})
+                oauth["connected"] = True
+                oauth["token_masked"] = _mask_secret(token)
+                acc["auth_type"] = "oauth"
+                acc["last_error"] = None
+                acc["last_error_code"] = None
+                self._save_raw_servers(servers)
+        if removed:
+            # Account removed during the HTTP exchange: drop the orphan tokens
+            # (vault writes stay outside the lock) and fail cleanly.
+            self._set_secret(server_id, account_id, "oauth_access_token", "")
+            self._set_secret(server_id, account_id, "oauth_refresh_token", "")
+            raise ValueError(OAUTH_ACCOUNT_REMOVED_MESSAGE)
         return {"ok": True, "account": acc}
 
     def chat_tool_specs(self) -> list[dict[str, Any]]:

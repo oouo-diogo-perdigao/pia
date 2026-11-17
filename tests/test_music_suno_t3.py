@@ -1136,3 +1136,299 @@ def test_s8_download_read_timeout_is_30s(tmp_path):
     session = _Session({"https://cdn.suno.test/a.mp3": _ok_resp()})
     service._download_audio("https://cdn.suno.test/a.mp3", tmp_path, session=session)
     assert session.calls[0][1]["timeout"] == (10, 30)
+
+
+# ==========================================================================
+# T3 follow-up 2 (review 18:43)
+# ==========================================================================
+def _json_resp(data):
+    resp = requests.Response()
+    resp.status_code = 200
+    resp.headers["Content-Type"] = "application/json"
+    resp._content = json.dumps(data).encode()
+    return resp
+
+
+def _blocking_post(monkeypatch, data, on_enter=None):
+    """Fake OAuth endpoint that blocks on ``release`` (no real sleep).
+
+    ``entered`` is set once the POST is in flight; the test checks concurrent
+    work finished while ``release`` is still unset, then releases it.
+    """
+    state = {"entered": threading.Event(), "release": threading.Event(), "urls": []}
+
+    def post(url, **_kwargs):
+        state["urls"].append(url)
+        if on_enter is not None:
+            on_enter()
+        state["entered"].set()
+        state["release"].wait(10)
+        return _json_resp(data)
+
+    monkeypatch.setattr(mcp_connectors.requests, "post", post)
+    return state
+
+
+def _oauth_srv(mgr):
+    mgr.save_server(
+        {
+            "id": "srv",
+            "name": "Srv",
+            "transport": "http_streaming",
+            "url": "https://mcp.example.test/mcp",
+            "accounts": [
+                {
+                    "id": "a1",
+                    "name": "A1",
+                    "auth_type": "oauth",
+                    "oauth": {
+                        "client_id": "cid",
+                        "auth_url": "https://auth.example.test/authorize",
+                        "token_url": "https://auth.example.test/token",
+                    },
+                }
+            ],
+        },
+        server_id="srv",
+    )
+
+
+def _suno_oauth_srv(mgr):
+    mgr.save_server(
+        {
+            "id": "suno_mcp",
+            "name": "Suno",
+            "transport": "http_streaming",
+            "url": "https://api.suno.com/mcp",
+            "accounts": [{"id": "default", "name": "Suno OAuth", "auth_type": "oauth"}],
+        },
+        server_id="suno_mcp",
+    )
+
+
+def _spawn(fn, threads):
+    """Run ``fn`` in a daemon thread; result/error land in the returned box."""
+    box: dict = {}
+
+    def target():
+        try:
+            box["result"] = fn()
+        except BaseException as exc:  # noqa: BLE001 - surfaced by the test
+            box["error"] = exc
+
+    thread = threading.Thread(target=target, daemon=True)
+    threads.append(thread)
+    thread.start()
+    return thread, box
+
+
+def _join_all(fake, threads):
+    fake["release"].set()
+    for thread in threads:
+        thread.join(5)
+    assert not any(t.is_alive() for t in threads)
+
+
+def _drop_account(mgr, server_id, account_id):
+    servers = mgr._raw_servers()
+    for srv in servers:
+        if srv.get("id") == server_id:
+            srv["accounts"] = [
+                a for a in srv.get("accounts") or [] if a.get("id") != account_id
+            ]
+    mgr._save_raw_servers(servers)
+
+
+# --- 1: OAuth HTTP runs outside _store_lock ---------------------------------
+def test_g1_complete_oauth_token_exchange_does_not_block_merge(tmp_path, monkeypatch):
+    mgr = _manager(tmp_path, monkeypatch)
+    _oauth_srv(mgr)
+    state = mgr.start_oauth("srv", account_id="a1")["state"]
+    fake = _blocking_post(monkeypatch, {"access_token": "tok-new"})
+    threads: list = []
+    try:
+        _oauth_t, oauth_box = _spawn(
+            lambda: mgr.complete_oauth("srv", {"state": state, "code": "c1"}), threads
+        )
+        assert fake["entered"].wait(5)
+        merge_t, merge_box = _spawn(
+            lambda: mgr._merge_runtime("srv", "a1", lambda t: t.update(usage_count=7)),
+            threads,
+        )
+        cursor_t, cursor_box = _spawn(lambda: mgr._advance_cursor("srv", 1), threads)
+        merge_t.join(5)
+        cursor_t.join(5)
+        # Finished while the token POST is still blocked => no lock held there.
+        assert not fake["release"].is_set()
+        assert not merge_t.is_alive() and not cursor_t.is_alive()
+        assert "error" not in merge_box and "error" not in cursor_box
+    finally:
+        _join_all(fake, threads)
+    assert "error" not in oauth_box
+    acc = mgr._find_raw("srv")["accounts"][0]
+    assert acc["usage_count"] == 7  # runtime merge survived the token merge
+    assert acc["oauth"]["connected"] is True and acc["last_error_code"] is None
+    assert fake["urls"] == ["https://auth.example.test/token"]
+
+
+def test_g1_duplicate_callback_cannot_reuse_code(tmp_path, monkeypatch):
+    mgr = _manager(tmp_path, monkeypatch)
+    _oauth_srv(mgr)
+    state = mgr.start_oauth("srv", account_id="a1")["state"]
+    fake = _blocking_post(monkeypatch, {"access_token": "tok-new"})
+    threads: list = []
+    try:
+        _first_t, first_box = _spawn(
+            lambda: mgr.complete_oauth("srv", {"state": state, "code": "c1"}), threads
+        )
+        assert fake["entered"].wait(5)
+        second_t, second_box = _spawn(
+            lambda: mgr.complete_oauth("srv", {"state": state, "code": "c1"}), threads
+        )
+        second_t.join(5)
+        assert not fake["release"].is_set()
+        assert not second_t.is_alive()  # answered while the 1st POST is blocked
+        assert isinstance(second_box.get("error"), ValueError)
+        assert "já utilizado" in str(second_box["error"])
+    finally:
+        _join_all(fake, threads)
+    assert "error" not in first_box
+    assert len(fake["urls"]) == 1  # the code was exchanged only once
+    assert mgr._find_raw("srv")["accounts"][0]["oauth"]["connected"] is True
+
+
+@pytest.mark.parametrize("manual", [False, True])
+def test_g1_start_oauth_dcr_outside_lock_keeps_existing_client_id(
+    tmp_path, monkeypatch, manual
+):
+    mgr = _manager(tmp_path, monkeypatch)
+    _suno_oauth_srv(mgr)
+    fake = _blocking_post(monkeypatch, {"client_id": "dcr-cid"})
+
+    def concurrent(target):
+        target["usage_count"] = 3
+        if manual:
+            target.setdefault("oauth", {})["client_id"] = "manual-cid"
+
+    threads: list = []
+    try:
+        _oauth_t, oauth_box = _spawn(
+            lambda: mgr.start_oauth("suno_mcp", account_id="default"), threads
+        )
+        assert fake["entered"].wait(5)
+        merge_t, merge_box = _spawn(
+            lambda: mgr._merge_runtime("suno_mcp", "default", concurrent), threads
+        )
+        merge_t.join(5)
+        assert not fake["release"].is_set()
+        assert not merge_t.is_alive() and "error" not in merge_box
+    finally:
+        _join_all(fake, threads)
+    assert "error" not in oauth_box
+    acc = mgr._find_raw("suno_mcp")["accounts"][0]
+    expected = "manual-cid" if manual else "dcr-cid"
+    assert acc["oauth"]["client_id"] == expected  # only filled when empty
+    assert acc["usage_count"] == 3
+    assert f"client_id={expected}" in oauth_box["result"]["auth_url"]
+
+
+# --- account removed during the OAuth HTTP ----------------------------------
+def test_g1_complete_oauth_account_removed_drops_tokens(tmp_path, monkeypatch):
+    mgr = _manager(tmp_path, monkeypatch)
+    _oauth_srv(mgr)
+    state = mgr.start_oauth("srv", account_id="a1")["state"]
+    fake = _blocking_post(
+        monkeypatch,
+        {"access_token": "tok-orphan", "refresh_token": "ref-orphan"},
+        on_enter=lambda: _drop_account(mgr, "srv", "a1"),
+    )
+    fake["release"].set()  # no concurrency needed here
+    with pytest.raises(ValueError) as err:
+        mgr.complete_oauth("srv", {"state": state, "code": "c1"})
+    assert str(err.value) == mcp_connectors.OAUTH_ACCOUNT_REMOVED_MESSAGE
+    assert not mgr._get_secret("srv", "a1", "oauth_access_token")
+    assert not mgr._get_secret("srv", "a1", "oauth_refresh_token")
+    assert mgr._find_raw("srv")["accounts"] == []
+
+
+def test_g1_start_oauth_account_removed_during_dcr(tmp_path, monkeypatch):
+    mgr = _manager(tmp_path, monkeypatch)
+    _suno_oauth_srv(mgr)
+    fake = _blocking_post(
+        monkeypatch,
+        {"client_id": "dcr-cid"},
+        on_enter=lambda: _drop_account(mgr, "suno_mcp", "default"),
+    )
+    fake["release"].set()
+    with pytest.raises(ValueError) as err:
+        mgr.start_oauth("suno_mcp", account_id="default")
+    assert str(err.value) == mcp_connectors.OAUTH_ACCOUNT_REMOVED_MESSAGE
+    assert mgr._find_raw("suno_mcp")["accounts"] == []  # not re-created
+
+
+# --- 2: short / numeric / hex IPv4 hosts ------------------------------------
+@pytest.mark.parametrize(
+    "host",
+    [
+        "127.1",
+        "127.0.1",
+        "2130706433",
+        "0x7f000001",
+        "0x7f.0.0.1",
+        "0177.0.0.1",
+        "017700000001",
+        "10.1",
+        "127.0.0.1.",
+        "1.2.3",
+        "[::ffff:127.0.0.1]",
+        "[::ffff:a00:1]",
+    ],
+)
+def test_g2_non_canonical_ipv4_hosts_rejected(host):
+    with pytest.raises(service.SunoDownloadError):
+        service._validate_audio_url(f"https://{host}/a.mp3")
+
+
+def test_g2_regular_hostnames_still_allowed():
+    for url in (
+        "https://cdn1.suno.ai/a.mp3",
+        "https://a1.b2.example/a.mp3",
+        "https://8.8.8.8/a.mp3",
+        "https://0x.example.com/a.mp3",
+    ):
+        assert service._validate_audio_url(url) == url
+
+
+# --- 3: cancel before the 1st call uses the before-send message -------------
+def test_g3_cancel_before_first_call_uses_before_send_message(music_out):
+    checks = {"n": 0}
+
+    def cancelled():
+        checks["n"] += 1
+        return checks["n"] > 1  # passes the start check, trips at the loop
+
+    stub = _StubAdapter([{"clips": [_b64_clip("a")]}])
+    with pytest.raises(InterruptedError) as err:
+        service.generate_suno_batch("lofi", count=1, adapter=stub, cancelled=cancelled)
+    assert str(err.value) == service.SUNO_CANCEL_BEFORE_SEND_MESSAGE
+    assert stub.calls == 0
+
+
+def test_g3_cancel_after_a_call_uses_rn08_message(music_out):
+    state = {"calls": 0}
+
+    class Adapter(_StubAdapter):
+        def generate(self, prompt, **kwargs):
+            state["calls"] += 1
+            return {"clips": [_b64_clip(f"c{state['calls']}"), _b64_clip("x")]}
+
+    with pytest.raises(InterruptedError) as err:
+        service.generate_suno_batch(
+            "lofi",
+            count=4,
+            adapter=Adapter([]),
+            on_track=lambda item, k, n: None,
+            cancelled=lambda: state["calls"] >= 1 and len(_audio_files(music_out)) >= 2,
+        )
+    assert str(err.value) == service.SUNO_CANCEL_MESSAGE
+    assert state["calls"] == 1 and err.value.completed == 2
