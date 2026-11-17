@@ -89,6 +89,7 @@ export default function MusicSettingsPanel() {
   const sunoStatus = resolveSunoConnectionStatus(
     catalog?.selection,
     sunoProvider,
+    pendingOAuth,
   );
   const warnOpensInLocal = shouldWarnSunoOpensInLocal(
     catalog?.selection,

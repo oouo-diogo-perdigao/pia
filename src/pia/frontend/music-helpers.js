@@ -167,6 +167,7 @@ export function findSunoProvider(catalog) {
 export function resolveSunoConnectionStatus(
   selection = {},
   activeProvider = {},
+  pendingOAuth = null,
 ) {
   const oauthRaw =
     selection?.suno_mcp_oauth_connected !== undefined
@@ -179,12 +180,6 @@ export function resolveSunoConnectionStatus(
       ? selection.suno_mcp_token_configured
       : activeProvider?.token_configured;
   const tokenConfigured = tokenRaw === true;
-
-  const authType = String(
-    selection?.suno_mcp_auth_type ?? activeProvider?.auth_type ?? "none",
-  )
-    .trim()
-    .toLowerCase();
 
   const credentialState = String(
     activeProvider?.credential_state ?? selection?.credential_state ?? "",
@@ -218,16 +213,9 @@ export function resolveSunoConnectionStatus(
       color: "teal",
     };
   }
-  // oauth/start grava a URL padrão, então "OAuth pendente" precisa vir
-  // antes de needs_auth (D4).
-  if (authType === "oauth") {
-    return {
-      connected: false,
-      mode: "oauth_pending",
-      label: "OAuth pendente",
-      color: "yellow",
-    };
-  }
+  // Credencial configurada (bearer ou equivalente) antes de authType oauth:
+  // um auth_type:"oauth" residual de um oauth/start antigo não deve esconder
+  // o bearer atrás de "OAuth pendente".
   if (tokenConfigured || credentialState === "configured") {
     return {
       connected: false,
@@ -236,12 +224,15 @@ export function resolveSunoConnectionStatus(
       color: "blue",
     };
   }
-  if (activeProvider?.available === true) {
+  // oauth_pending só com o fluxo pendente ativo no painel. Sem pendingOAuth,
+  // cai em needs_auth se houver endpoint (D1) — inclusive depois de
+  // desconectar e com servidor desabilitado (sem endpoint → "Não configurado").
+  if (pendingOAuth) {
     return {
       connected: false,
-      mode: "credential",
-      label: "Credencial configurada",
-      color: "blue",
+      mode: "oauth_pending",
+      label: "OAuth pendente",
+      color: "yellow",
     };
   }
   // needs_auth só com endpoint configurado (D1). credential_state "missing"

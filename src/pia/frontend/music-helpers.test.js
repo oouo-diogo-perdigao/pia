@@ -155,8 +155,8 @@ describe("music-helpers Suno MCP & OAuth", () => {
       ),
       {
         connected: false,
-        mode: "oauth_pending",
-        label: "OAuth pendente",
+        mode: "needs_auth",
+        label: "URL configurada, falta autorizar",
         color: "yellow",
       },
     );
@@ -390,12 +390,26 @@ describe("music-helpers T7: status, payload mascarado e evento", () => {
       oauth_connected: false,
       available: false,
     });
+    // Sem pendingOAuth ativo, auth_type residual cai em needs_auth (D1).
     assert.deepEqual(statusOf(catalog), {
       connected: false,
-      mode: "oauth_pending",
-      label: "OAuth pendente",
+      mode: "needs_auth",
+      label: "URL configurada, falta autorizar",
       color: "yellow",
     });
+    assert.deepEqual(
+      resolveSunoConnectionStatus(
+        catalog.selection,
+        findSunoProvider(catalog),
+        { state: "xyz", authUrl: "https://auth.suno.com/authorize" },
+      ),
+      {
+        connected: false,
+        mode: "oauth_pending",
+        label: "OAuth pendente",
+        color: "yellow",
+      },
+    );
     assert.deepEqual(
       buildSunoOAuthStartPayload(
         {
@@ -413,6 +427,101 @@ describe("music-helpers T7: status, payload mascarado e evento", () => {
       ),
       { client_id: "novo-client" },
     );
+  });
+
+  it("oauth salvo + bearer configurado mostra Credencial configurada", () => {
+    const catalog = t1Catalog({
+      url: "https://api.suno.com/mcp",
+      endpoint_configured: true,
+      credential_state: "configured",
+      token_configured: true,
+      auth_type: "oauth",
+      oauth_connected: false,
+      available: true,
+    });
+    assert.deepEqual(statusOf(catalog), {
+      connected: false,
+      mode: "credential",
+      label: "Credencial configurada",
+      color: "blue",
+    });
+  });
+
+  it("oauth salvo sem pendingOAuth e sem credencial cai em needs_auth", () => {
+    const catalog = t1Catalog({
+      url: "https://api.suno.com/mcp",
+      endpoint_configured: true,
+      credential_state: "missing",
+      auth_type: "oauth",
+      oauth_connected: false,
+      available: false,
+    });
+    assert.deepEqual(statusOf(catalog), {
+      connected: false,
+      mode: "needs_auth",
+      label: "URL configurada, falta autorizar",
+      color: "yellow",
+    });
+  });
+
+  it("pendingOAuth ativo mostra OAuth pendente", () => {
+    const catalog = t1Catalog({
+      url: "https://api.suno.com/mcp",
+      endpoint_configured: true,
+      credential_state: "missing",
+      auth_type: "oauth",
+      oauth_connected: false,
+      available: false,
+    });
+    assert.deepEqual(
+      resolveSunoConnectionStatus(
+        catalog.selection,
+        findSunoProvider(catalog),
+        { state: "pending-1", authUrl: "https://api.suno.com/login" },
+      ),
+      {
+        connected: false,
+        mode: "oauth_pending",
+        label: "OAuth pendente",
+        color: "yellow",
+      },
+    );
+  });
+
+  it("depois de desconectar não fica OAuth pendente", () => {
+    const catalog = t1Catalog({
+      url: "https://api.suno.com/mcp",
+      endpoint_configured: true,
+      credential_state: "missing",
+      token_configured: false,
+      auth_type: "oauth",
+      oauth_connected: false,
+      available: false,
+    });
+    assert.deepEqual(statusOf(catalog), {
+      connected: false,
+      mode: "needs_auth",
+      label: "URL configurada, falta autorizar",
+      color: "yellow",
+    });
+  });
+
+  it("servidor desabilitado com auth_type oauth residual fica Não configurado", () => {
+    const catalog = t1Catalog({
+      url: "https://api.suno.com/mcp",
+      endpoint_configured: false,
+      credential_state: "missing",
+      token_configured: false,
+      auth_type: "oauth",
+      oauth_connected: false,
+      available: false,
+    });
+    assert.deepEqual(statusOf(catalog), {
+      connected: false,
+      mode: "none",
+      label: "Não configurado",
+      color: "gray",
+    });
   });
 
   it("trata api.suno.com com qualquer id como Suno quando a credencial vale", () => {
