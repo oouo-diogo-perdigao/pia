@@ -148,11 +148,12 @@ class SunoIncompleteBatchError(MusicProviderError):
     """The Suno returned fewer clips than requested (Q1); saved ones are kept."""
 
     code = "incomplete_batch"
+    # No "k de N" suffix: that lives in the notification, completed/total and
+    # the job's ready_text (TechLead decision (b)).
+    default_message = "O Suno devolveu menos músicas que o esperado."
 
     def __init__(self, completed: int = 0, total: int = 0):
-        super().__init__(
-            tracks_ready_text(completed, total) + " (geração interrompida)"
-        )
+        super().__init__()
         self.completed = completed
         self.total = total
 
@@ -412,6 +413,117 @@ def suno_status() -> dict[str, Any]:
     status["url"] = status["url_masked"]
     status["command"] = _mask_command(status["command"])
     return status
+
+
+SUNO_CONNECT_MESSAGE = "Conecte o Suno em Configurações → Música"
+
+
+class SunoJobRefusedError(ValueError):
+    """Suno job refused before it is created (T4). A ValueError (HTTP 400)
+    with a stable ``code``: ``suno_not_connected`` or ``suno_credential_expired``."""
+
+    def __init__(self, message: str, code: str):
+        super().__init__(message)
+        self.code = code
+
+
+def resolve_music_provider(provider: Any = None) -> str:
+    """Requested provider, or the saved ``MUSIC_PROVIDER`` when omitted."""
+    if provider is None or (isinstance(provider, str) and not provider.strip()):
+        provider = settings().get("MUSIC_PROVIDER") or "local"
+    return str(provider).strip().lower()
+
+
+def suno_job_refusal() -> SunoJobRefusedError | None:
+    """Error to raise when a Suno job must be refused before it exists, or None.
+
+    No network call: same rule as the catalog (``suno_status()["available"]``).
+    """
+    status = suno_status()
+    if status.get("available"):
+        return None
+    if status.get("credential_state") == "expired":
+        return SunoJobRefusedError(
+            SunoAuthError.default_message, "suno_credential_expired"
+        )
+    return SunoJobRefusedError(SUNO_CONNECT_MESSAGE, "suno_not_connected")
+
+
+_SUNO_VAULT_SECRET_FIELDS = (
+    "oauth_access_token",
+    "oauth_refresh_token",
+    "oauth_client_secret",
+    "bearer_token",
+)
+
+
+def suno_known_secrets() -> list[str]:
+    """Secrets known right now for ``redact_secrets``: the resolved token plus
+    the access/refresh tokens, client_secret and bearer of every Suno server
+    and account in the vault, and the legacy settings token.
+
+    Read again whenever needed (a refresh may rotate them). Never raises:
+    redaction must not break the job worker.
+    """
+    found: list[str] = []
+
+    def add(value: Any) -> None:
+        text = str(value or "").strip()
+        if text and text not in found:
+            found.append(text)
+
+    try:
+        add(_suno_resolve(include_secrets=True).get("token"))
+    except Exception:
+        pass
+    try:
+        add(settings().get("MUSIC_SUNO_MCP_TOKEN"))
+    except Exception:
+        pass
+    try:
+        from src.mcp_connectors import get_mcp_manager
+
+        mgr = get_mcp_manager()
+        for server in mgr.find_suno_servers():
+            sid = str(server.get("id") or "")
+            scopes = ["_server"] + [
+                str(acc.get("id") or "")
+                for acc in (server.get("accounts") or [])
+                if isinstance(acc, dict) and acc.get("id")
+            ]
+            for scope in scopes:
+                for field in _SUNO_VAULT_SECRET_FIELDS:
+                    add(mgr._get_secret(sid, scope, field))
+    except Exception:
+        pass
+    return found
+
+
+_AMZ_PARAM_RE = re.compile(r"(?i)\bx-amz-[a-z0-9-]+\s*[=:]\s*[^&\s'\"]*")
+_REDACTED = "••••"
+_MIN_KNOWN_SECRET = 6
+
+
+def redact_secrets(text: Any, extra: Any = (), limit: int = 2000) -> str:
+    """Text safe for job logs/errors/notifications (CA10).
+
+    Masks URLs (no query), ``Bearer …``, ``token=``/``sig=``/``signature=``
+    (``mcp_connectors.redact_error_text``), any ``X-Amz-*`` parameter, and the
+    literal value of known secrets passed in ``extra``. Never raises.
+    """
+    from src.mcp_connectors import redact_error_text
+
+    try:
+        out = str(text if text is not None else "")
+        for secret in sorted(
+            {str(s) for s in (extra or ()) if s}, key=len, reverse=True
+        ):
+            if len(secret) >= _MIN_KNOWN_SECRET:
+                out = out.replace(secret, _REDACTED)
+        out = _AMZ_PARAM_RE.sub(_REDACTED, out)
+        return redact_error_text(out, limit=limit)
+    except Exception:
+        return ""
 
 
 def _ensure_suno_mcp_server(

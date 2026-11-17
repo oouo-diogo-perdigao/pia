@@ -393,7 +393,7 @@ def test_q1_fewer_clips_ends_batch_without_extra_call(music_out):
     assert stub.calls == 1
     assert err.value.code == "incomplete_batch"
     assert err.value.completed == 1 and err.value.total == 4
-    assert str(err.value) == "1 de 4 músicas prontas (geração interrompida)"
+    assert str(err.value) == "O Suno devolveu menos músicas que o esperado."
     assert len(err.value.items) == 1 and len(_audio_files(music_out)) == 1
 
 
@@ -401,7 +401,8 @@ def test_q1_incomplete_message_singular(music_out):
     stub = _StubAdapter([{"clips": []}])
     with pytest.raises(service.SunoIncompleteBatchError) as err:
         service.generate_suno_batch("lofi", count=1, adapter=stub)
-    assert str(err.value) == "0 de 1 música pronta (geração interrompida)"
+    assert str(err.value) == "O Suno devolveu menos músicas que o esperado."
+    assert "de 1" not in str(err.value)
     assert (err.value.completed, err.value.total) == (0, 1)
     assert service.tracks_ready_text(1, 1) == "1 de 1 música pronta"
     assert service.tracks_ready_text(2, 3) == "2 de 3 músicas prontas"
