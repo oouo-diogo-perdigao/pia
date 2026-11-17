@@ -39,3 +39,11 @@ def isolated_profile(tmp_path, monkeypatch):
     monkeypatch.setattr(settings_store, "_store", store)
     monkeypatch.setattr(user_paths, "USER_DIR", tmp_path / "profile")
     return store
+
+
+@pytest.fixture
+def fake_suno_mcp():
+    from tests.fixtures.fake_suno_mcp import FakeSunoMcpServer
+
+    with FakeSunoMcpServer() as server:
+        yield server
