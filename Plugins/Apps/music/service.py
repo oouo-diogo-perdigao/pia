@@ -73,56 +73,325 @@ MUSIC_PROVIDERS = ("local", "gemini", "suno_mcp")
 _SUNO_MCP_SERVER_ID = "suno_mcp"
 
 
-def _suno_connector_state() -> dict[str, Any]:
-    state = {
-        "auth_type": "none",
-        "oauth_connected": False,
-        "oauth_client_id": "",
-        "oauth_auth_url": "",
-        "oauth_token_url": "",
-        "oauth_scopes": "",
-        "has_token": False,
+class MusicProviderError(RuntimeError):
+    """Provider error with a friendly, secret-free message and a stable ``code``."""
+
+    code = "error"
+    default_message = "Falha ao gerar a música."
+
+    def __init__(self, message: str | None = None):
+        super().__init__(message or self.default_message)
+
+
+class SunoAuthError(MusicProviderError):
+    code = "suno_auth"
+    default_message = "Autorização do Suno expirou. Reconecte em Configurações → Música"
+
+
+class SunoUnavailableError(MusicProviderError):
+    code = "suno_unavailable"
+    default_message = "Suno indisponível no momento, tente de novo ou use outro gerador"
+
+
+class SunoTimeoutError(MusicProviderError):
+    code = "suno_timeout"
+    default_message = (
+        "O Suno não respondeu a tempo; a geração pode ter sido concluída lá"
+    )
+
+
+class SunoProtocolError(MusicProviderError):
+    """Unexpected/incompatible answer from the Suno MCP (code ``error``)."""
+
+    default_message = "O Suno recusou ou não entendeu a solicitação; nenhuma nova tentativa foi feita."
+
+
+SUNO_SETTINGS_ROUTE = {"view": "settings", "section": "Apps/music"}
+_SECRET_ENV_KEY = re.compile(r"(TOKEN|SECRET|KEY|PASSWORD|AUTH|BEARER|COOKIE)", re.I)
+_AUTH_ERROR_CODES = ("401", "403")
+_CMD_SECRET_FLAG = re.compile(
+    r"(?i)(--?(?:token|access[-_]?token|api[-_]?key|key|secret|password|bearer)(?:=|\s+))"
+    r"(\"[^\"]*\"|'[^']*'|\S+)"
+)
+_CMD_ENV_ASSIGN = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|'[^']*'|\S+)")
+
+
+def _mask_url(url: str) -> str:
+    """Remove userinfo, query and fragment so the URL never carries secrets."""
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    try:
+        parts = urlsplit(raw)
+    except ValueError:
+        return ""
+    if not parts.scheme or not parts.hostname:
+        return ""
+    host = parts.hostname
+    if ":" in host:
+        host = f"[{host}]"
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    netloc = f"{host}:{port}" if port else host
+    return f"{parts.scheme}://{netloc}{parts.path}"
+
+
+def _mask_command(cmd: str) -> str:
+    """Hide values of --token/--api-key/--key=… and secret-looking VAR=value."""
+    raw = str(cmd or "").strip()
+    if not raw:
+        return ""
+    out = _CMD_SECRET_FLAG.sub(lambda m: m.group(1) + "••••", raw)
+    return _CMD_ENV_ASSIGN.sub(
+        lambda m: (m.group(1) + "=••••")
+        if _SECRET_ENV_KEY.search(m.group(1))
+        else m.group(0),
+        out,
+    )
+
+
+def _keep_if_masked(received: Any, currents: list[str], masker: Any) -> Any:
+    """Round-trip guard: the UI sends back the masked value it received.
+
+    If ``received`` equals the masked form of a current (real) value, keep the
+    real value instead of overwriting it with the masked one.
+    """
+    if received is None:
+        return None
+    value = str(received).strip()
+    for current in currents:
+        current = str(current or "").strip()
+        if current and value != current and value == masker(current):
+            return current
+    return received
+
+
+def _suno_server_evaluation(
+    mgr: Any, raw: dict[str, Any], cfg: dict[str, Any], *, include_secrets: bool
+) -> dict[str, Any]:
+    """Evaluate one registered Suno MCP server (endpoint + credential, no I/O)."""
+    sid = str(raw.get("id") or "")
+    is_primary = sid == _SUNO_MCP_SERVER_ID
+    transport = str(raw.get("transport") or "http_streaming")
+    url = str(raw.get("url") or "").strip()
+    cmd = str(raw.get("command") or "").strip()
+    if is_primary:
+        # Legacy mirror: settings Apps/music only complement the server with id suno_mcp.
+        url = url or str(cfg.get("MUSIC_SUNO_MCP_URL") or "").strip()
+        cmd = cmd or str(cfg.get("MUSIC_SUNO_MCP_COMMAND") or "").strip()
+    if transport == "stdio":
+        endpoint = bool(cmd)
+    else:
+        endpoint = bool(url) or (is_primary and bool(cmd))
+
+    accounts = [a for a in (raw.get("accounts") or []) if a.get("enabled", True)]
+    oauth_connected = False
+    oauth_meta: dict[str, Any] = {}
+    bearer = False
+    expired = False
+    token = ""
+    acc_auth_type = ""
+    ready: list[tuple[bool, bool, str, dict[str, Any]]] = []
+    for acc in accounts or [None]:
+        try:
+            headers, env_vars = mgr._resolve_credentials(raw, acc)
+        except Exception:
+            headers, env_vars = {}, {}
+        acc_oauth = (acc or {}).get("oauth") or {}
+        acc_id = str((acc or {}).get("id") or "")
+        vault_oauth = (
+            mgr._get_secret(sid, acc_id, "oauth_access_token").strip() if acc else ""
+        )
+        acc_oauth_ok = bool(acc_oauth.get("connected") and vault_oauth)
+        auth_header = str(headers.get("Authorization") or "").strip()
+        acc_bearer = bool(auth_header)
+        if acc and vault_oauth and not acc_oauth_ok:
+            # OAuth token left in the vault without connected=True does not count.
+            acc_bearer = bool(
+                mgr._get_secret(sid, acc_id, "bearer_token").strip()
+                or mgr._get_secret(sid, "_server", "bearer_token").strip()
+            )
+        if transport == "stdio" and any(
+            str(v).strip() and _SECRET_ENV_KEY.search(str(k))
+            for k, v in (env_vars or {}).items()
+        ):
+            acc_bearer = True
+        if acc and not oauth_meta:
+            oauth_meta = acc_oauth
+            acc_auth_type = str(acc.get("auth_type") or "")
+        if not (acc_oauth_ok or acc_bearer):
+            continue
+        # Last call answered 401/403 => this credential is considered expired.
+        # Uses the recorded code (HTTP status), not the free-text message.
+        error_code = (acc or {}).get("last_error_code") if acc else None
+        if not acc:
+            error_code = raw.get("last_error_code")
+        acc_expired = str(error_code or "") in _AUTH_ERROR_CODES
+        ready.append((acc_oauth_ok, acc_expired, auth_header, acc or {}))
+    if ready:
+        # Prefer non-expired credentials, then OAuth over bearer.
+        ready.sort(key=lambda item: (item[1], not item[0]))
+        best_oauth, best_expired, best_header, best_acc = ready[0]
+        oauth_connected = any(item[0] for item in ready)
+        bearer = any(not item[0] for item in ready)
+        expired = best_expired  # every credentialed account is expired
+        if best_acc:
+            if best_oauth:
+                oauth_meta = best_acc.get("oauth") or {}
+            acc_auth_type = str(best_acc.get("auth_type") or acc_auth_type)
+        if include_secrets and best_header.startswith("Bearer "):
+            token = best_header[len("Bearer ") :].strip()
+    settings_token = (
+        str(cfg.get("MUSIC_SUNO_MCP_TOKEN") or "").strip() if is_primary else ""
+    )
+    if settings_token and not ready:
+        # Legacy MUSIC_SUNO_MCP_TOKEN only fills in when the server has none.
+        bearer = True
+        expired = str(raw.get("last_error_code") or "") in _AUTH_ERROR_CODES
+        if include_secrets:
+            token = settings_token
+    credential = oauth_connected or bearer
+    auth_type = acc_auth_type or (
+        "oauth"
+        if oauth_meta.get("client_id") or oauth_connected
+        else ("bearer" if bearer else "none")
+    )
+    out = {
+        "server_id": sid,
+        "server_enabled": bool(raw.get("enabled", True)),
+        "transport": transport,
+        "url": url,
+        "command": cmd,
+        "endpoint_configured": endpoint,
+        "has_credential": credential,
+        "oauth_connected": oauth_connected,
+        "has_token": credential,
+        "expired": expired,
+        "auth_type": auth_type,
+        "oauth": oauth_meta,
     }
+    if include_secrets:
+        out["token"] = token
+    return out
+
+
+def _suno_resolve(*, include_secrets: bool = False) -> dict[str, Any]:
+    """Single source of truth for the Suno provider (RN01, D1).
+
+    available = endpoint (URL or command) AND credential (OAuth connected or
+    bearer/env secret). Registered MCP servers (id ``suno_mcp`` or host
+    ``api.suno.com``) are the primary source; settings ``Apps/music`` are only a
+    legacy mirror/fallback. No network calls (RN06: no health check).
+    """
+    cfg = settings()
+    servers: list[dict[str, Any]] = []
+    mgr = None
     try:
         from src.mcp_connectors import get_mcp_manager
 
         mgr = get_mcp_manager()
-        srv = mgr.get_server(_SUNO_MCP_SERVER_ID)
+        servers = mgr.find_suno_servers()
     except Exception:
-        return state
+        servers = []
 
-    accounts = srv.get("accounts") or []
-    acc = accounts[0] if accounts else {}
-    acc_id = str(acc.get("id") or "default")
-    oauth = acc.get("oauth") or {}
-    vault_oauth = bool(
-        mgr._get_secret(_SUNO_MCP_SERVER_ID, acc_id, "oauth_access_token").strip()
-    )
-    vault_bearer = bool(
-        mgr._get_secret(_SUNO_MCP_SERVER_ID, "_server", "bearer_token").strip()
-        or mgr._get_secret(_SUNO_MCP_SERVER_ID, acc_id, "bearer_token").strip()
-    )
-    oauth_connected = bool(oauth.get("connected") and vault_oauth)
-    has_token = bool(vault_oauth or vault_bearer)
-    state.update(
-        {
-            "auth_type": str(
-                acc.get("auth_type")
-                or (
-                    "oauth"
-                    if oauth.get("client_id") or oauth_connected
-                    else ("bearer" if has_token else "none")
-                )
-            ),
-            "oauth_connected": oauth_connected,
-            "oauth_client_id": str(oauth.get("client_id") or ""),
-            "oauth_auth_url": str(oauth.get("auth_url") or ""),
-            "oauth_token_url": str(oauth.get("token_url") or ""),
-            "oauth_scopes": str(oauth.get("scopes") or ""),
-            "has_token": has_token,
+    chosen: dict[str, Any] | None = None
+    source = "none"
+    if servers and mgr is not None:
+        enabled = [s for s in servers if s.get("enabled", True)]
+        evaluations = [
+            _suno_server_evaluation(mgr, s, cfg, include_secrets=include_secrets)
+            for s in enabled
+        ]
+        ready = [
+            e
+            for e in evaluations
+            if e["endpoint_configured"] and e["has_credential"] and not e["expired"]
+        ]
+        primary_first = lambda items: sorted(  # noqa: E731
+            items, key=lambda e: e["server_id"] != _SUNO_MCP_SERVER_ID
+        )
+        if ready:
+            chosen = primary_first(ready)[0]
+        elif evaluations:
+            chosen = primary_first(evaluations)[0]
+        else:
+            # Only disabled Suno servers: report them as unavailable.
+            raw = sorted(servers, key=lambda s: s.get("id") != _SUNO_MCP_SERVER_ID)[0]
+            chosen = _suno_server_evaluation(
+                mgr, raw, cfg, include_secrets=include_secrets
+            )
+            chosen["endpoint_configured"] = False
+            chosen["has_credential"] = False
+            chosen["has_token"] = False
+            chosen["oauth_connected"] = False
+            chosen["expired"] = False
+            if include_secrets:
+                chosen["token"] = ""
+        source = "mcp_server"
+    if chosen is None:
+        url = str(cfg.get("MUSIC_SUNO_MCP_URL") or "").strip()
+        cmd = str(cfg.get("MUSIC_SUNO_MCP_COMMAND") or "").strip()
+        tok = str(cfg.get("MUSIC_SUNO_MCP_TOKEN") or "").strip()
+        chosen = {
+            "server_id": _SUNO_MCP_SERVER_ID,
+            "server_enabled": True,
+            "transport": "stdio" if (cmd and not url) else "http_streaming",
+            "url": url,
+            "command": cmd,
+            "endpoint_configured": bool(url or cmd),
+            "has_credential": bool(tok),
+            "oauth_connected": False,
+            "has_token": bool(tok),
+            "expired": False,
+            "auth_type": "bearer" if tok else "none",
+            "oauth": {},
         }
+        if include_secrets:
+            chosen["token"] = tok
+        source = "settings" if (url or cmd or tok) else "none"
+
+    oauth = chosen.pop("oauth", {}) or {}
+    # Expired credential (last call answered 401/403) => unavailable until the
+    # user reconnects (new credential clears last_error in mcp_connectors).
+    available = bool(
+        chosen["server_enabled"]
+        and chosen["endpoint_configured"]
+        and chosen["has_credential"]
+        and not chosen["expired"]
     )
-    return state
+    if not chosen["has_credential"]:
+        credential_state = "missing"
+    elif chosen["expired"]:
+        credential_state = "expired"
+    else:
+        credential_state = "configured"
+    status = {
+        **chosen,
+        "id": "suno_mcp",
+        "label": "Suno",
+        "available": available,
+        "credential_state": credential_state,
+        "source": source,
+        "url_masked": _mask_url(chosen["url"]),
+        "settings_route": dict(SUNO_SETTINGS_ROUTE),
+        "oauth_client_id": str(oauth.get("client_id") or ""),
+        "oauth_auth_url": _mask_url(str(oauth.get("auth_url") or "")),
+        "oauth_token_url": _mask_url(str(oauth.get("token_url") or "")),
+        "oauth_scopes": str(oauth.get("scopes") or ""),
+    }
+    status.pop("expired", None)
+    status.pop("has_credential", None)
+    return status
+
+
+def suno_status() -> dict[str, Any]:
+    """Public, secret-free Suno status used by catalog, generate() and tools."""
+    status = _suno_resolve(include_secrets=False)
+    status["url"] = status["url_masked"]
+    status["command"] = _mask_command(status["command"])
+    return status
 
 
 def _ensure_suno_mcp_server(
@@ -189,7 +458,13 @@ def _ensure_suno_mcp_server(
         oauth = dict(acc.get("oauth") or {})
         for key in ("client_id", "auth_url", "token_url", "scopes", "redirect_uri"):
             if key in oauth_payload and oauth_payload[key] is not None:
-                oauth[key] = str(oauth_payload[key]).strip()
+                value = str(oauth_payload[key]).strip()
+                if key in ("auth_url", "token_url"):
+                    # Catalog exposes these masked; don't overwrite the real URL.
+                    value = str(
+                        _keep_if_masked(value, [oauth.get(key) or ""], _mask_url)
+                    ).strip()
+                oauth[key] = value
         if oauth_payload.get("client_secret"):
             oauth["client_secret"] = str(oauth_payload["client_secret"]).strip()
         acc["oauth"] = oauth
@@ -206,28 +481,16 @@ def _ensure_suno_mcp_server(
     return mgr.save_server(payload, server_id=_SUNO_MCP_SERVER_ID)
 
 
-def _resolve_suno_mcp_credentials(cfg: dict[str, Any]) -> tuple[str, str, str]:
-    suno_url = str(cfg.get("MUSIC_SUNO_MCP_URL") or "").strip()
-    suno_cmd = str(cfg.get("MUSIC_SUNO_MCP_COMMAND") or "").strip()
-    suno_tok = str(cfg.get("MUSIC_SUNO_MCP_TOKEN") or "").strip()
-    try:
-        from src.mcp_connectors import get_mcp_manager
+def _resolve_suno_mcp_credentials(
+    cfg: dict[str, Any] | None = None,
+) -> tuple[str, str, str]:
+    """(url, command, token) for the Suno MCP, read through the single source.
 
-        mgr = get_mcp_manager()
-        raw = mgr._find_raw(_SUNO_MCP_SERVER_ID)
-        suno_url = suno_url or str(raw.get("url") or "").strip()
-        suno_cmd = suno_cmd or str(raw.get("command") or "").strip()
-        accounts = [a for a in (raw.get("accounts") or []) if a.get("enabled", True)]
-        acc = accounts[0] if accounts else None
-        headers, _ = mgr._resolve_credentials(raw, acc)
-        auth_header = headers.get("Authorization") or ""
-        if auth_header.startswith("Bearer "):
-            vault_tok = auth_header[len("Bearer ") :].strip()
-            if vault_tok:
-                suno_tok = vault_tok
-    except Exception:
-        pass
-    return suno_url, suno_cmd, suno_tok
+    ``cfg`` is accepted for backwards compatibility and ignored: the settings are
+    read inside ``_suno_resolve``.
+    """
+    status = _suno_resolve(include_secrets=True)
+    return status["url"], status["command"], status.get("token", "")
 
 
 def suno_oauth_start(payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -296,14 +559,10 @@ def providers_catalog():
     gemini_key = bool(
         setting("GEMINI_API_KEY") or setting("AGE_GEMINI_API_KEY") or STT_GEMINI_API_KEY
     )
-    suno_url = str(cfg.get("MUSIC_SUNO_MCP_URL") or "").strip()
-    suno_cmd = str(cfg.get("MUSIC_SUNO_MCP_COMMAND") or "").strip()
-    suno_state = _suno_connector_state()
-    suno_token = (
-        bool(str(cfg.get("MUSIC_SUNO_MCP_TOKEN") or "").strip())
-        or suno_state["has_token"]
-    )
-    suno_configured = bool(suno_url or suno_cmd)
+    suno = suno_status()
+    suno_url = suno["url_masked"]
+    suno_cmd = suno["command"]
+    suno_token = suno["has_token"]
     return {
         "providers": [
             {
@@ -325,20 +584,24 @@ def providers_catalog():
             },
             {
                 "id": "suno_mcp",
+                "label": "Suno",
                 "name": "Suno (MCP)",
                 "kind": "mcp",
                 "description": "Conexão com servidor MCP do Suno",
                 "url": suno_url,
                 "command": suno_cmd,
-                "credential_state": "configured" if suno_token else "missing",
+                "endpoint_configured": suno["endpoint_configured"],
+                "credential_state": suno["credential_state"],
                 "token_configured": suno_token,
-                "auth_type": suno_state["auth_type"],
-                "oauth_connected": suno_state["oauth_connected"],
-                "oauth_client_id": suno_state["oauth_client_id"],
-                "oauth_auth_url": suno_state["oauth_auth_url"],
-                "oauth_token_url": suno_state["oauth_token_url"],
-                "oauth_scopes": suno_state["oauth_scopes"],
-                "available": suno_configured,
+                "auth_type": suno["auth_type"],
+                "oauth_connected": suno["oauth_connected"],
+                "oauth_client_id": suno["oauth_client_id"],
+                "oauth_auth_url": suno["oauth_auth_url"],
+                "oauth_token_url": suno["oauth_token_url"],
+                "oauth_scopes": suno["oauth_scopes"],
+                "server_id": suno["server_id"],
+                "settings_route": suno["settings_route"],
+                "available": suno["available"],
             },
         ],
         "selection": {
@@ -347,12 +610,12 @@ def providers_catalog():
             "suno_mcp_url": suno_url,
             "suno_mcp_command": suno_cmd,
             "suno_mcp_token_configured": suno_token,
-            "suno_mcp_auth_type": suno_state["auth_type"],
-            "suno_mcp_oauth_connected": suno_state["oauth_connected"],
-            "suno_mcp_oauth_client_id": suno_state["oauth_client_id"],
-            "suno_mcp_oauth_auth_url": suno_state["oauth_auth_url"],
-            "suno_mcp_oauth_token_url": suno_state["oauth_token_url"],
-            "suno_mcp_oauth_scopes": suno_state["oauth_scopes"],
+            "suno_mcp_auth_type": suno["auth_type"],
+            "suno_mcp_oauth_connected": suno["oauth_connected"],
+            "suno_mcp_oauth_client_id": suno["oauth_client_id"],
+            "suno_mcp_oauth_auth_url": suno["oauth_auth_url"],
+            "suno_mcp_oauth_token_url": suno["oauth_token_url"],
+            "suno_mcp_oauth_scopes": suno["oauth_scopes"],
         },
     }
 
@@ -373,6 +636,29 @@ def select_provider(
     suno_mcp_redirect_uri: str | None = None,
 ):
     from src.settings_store import get_store
+
+    if suno_mcp_url is not None or suno_mcp_command is not None:
+        # The catalog exposes masked URL/command; keep the real ones when the
+        # UI sends the masked value back unchanged (review item 1/2).
+        current = _suno_resolve(include_secrets=False)
+        cfg_now = settings()
+        url_candidates = [str(cfg_now.get("MUSIC_SUNO_MCP_URL") or ""), current["url"]]
+        cmd_candidates = [
+            str(cfg_now.get("MUSIC_SUNO_MCP_COMMAND") or ""),
+            current["command"],
+        ]
+        try:
+            from src.mcp_connectors import get_mcp_manager
+
+            primary = get_mcp_manager()._find_raw(_SUNO_MCP_SERVER_ID)
+            url_candidates.append(str(primary.get("url") or ""))
+            cmd_candidates.append(str(primary.get("command") or ""))
+        except Exception:
+            pass
+        suno_mcp_url = _keep_if_masked(suno_mcp_url, url_candidates, _mask_url)
+        suno_mcp_command = _keep_if_masked(
+            suno_mcp_command, cmd_candidates, _mask_command
+        )
 
     updates = {}
     if provider is not None:
@@ -738,8 +1024,7 @@ def generate(
             elif provider == "suno_mcp":
                 from src.mcp_chat_tools import call_suno_mcp
 
-                cfg = settings()
-                suno_url, suno_cmd, suno_tok = _resolve_suno_mcp_credentials(cfg)
+                suno_url, suno_cmd, suno_tok = _resolve_suno_mcp_credentials()
                 progress("Gerando música via Suno (MCP)…")
                 data = call_suno_mcp(
                     prompt,

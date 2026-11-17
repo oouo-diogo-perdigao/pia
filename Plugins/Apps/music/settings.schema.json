@@ -43,5 +43,17 @@
     "type": "secret",
     "default": "",
     "label": "Suno MCP Token"
+  },
+  {
+    "name": "MUSIC_SUNO_MCP_TOOL",
+    "type": "string",
+    "default": "",
+    "label": "Suno MCP Tool"
+  },
+  {
+    "name": "MUSIC_SUNO_TIMEOUT",
+    "type": "int",
+    "default": "600",
+    "label": "Suno Timeout Seconds"
   }
 ]
