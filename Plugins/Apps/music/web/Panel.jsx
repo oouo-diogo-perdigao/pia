@@ -28,9 +28,12 @@ import {
   usePia,
 } from "../../../../src/pia/frontend/shared";
 import {
+  MUSIC_PROVIDERS_UPDATED_EVENT,
   SUNO_CANCEL_WARNING,
   SUNO_HINT_TEXT,
   buildGeneratorOptions,
+  generatorHints,
+  partialBatchLabel,
   providerLabel,
   resolveInitialProvider,
   resolveProviderAfterRefresh,
@@ -56,10 +59,17 @@ export default function Music({ sub = "principal" }) {
     [folder, setFolder] = useState(""),
     [scrollBatch, setScrollBatch] = useState(null),
     [catalog, setCatalog] = useState(null),
-    [notice, setNotice] = useState("");
+    [notice, setNoticeState] = useState({ text: "", source: "" });
   const providerReady = useRef(false),
     providerRef = useRef(provider),
-    busyRef = useRef(busy);
+    busyRef = useRef(busy),
+    alive = useRef(true),
+    catalogRequest = useRef(0),
+    pendingReuse = useRef(null);
+  // source: "refresh" (catálogo mudou) ou "user" (reuse); o refresh só limpa
+  // o próprio aviso.
+  const setNotice = (text, source = "user") =>
+    setNoticeState({ text: text || "", source: text ? source : "" });
   providerRef.current = provider;
   busyRef.current = busy;
   const source = useRef(),
@@ -71,8 +81,9 @@ export default function Music({ sub = "principal" }) {
     setLyrics(item.lyrics || "");
     const reused = resolveReuseProvider(item, catalog);
     providerReady.current = true;
+    pendingReuse.current = reused.pending ? item : null;
     setProvider(reused.provider);
-    setNotice(reused.warning || "");
+    setNotice(reused.warning);
     setDuration(
       Number.isInteger(item.requested_duration)
         ? Math.max(10, Math.min(180, item.requested_duration))
@@ -91,6 +102,7 @@ export default function Music({ sub = "principal" }) {
     setJob(identity);
     source.current?.close();
     source.current = watchJob(identity, (event) => {
+      if (!alive.current) return;
       if (event.type === "progress") setProgress(event.value);
       if (event.type === "track")
         setItems((old) => [
@@ -100,10 +112,23 @@ export default function Music({ sub = "principal" }) {
       if (event.type === "log") setLogs((old) => old + event.text + "\n");
       if (["done", "error"].includes(event.type)) {
         setBusy(false);
+        busyRef.current = false;
+        // Ex.: 401 do Suno durante a geração muda a disponibilidade.
+        loadProviders();
         if (event.type === "error") {
           setProgress((old) =>
             old
-              ? { ...old, state: "error", label: "Geração interrompida" }
+              ? {
+                  ...old,
+                  state: "error",
+                  label: [
+                    "Geração interrompida",
+                    event.completed > 0 &&
+                      partialBatchLabel(event.completed, event.total),
+                  ]
+                    .filter(Boolean)
+                    .join(" · "),
+                }
               : null,
           );
           report(event.error);
@@ -118,6 +143,7 @@ export default function Music({ sub = "principal" }) {
   }
   const refresh = () =>
     call("library").then((value) => {
+      if (!alive.current) return;
       setItems(value.items);
       setFolder(value.folder || "");
       if (value.job && !source.current) follow(value.job);
@@ -125,10 +151,13 @@ export default function Music({ sub = "principal" }) {
   // Catálogo de provedores: fonte da verdade para o seletor (RN03/RN05).
   // Em erro mantém o último catálogo válido; sem nenhum, o seletor cai em
   // Local, Gemini e Flow sem quebrar a tela.
-  const loadProviders = () =>
-    call("providers")
+  // Só a resposta mais recente é aplicada (requisições fora de ordem).
+  const loadProviders = () => {
+    const requestId = ++catalogRequest.current;
+    return call("providers")
       .catch(() => null)
       .then((value) => {
+        if (!alive.current || requestId !== catalogRequest.current) return;
         const valid = value && Array.isArray(value.providers) ? value : null;
         if (valid) setCatalog(valid);
         if (!providerReady.current) {
@@ -137,19 +166,33 @@ export default function Music({ sub = "principal" }) {
           return;
         }
         if (!valid) return;
+        if (pendingReuse.current && !busyRef.current) {
+          const reused = resolveReuseProvider(pendingReuse.current, valid);
+          pendingReuse.current = null;
+          setProvider(reused.provider);
+          setNotice(reused.warning);
+          return;
+        }
         const next = resolveProviderAfterRefresh(
           providerRef.current,
           valid,
           busyRef.current,
         );
-        if (next.provider !== providerRef.current) {
-          setProvider(next.provider);
-          setNotice(next.warning || "");
-        }
+        if (next.provider !== providerRef.current) setProvider(next.provider);
+        if (next.warning) setNotice(next.warning, "refresh");
+        else
+          setNoticeState((old) =>
+            old.source === "refresh" ? { text: "", source: "" } : old,
+          );
       });
+  };
   useEffect(() => {
-    refresh().catch(report);
-    return () => source.current?.close();
+    alive.current = true;
+    refresh().catch((error) => alive.current && report(error));
+    return () => {
+      alive.current = false;
+      source.current?.close();
+    };
   }, []);
   useEffect(() => {
     let timer;
@@ -162,10 +205,12 @@ export default function Music({ sub = "principal" }) {
     };
     loadProviders();
     window.addEventListener("focus", schedule);
+    window.addEventListener(MUSIC_PROVIDERS_UPDATED_EVENT, schedule);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       clearTimeout(timer);
       window.removeEventListener("focus", schedule);
+      window.removeEventListener(MUSIC_PROVIDERS_UPDATED_EVENT, schedule);
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
@@ -181,6 +226,7 @@ export default function Music({ sub = "principal" }) {
     setBusy(true);
     setLogs("");
     setProgress(null);
+    if (action === "generate") setNotice("");
     try {
       const response = await call(
         action,
@@ -224,12 +270,16 @@ export default function Music({ sub = "principal" }) {
                 onChange={(value) => {
                   if (!value) return;
                   providerReady.current = true;
+                  pendingReuse.current = null;
                   setProvider(value);
                   setNotice("");
                 }}
                 disabled={busy}
                 allowDeselect={false}
-                data={buildGeneratorOptions(catalog)}
+                data={buildGeneratorOptions(
+                  catalog,
+                  busy || !catalog || pendingReuse.current ? provider : null,
+                )}
               />
               {shouldShowSunoHint(catalog) && (
                 <Text size="xs" c="dimmed">
@@ -244,9 +294,9 @@ export default function Music({ sub = "principal" }) {
                   </Anchor>
                 </Text>
               )}
-              {notice && (
+              {notice.text && (
                 <Text size="sm" c="yellow">
-                  {notice}
+                  {notice.text}
                 </Text>
               )}
               <Textarea
@@ -321,11 +371,15 @@ export default function Music({ sub = "principal" }) {
                   </Button>
                 )}
               </Group>
-              {provider === "suno_mcp" && (
-                <Text size="xs" c="yellow">
-                  {SUNO_CANCEL_WARNING}
+              {generatorHints(provider).map((hint, index) => (
+                <Text
+                  size="xs"
+                  c={hint === SUNO_CANCEL_WARNING ? "yellow" : "dimmed"}
+                  key={index}
+                >
+                  {hint}
                 </Text>
-              )}
+              ))}
               <Text size="sm" c="dimmed">
                 A PIA não usa cookies das contas para simular APIs. O motor
                 local fica separado do Whisper/TTS.

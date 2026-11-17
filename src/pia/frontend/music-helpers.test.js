@@ -1,9 +1,17 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  MUSIC_PROVIDERS_UPDATED_EVENT,
   MUSIC_PROVIDER_LABELS,
+  SUNO_CANCEL_WARNING,
+  SUNO_DURATION_HINT,
+  SUNO_HINT_TEXT,
+  SUNO_REUSE_WARNING,
   SUNO_SETTINGS_ROUTE,
   buildGeneratorOptions,
+  generatorHints,
+  isGeneratorAvailable,
+  partialBatchLabel,
   buildMusicSelectPayload,
   buildSunoOAuthStartPayload,
   musicDraftSnapshot,
@@ -307,5 +315,124 @@ describe("music-helpers seletor dinâmico (Suno no app de Música)", () => {
       view: "settings",
       section: "Apps/music",
     });
+  });
+
+  it("falha passageira do catálogo mantém o provedor atual sem aviso", () => {
+    for (const bad of [undefined, null, {}, { error: "timeout" }]) {
+      assert.deepEqual(resolveProviderAfterRefresh("suno_mcp", bad), {
+        provider: "suno_mcp",
+        warning: null,
+      });
+    }
+  });
+
+  it("resolveInitialProvider ignora flow salvo (não é gerador do backend)", () => {
+    assert.equal(resolveInitialProvider(catalog(true, "flow")), "local");
+  });
+
+  it("isGeneratorAvailable direto", () => {
+    assert.equal(isGeneratorAvailable("local", null), true);
+    assert.equal(isGeneratorAvailable("gemini", catalog(false)), true);
+    assert.equal(isGeneratorAvailable("flow", undefined), true);
+    assert.equal(isGeneratorAvailable("suno_mcp", catalog(true)), true);
+    assert.equal(isGeneratorAvailable("suno_mcp", catalog(false)), false);
+    assert.equal(isGeneratorAvailable("suno_mcp", null), false);
+    assert.equal(isGeneratorAvailable("xyz", catalog(true)), false);
+  });
+
+  it("buildGeneratorOptions e sunoSettingsRoute devolvem cópias", () => {
+    const first = buildGeneratorOptions(catalog(true));
+    first[0].label = "alterado";
+    first.push({ value: "x" });
+    assert.equal(
+      buildGeneratorOptions(catalog(true))[0].label,
+      "Local · ACE-Step",
+    );
+    const cat = catalog(false);
+    const route = sunoSettingsRoute(cat);
+    route.section = "outra";
+    assert.equal(cat.providers[2].settings_route.section, "Apps/music");
+    const fallback = sunoSettingsRoute(null);
+    fallback.view = "x";
+    assert.equal(SUNO_SETTINGS_ROUTE.view, "settings");
+  });
+
+  it("sunoSettingsRoute só aceita view settings", () => {
+    const cat = catalog(false);
+    cat.providers[2].settings_route = { view: "chat", section: "x" };
+    assert.deepEqual(sunoSettingsRoute(cat), SUNO_SETTINGS_ROUTE);
+    cat.providers[2].settings_route = {
+      view: "settings",
+      section: "Apps/music2",
+    };
+    assert.deepEqual(sunoSettingsRoute(cat), {
+      view: "settings",
+      section: "Apps/music2",
+    });
+  });
+
+  it("textos de dica, aviso e cancelamento", () => {
+    assert.match(SUNO_HINT_TEXT, /Configurações → Música/);
+    assert.match(SUNO_REUSE_WARNING, /Configurações → Música/);
+    assert.match(SUNO_CANCEL_WARNING, /créditos/);
+    assert.match(SUNO_DURATION_HINT, /duração é indicativa/);
+  });
+
+  it("generatorHints mostra duração indicativa e créditos só com Suno", () => {
+    assert.deepEqual(generatorHints("suno_mcp"), [
+      SUNO_DURATION_HINT,
+      SUNO_CANCEL_WARNING,
+    ]);
+    assert.deepEqual(generatorHints("local"), []);
+    assert.deepEqual(generatorHints("gemini"), []);
+    assert.deepEqual(generatorHints(undefined), []);
+  });
+
+  it("partialBatchLabel usa o texto da notificação", () => {
+    assert.equal(partialBatchLabel(1, 3), "1 de 3 músicas prontas");
+    assert.equal(partialBatchLabel(0, 2), "0 de 2 músicas prontas");
+    assert.equal(partialBatchLabel(0, 1), "0 de 1 música pronta");
+    assert.equal(partialBatchLabel(undefined, 3), "");
+    assert.equal(partialBatchLabel(1, 0), "");
+  });
+
+  it("buildGeneratorOptions mantém o provedor atual com keep", () => {
+    assert.deepEqual(
+      values(buildGeneratorOptions(catalog(false), "suno_mcp")),
+      ["local", "gemini", "suno_mcp", "flow"],
+    );
+    assert.deepEqual(values(buildGeneratorOptions(null, "suno_mcp")), [
+      "local",
+      "gemini",
+      "suno_mcp",
+      "flow",
+    ]);
+    assert.deepEqual(values(buildGeneratorOptions(catalog(false), "xyz")), [
+      "local",
+      "gemini",
+      "flow",
+    ]);
+    assert.deepEqual(values(buildGeneratorOptions(catalog(false), "local")), [
+      "local",
+      "gemini",
+      "flow",
+    ]);
+  });
+
+  it("reuse de faixa Suno com catálogo carregando fica pendente, sem aviso", () => {
+    for (const loading of [null, undefined, { error: "x" }]) {
+      assert.deepEqual(
+        resolveReuseProvider({ provider: "suno_mcp" }, loading),
+        {
+          provider: "suno_mcp",
+          warning: null,
+          pending: true,
+        },
+      );
+    }
+  });
+
+  it("evento de atualização do catálogo", () => {
+    assert.equal(MUSIC_PROVIDERS_UPDATED_EVENT, "pia:music-providers-updated");
   });
 });

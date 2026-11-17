@@ -136,8 +136,10 @@ export function resolveSunoConnectionStatus(
 
 // ---------------------------------------------------------------------------
 // Seletor dinâmico do app de Música (Panel.jsx)
-// Contrato: GET /api/pia/music/providers e appApi("music", "providers")
+// Contrato (seção 3 do plano): GET /api/pia/music/providers e appApi("music", "providers")
 // -> { providers: [{ id, label, available, ... }], selection: { provider } }
+// `available` e `settings_route` do suno_mcp vêm do backend (T1, suno_status()):
+// available = endpoint && credencial. O frontend não recalcula essa regra.
 // ---------------------------------------------------------------------------
 
 export const MUSIC_PROVIDER_SHORT_LABELS = {
@@ -149,6 +151,9 @@ export const MUSIC_PROVIDER_SHORT_LABELS = {
 
 export const SUNO_SETTINGS_ROUTE = { view: "settings", section: "Apps/music" };
 
+// Disparado por Configurações → Música (T7) depois de conectar/desconectar o Suno.
+export const MUSIC_PROVIDERS_UPDATED_EVENT = "pia:music-providers-updated";
+
 export const SUNO_HINT_TEXT = "Conecte o Suno em Configurações → Música";
 
 export const SUNO_REUSE_WARNING =
@@ -156,6 +161,9 @@ export const SUNO_REUSE_WARNING =
 
 export const SUNO_UNAVAILABLE_WARNING =
   "O Suno deixou de estar disponível. O gerador voltou para Local.";
+
+export const SUNO_DURATION_HINT =
+  "No Suno a duração é indicativa; a faixa pode sair com outro tamanho.";
 
 export const SUNO_CANCEL_WARNING =
   "Cancelar para a espera, mas não interrompe a geração já enviada ao Suno; pode consumir créditos.";
@@ -188,17 +196,27 @@ export function isGeneratorAvailable(id, catalog) {
   return GENERATOR_OPTIONS.some((option) => option.value === id);
 }
 
-/** Opções do Select "Gerador". Suno escondido (não desabilitado) se indisponível (RN02/RN03). */
-export function buildGeneratorOptions(catalog) {
-  return GENERATOR_OPTIONS.filter((option) =>
-    isGeneratorAvailable(option.value, catalog),
+/**
+ * Opções do Select "Gerador". Suno escondido (não desabilitado) se
+ * indisponível (RN02/RN03). `keep` mantém um provedor conhecido na lista mesmo
+ * indisponível (geração em andamento ou catálogo ainda carregando), para o
+ * Select não ficar em branco.
+ */
+export function buildGeneratorOptions(catalog, keep = null) {
+  return GENERATOR_OPTIONS.filter(
+    (option) =>
+      option.value === keep || isGeneratorAvailable(option.value, catalog),
   ).map((option) => ({ ...option }));
 }
 
 /** Provedor salvo (MUSIC_PROVIDER) se disponível, senão "local" (RN04). */
 export function resolveInitialProvider(catalog) {
   const saved = catalog?.selection?.provider;
-  return saved && isGeneratorAvailable(saved, catalog) ? saved : "local";
+  // MUSIC_PROVIDER só admite geradores reais; "flow" não é salvo no backend.
+  return REUSABLE_PROVIDERS.includes(saved) &&
+    isGeneratorAvailable(saved, catalog)
+    ? saved
+    : "local";
 }
 
 /**
@@ -206,6 +224,10 @@ export function resolveInitialProvider(catalog) {
  * deixou de estar disponível e não há geração em andamento, volta para Local.
  */
 export function resolveProviderAfterRefresh(current, catalog, busy = false) {
+  // Falha passageira do catálogo (sem providers) não tira o usuário do Suno.
+  if (!Array.isArray(catalog?.providers)) {
+    return { provider: current, warning: null };
+  }
   if (busy || isGeneratorAvailable(current, catalog)) {
     return { provider: current, warning: null };
   }
@@ -215,11 +237,19 @@ export function resolveProviderAfterRefresh(current, catalog, busy = false) {
   };
 }
 
-/** "Reutilizar prompt" de uma faixa do Histórico (RN10). */
+/**
+ * "Reutilizar prompt" de uma faixa do Histórico (RN10). Sem catálogo ainda
+ * (carregando ou erro), uma faixa Suno fica pendente em vez de ser tratada
+ * como "Suno não conectado": `pending: true` pede reavaliar quando o catálogo
+ * chegar.
+ */
 export function resolveReuseProvider(item, catalog) {
   const provider = item?.provider;
   if (!REUSABLE_PROVIDERS.includes(provider)) {
     return { provider: "local", warning: null };
+  }
+  if (provider === "suno_mcp" && !Array.isArray(catalog?.providers)) {
+    return { provider, warning: null, pending: true };
   }
   if (isGeneratorAvailable(provider, catalog)) {
     return { provider, warning: null };
@@ -242,11 +272,28 @@ export function shouldShowSunoHint(catalog) {
 /** Rota do atalho para Configurações → Música. */
 export function sunoSettingsRoute(catalog) {
   const route = findCatalogProvider(catalog, "suno_mcp")?.settings_route;
-  return route && route.view ? { ...route } : { ...SUNO_SETTINGS_ROUTE };
+  return route?.view === "settings" && route.section
+    ? { view: route.view, section: route.section }
+    : { ...SUNO_SETTINGS_ROUTE };
 }
 
 /** Rótulo curto para o Histórico: "Local", "Gemini", "Suno"; fallback para o id. */
 export function providerLabel(id) {
   if (!id) return "";
   return MUSIC_PROVIDER_SHORT_LABELS[id] || String(id);
+}
+
+/** Dicas extras abaixo do formulário conforme o gerador selecionado. */
+export function generatorHints(provider) {
+  return provider === "suno_mcp"
+    ? [SUNO_DURATION_HINT, SUNO_CANCEL_WARNING]
+    : [];
+}
+
+/** Texto do lote parcial, igual ao da notificação: "1 de 3 músicas prontas". */
+export function partialBatchLabel(completed, total) {
+  const done = Number(completed);
+  const all = Number(total);
+  if (!Number.isInteger(done) || !Number.isInteger(all) || all < 1) return "";
+  return `${done} de ${all} ${all === 1 ? "música pronta" : "músicas prontas"}`;
 }
