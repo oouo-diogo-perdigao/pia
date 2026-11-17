@@ -91,6 +91,86 @@ def redact_error_text(text: str, limit: int = 300) -> str:
     return out[:limit]
 
 
+AUTH_ERROR_CODES = ("401", "403")
+# JSON-RPC codes some MCP servers use for auth/credits (non-standard range).
+_RPC_AUTH_CODES = (-32001, 401, 403)
+_RPC_CREDIT_CODES = (402,)
+_AUTH_MESSAGE_RE = re.compile(
+    r"\bunauthori[sz]ed\b|\bforbidden\b|token (expired|invalid)|invalid[_ ]token",
+    re.I,
+)
+_CREDIT_MESSAGE_RE = re.compile(
+    r"insufficient[_ ]credits?|no credits|out of credits|not enough credits"
+    r"|credits? (exhausted|insufficient)|payment required|insufficient[_ ]balance",
+    re.I,
+)
+
+
+# Conservative: only explicit auth wording in a tool ``isError`` result marks
+# the credential as expired ("forbidden"/policy texts do not).
+_TOOL_AUTH_ERROR_RE = re.compile(
+    r"\bunauthori[sz]ed\b"
+    r"|\b(?:invalid|expired|revoked)[_ -]?(?:access[_ -]?|bearer[_ -]?)?token\b"
+    r"|\b(?:access[_ -]?)?token[_ -]?(?:has[_ -]?)?(?:expired|invalid|revoked)\b"
+    r"|\bnot[_ -]authenticated\b|\bauthentication[_ -](?:failed|required)\b",
+    re.I,
+)
+TOOL_AUTH_ERROR_MESSAGE = "Autorização recusada pela ferramenta MCP (isError)."
+
+
+def tool_error_text(result: Any) -> str:
+    """Text of a tools/call result flagged ``isError`` (for classification only)."""
+    if not isinstance(result, dict):
+        return ""
+    parts = [
+        str(part.get("text") or "")
+        for part in (result.get("content") or [])
+        if isinstance(part, dict)
+    ]
+    structured = result.get("structuredContent")
+    if isinstance(structured, dict):
+        parts.append(json.dumps(structured, ensure_ascii=False))
+    return " ".join(p for p in parts if p)[:2000]
+
+
+def is_tool_auth_error(result: Any) -> bool:
+    return bool(
+        isinstance(result, dict)
+        and result.get("isError")
+        and _TOOL_AUTH_ERROR_RE.search(tool_error_text(result))
+    )
+
+
+class MCPRpcError(RuntimeError):
+    """JSON-RPC error returned by an MCP server (keeps the numeric ``code``)."""
+
+    def __init__(self, message: str, code: Any = None):
+        super().__init__(message or "Erro MCP")
+        self.rpc_code = code
+
+
+def _rpc_error(error: Any) -> MCPRpcError:
+    if isinstance(error, dict):
+        return MCPRpcError(str(error.get("message") or "Erro MCP"), error.get("code"))
+    return MCPRpcError(str(error or "Erro MCP"))
+
+
+def keep_if_masked(received: Any, currents: list[Any], masker: Any) -> Any:
+    """Round-trip guard for values the UI got masked and sends back unchanged.
+
+    If ``received`` equals ``masker(current)`` for a real current value (and
+    differs from it), return the real value instead of the masked one.
+    """
+    if received is None:
+        return None
+    value = str(received).strip()
+    for current in currents:
+        current = str(current or "").strip()
+        if current and value != current and value == masker(current):
+            return current
+    return received
+
+
 def safe_error(exc: BaseException) -> tuple[str, str]:
     """(code, message) for persisting an error (last_error_code/last_error).
 
@@ -98,8 +178,17 @@ def safe_error(exc: BaseException) -> tuple[str, str]:
     the exception class name. ``message`` never carries URL query/secrets.
     """
     status = getattr(getattr(exc, "response", None), "status_code", None)
+    message = str(exc)
     if isinstance(exc, requests.HTTPError) and status:
         code = str(int(status))
+    elif isinstance(exc, MCPRpcError) and (
+        exc.rpc_code in _RPC_AUTH_CODES or _AUTH_MESSAGE_RE.search(message)
+    ):
+        code = "401"  # JSON-RPC authorization error counts as HTTP 401
+    elif isinstance(exc, MCPRpcError) and (
+        exc.rpc_code in _RPC_CREDIT_CODES or _CREDIT_MESSAGE_RE.search(message)
+    ):
+        code = "402"
     elif isinstance(exc, (requests.Timeout, subprocess.TimeoutExpired, TimeoutError)):
         code = "timeout"
     elif isinstance(exc, requests.ConnectionError):
@@ -309,6 +398,10 @@ class MCPConnectorManager:
         # server/account pair has its own Mcp-Session-Id. Never stores the token.
         self._http_sessions: dict[tuple[str, str], dict[str, str]] = {}
         self._http_sessions_lock = threading.Lock()
+        # Runtime fields (usage, last_error, rr_cursor, cached_tools) are merged
+        # into a fresh read under this lock, never saved from a stale snapshot
+        # taken before a long tools/call (review item d).
+        self._store_lock = threading.RLock()
 
     def _vault_key(self, server_id: str, scope: str, field: str) -> str:
         return f"mcp:connector:{server_id}:{scope}:{field}"
@@ -813,14 +906,12 @@ class MCPConnectorManager:
                         or "error" in parsed
                     ):
                         if "error" in parsed:
-                            raise RuntimeError(
-                                parsed["error"].get("message", "Erro MCP")
-                            )
+                            raise _rpc_error(parsed["error"])
                         return parsed.get("result") or {}
             return {}
         data = resp.json()
         if isinstance(data, dict) and "error" in data:
-            raise RuntimeError(data["error"].get("message", "Erro MCP"))
+            raise _rpc_error(data["error"])
         if isinstance(data, dict) and "result" in data:
             return data["result"] or {}
         return data if isinstance(data, dict) else {}
@@ -1004,7 +1095,7 @@ class MCPConnectorManager:
                 parsed = json.loads(line)
                 if parsed.get("id") == 2:
                     if "error" in parsed:
-                        raise RuntimeError(parsed["error"].get("message", "Erro MCP"))
+                        raise _rpc_error(parsed["error"])
                     return parsed.get("result") or {}
             except json.JSONDecodeError:
                 continue
@@ -1099,10 +1190,53 @@ class MCPConnectorManager:
         if exc is None:
             target["last_error"] = None
             target["last_error_code"] = None
-        else:
-            code, message = safe_error(exc)
-            target["last_error"] = message
-            target["last_error_code"] = code
+            return
+        code, message = safe_error(exc)
+        if (
+            str(target.get("last_error_code") or "") in AUTH_ERROR_CODES
+            and code not in AUTH_ERROR_CODES
+        ):
+            # An expired credential stays expired until a success or a new
+            # credential; a timeout/5xx afterwards must not hide it.
+            return
+        target["last_error"] = message
+        target["last_error_code"] = code
+
+    def _merge_runtime(
+        self, server_id: str, account_id: str | None, apply: Any
+    ) -> None:
+        """Apply ``apply(target)`` to the fresh stored server/account and save."""
+        with self._store_lock:
+            servers = self._raw_servers()
+            server = next((s for s in servers if s.get("id") == server_id), None)
+            if server is None:
+                return
+            target: dict[str, Any] | None = server
+            if account_id is not None:
+                target = next(
+                    (
+                        a
+                        for a in (server.get("accounts") or [])
+                        if a.get("id") == account_id
+                    ),
+                    None,
+                )
+            if target is None:
+                return
+            apply(target)
+            self._save_raw_servers(servers)
+
+    def _advance_cursor(self, server_id: str, n_accounts: int) -> int:
+        """Read and advance ``rr_cursor`` atomically; returns the cursor used."""
+        used = {"cursor": 0}
+
+        def apply(server: dict[str, Any]) -> None:
+            cursor = int(server.get("rr_cursor", 0)) % max(1, n_accounts)
+            used["cursor"] = cursor
+            server["rr_cursor"] = (cursor + 1) % max(1, n_accounts)
+
+        self._merge_runtime(server_id, None, apply)
+        return used["cursor"]
 
     def _load_server(
         self, server_id: str
@@ -1171,15 +1305,11 @@ class MCPConnectorManager:
         if mode == "alternating":
             return self._alternating_account(server, accounts)["id"]
         if mode == "distributed":
-            cursor = int(server.get("rr_cursor", 0)) % len(accounts)
-            server["rr_cursor"] = (cursor + 1) % len(accounts)
-            self._save_raw_servers(servers)
-            return accounts[cursor]["id"]
+            return accounts[self._advance_cursor(server_id, len(accounts))]["id"]
         return accounts[0]["id"]
 
     def _exec_recorded(
         self,
-        servers: list[dict[str, Any]],
         server: dict[str, Any],
         account: dict[str, Any] | None,
         method: str,
@@ -1188,17 +1318,30 @@ class MCPConnectorManager:
         timeout: float | None,
         count_usage: bool = True,
     ) -> Any:
-        target = account if account is not None else server
+        server_id = str(server.get("id") or "")
+        account_id = str(account["id"]) if account is not None else None
         try:
             res = self._exec_single(server, account, method, params, timeout=timeout)
         except Exception as exc:
-            self._record_outcome(target, exc)
-            self._save_raw_servers(servers)
+            self._merge_runtime(
+                server_id, account_id, lambda t, err=exc: self._record_outcome(t, err)
+            )
             raise
-        if account is not None and count_usage:
-            account["usage_count"] = int(account.get("usage_count", 0)) + 1
-            account["last_used_at"] = _now_iso()
-        self._record_outcome(target, None)
+
+        auth_refused = method == "tools/call" and is_tool_auth_error(res)
+
+        def ok(target: dict[str, Any]) -> None:
+            if account_id is not None and count_usage:
+                target["usage_count"] = int(target.get("usage_count", 0)) + 1
+                target["last_used_at"] = _now_iso()
+            if auth_refused:
+                # Only the code + a fixed message; never the raw tool text.
+                target["last_error"] = TOOL_AUTH_ERROR_MESSAGE
+                target["last_error_code"] = "401"
+            else:
+                self._record_outcome(target, None)
+
+        self._merge_runtime(server_id, account_id, ok)
         return res
 
     def list_tools(
@@ -1214,20 +1357,14 @@ class MCPConnectorManager:
         to inferred catalogs. Errors are recorded (last_error_code) so a 401
         marks the credential as expired; success clears it.
         """
-        servers, server, accounts = self._load_server(server_id)
+        _servers, server, accounts = self._load_server(server_id)
         account = (
             self._pinned_account(accounts, account_id)
             if account_id
             else (accounts[0] if accounts else None)
         )
         res = self._exec_recorded(
-            servers,
-            server,
-            account,
-            "tools/list",
-            {},
-            timeout=timeout,
-            count_usage=False,
+            server, account, "tools/list", {}, timeout=timeout, count_usage=False
         )
         raw_tools = res.get("tools") if isinstance(res, dict) else []
         tools = [
@@ -1240,10 +1377,13 @@ class MCPConnectorManager:
             for t in (raw_tools if isinstance(raw_tools, list) else [])
             if isinstance(t, dict) and t.get("name")
         ]
-        server["cached_tools"] = tools
-        server["last_inspected_at"] = _now_iso()
-        server["last_status"] = "online"
-        self._save_raw_servers(servers)
+
+        def cache(target: dict[str, Any]) -> None:
+            target["cached_tools"] = tools
+            target["last_inspected_at"] = _now_iso()
+            target["last_status"] = "online"
+
+        self._merge_runtime(server_id, None, cache)
         return tools
 
     def call_tool(
@@ -1262,9 +1402,10 @@ class MCPConnectorManager:
         ``retry_other_accounts=False`` uses exactly one account in any mode
         (no distributed fallback, no incremental fan-out), for paid or
         non-idempotent tools. ``account_id`` pins that account (implies a
-        single call, no cursor rotation).
+        single call, no cursor rotation). Runtime fields are merged into the
+        store after the call (no stale snapshot is saved).
         """
-        servers, server, accounts = self._load_server(server_id)
+        _servers, server, accounts = self._load_server(server_id)
         args = dict(arguments or {})
         req_account_id = args.pop("_account_id", None)
         req_context = args.pop("_account_context", None)
@@ -1272,11 +1413,9 @@ class MCPConnectorManager:
         mode = server.get("account_mode", "distributed")
 
         def single(account: dict[str, Any] | None) -> Any:
-            res = self._exec_recorded(
-                servers, server, account, "tools/call", params, timeout=timeout
+            return self._exec_recorded(
+                server, account, "tools/call", params, timeout=timeout
             )
-            self._save_raw_servers(servers)
-            return res
 
         if account_id:
             return single(self._pinned_account(accounts, account_id))
@@ -1288,9 +1427,7 @@ class MCPConnectorManager:
             )
         if not retry_other_accounts:
             if mode == "distributed":
-                cursor = int(server.get("rr_cursor", 0)) % len(accounts)
-                server["rr_cursor"] = (cursor + 1) % len(accounts)
-                return single(accounts[cursor])
+                return single(accounts[self._advance_cursor(server_id, len(accounts))])
             return single(accounts[0])
 
         if mode == "incremental":
@@ -1302,32 +1439,23 @@ class MCPConnectorManager:
                     "context": acc.get("context", ""),
                 }
                 try:
-                    res = self._exec_recorded(
-                        servers, server, acc, "tools/call", params, timeout=timeout
-                    )
+                    res = single(acc)
                     aggregated.append({**entry, "ok": True, "result": res})
                 except Exception as exc:
                     aggregated.append(
                         {**entry, "ok": False, "error": safe_error(exc)[1]}
                     )
-            self._save_raw_servers(servers)
             return {"mode": "incremental", "results": aggregated}
 
         # Default: distributed (round-robin with automatic fallback on failure)
-        cursor = int(server.get("rr_cursor", 0)) % len(accounts)
+        cursor = self._advance_cursor(server_id, len(accounts))
         ordered = accounts[cursor:] + accounts[:cursor]
-        server["rr_cursor"] = (cursor + 1) % len(accounts)
         last_exc: Exception | None = None
         for acc in ordered:
             try:
-                res = self._exec_recorded(
-                    servers, server, acc, "tools/call", params, timeout=timeout
-                )
-                self._save_raw_servers(servers)
-                return res
+                return single(acc)
             except Exception as exc:
                 last_exc = exc
-        self._save_raw_servers(servers)
         raise last_exc or RuntimeError(
             "Nenhuma conta MCP ativa conseguiu executar a ferramenta."
         )
@@ -1369,7 +1497,13 @@ class MCPConnectorManager:
         oauth = acc.setdefault("oauth", {})
         for field in ("client_id", "auth_url", "token_url", "scopes", "redirect_uri"):
             if payload.get(field):
-                oauth[field] = str(payload[field]).strip()
+                value = str(payload[field]).strip()
+                if field in ("auth_url", "token_url"):
+                    # The UI shows these masked; never overwrite the real URL.
+                    value = str(
+                        keep_if_masked(value, [oauth.get(field)], mask_url)
+                    ).strip()
+                oauth[field] = value
         if payload.get("client_secret"):
             self._set_secret(
                 server_id,

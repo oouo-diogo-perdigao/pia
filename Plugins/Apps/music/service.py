@@ -3,7 +3,9 @@ from src.settings_store import get as setting
 """Music providers. Local ACE-Step is isolated from PIA's Torch environment."""
 import atexit
 import base64
+import binascii
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -14,12 +16,14 @@ import sys
 import threading
 import time
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 import uuid
 import requests
 from src.config_paths import BASE_DIR
 from src.settings_store import values as section_values, document, save_document
 from src.resource_plugins import save_json
+from src.mcp_connectors import keep_if_masked as _keep_if_masked
+from src.mcp_connectors import mask_url as _mask_url
 
 ROOT = Path(__file__).resolve().parent
 CACHE = BASE_DIR / "cache/Apps/music"
@@ -106,6 +110,51 @@ class SunoProtocolError(MusicProviderError):
     default_message = "O Suno recusou ou não entendeu a solicitação; nenhuma nova tentativa foi feita."
 
 
+class SunoNoCreditsError(MusicProviderError):
+    """Identifiable lack of credits (HTTP 402 or explicit credits code, Q7)."""
+
+    code = "suno_no_credits"
+    default_message = "Sem créditos no Suno. Verifique sua conta."
+
+
+class SunoDownloadError(MusicProviderError):
+    """The clip was generated but its audio could not be fetched/saved (Q2)."""
+
+    code = "download_failed"
+    default_message = (
+        "Não foi possível baixar o áudio gerado pelo Suno, tente de novo ou "
+        "use outro gerador"
+    )
+
+
+class SunoClipFailedError(MusicProviderError):
+    """A clip came back failed/without audio; the batch stops there (Q8)."""
+
+    default_message = (
+        "O Suno não conseguiu gerar uma das músicas; as que ficaram prontas "
+        "foram salvas."
+    )
+
+
+def tracks_ready_text(completed: int, total: int) -> str:
+    """ "k de N músicas prontas" (singular when total == 1)."""
+    noun = "música pronta" if total == 1 else "músicas prontas"
+    return f"{completed} de {total} {noun}"
+
+
+class SunoIncompleteBatchError(MusicProviderError):
+    """The Suno returned fewer clips than requested (Q1); saved ones are kept."""
+
+    code = "incomplete_batch"
+
+    def __init__(self, completed: int = 0, total: int = 0):
+        super().__init__(
+            tracks_ready_text(completed, total) + " (geração interrompida)"
+        )
+        self.completed = completed
+        self.total = total
+
+
 SUNO_SETTINGS_ROUTE = {"view": "settings", "section": "Apps/music"}
 _SECRET_ENV_KEY = re.compile(r"(TOKEN|SECRET|KEY|PASSWORD|AUTH|BEARER|COOKIE)", re.I)
 _AUTH_ERROR_CODES = ("401", "403")
@@ -114,28 +163,6 @@ _CMD_SECRET_FLAG = re.compile(
     r"(\"[^\"]*\"|'[^']*'|\S+)"
 )
 _CMD_ENV_ASSIGN = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|'[^']*'|\S+)")
-
-
-def _mask_url(url: str) -> str:
-    """Remove userinfo, query and fragment so the URL never carries secrets."""
-    raw = str(url or "").strip()
-    if not raw:
-        return ""
-    try:
-        parts = urlsplit(raw)
-    except ValueError:
-        return ""
-    if not parts.scheme or not parts.hostname:
-        return ""
-    host = parts.hostname
-    if ":" in host:
-        host = f"[{host}]"
-    try:
-        port = parts.port
-    except ValueError:
-        port = None
-    netloc = f"{host}:{port}" if port else host
-    return f"{parts.scheme}://{netloc}{parts.path}"
 
 
 def _mask_command(cmd: str) -> str:
@@ -150,22 +177,6 @@ def _mask_command(cmd: str) -> str:
         else m.group(0),
         out,
     )
-
-
-def _keep_if_masked(received: Any, currents: list[str], masker: Any) -> Any:
-    """Round-trip guard: the UI sends back the masked value it received.
-
-    If ``received`` equals the masked form of a current (real) value, keep the
-    real value instead of overwriting it with the masked one.
-    """
-    if received is None:
-        return None
-    value = str(received).strip()
-    for current in currents:
-        current = str(current or "").strip()
-        if current and value != current and value == masker(current):
-            return current
-    return received
 
 
 def _suno_server_evaluation(
@@ -921,16 +932,223 @@ def library():
     return sorted(items.values(), key=lambda item: item["modified"], reverse=True)[:100]
 
 
-def generate(
-    prompt,
-    lyrics="",
-    provider=None,
-    duration=30,
-    progress=lambda text: None,
-    cancelled=lambda: False,
-):
-    if provider is None:
-        provider = str(settings().get("MUSIC_PROVIDER") or "local").strip().lower()
+# --- T3: Suno batch through SunoMcpAdapter ---------------------------------
+MAX_AUDIO_BYTES = 100 * 1024**2
+# Private test hook: allows http:// audio ONLY for loopback hosts. Never read
+# from env/settings; tests flip it with monkeypatch (Q3).
+_ALLOW_LOOPBACK_HTTP_AUDIO = False
+_LOOPBACK_AUDIO_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+_AUDIO_MAX_REDIRECTS = 3
+_AUDIO_TIMEOUT = (10, 60)  # (connect, read) per request
+_SUNO_SLEEP_SLICE = 0.25  # polling waits in Event slices, checking cancel
+_AUDIO_CHUNK = 64 * 1024
+_AUDIO_REDIRECT_CODES = (301, 302, 303, 307, 308)
+_AUDIO_CONTENT_EXTENSIONS = {
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/wave": "wav",
+    "audio/flac": "flac",
+    "audio/x-flac": "flac",
+}
+_AUDIO_EXTENSIONS = ("mp3", "wav", "flac")
+
+
+def _validate_audio_url(url: Any) -> str:
+    """https only; http just for loopback with the private test flag on."""
+    raw = str(url or "").strip()
+    try:
+        parts = urlsplit(raw)
+        host = (parts.hostname or "").lower()
+    except ValueError:
+        raise SunoDownloadError() from None
+    if not host:
+        raise SunoDownloadError()
+    if parts.scheme == "https":
+        return raw
+    if (
+        parts.scheme == "http"
+        and _ALLOW_LOOPBACK_HTTP_AUDIO is True
+        and host in _LOOPBACK_AUDIO_HOSTS
+    ):
+        return raw
+    raise SunoDownloadError()
+
+
+def _audio_extension(url: str, content_type: str) -> str:
+    ext = _AUDIO_CONTENT_EXTENSIONS.get(content_type)
+    if ext:
+        return ext
+    suffix = Path(urlsplit(url).path).suffix.lower().lstrip(".")
+    return suffix if suffix in _AUDIO_EXTENSIONS else "mp3"
+
+
+def _download_audio(
+    url: Any,
+    destination: Path,
+    *,
+    cancelled: Any = lambda: False,
+    session: Any = None,
+) -> Path:
+    """Stream the clip audio into ``destination`` (``.part`` + ``os.replace``).
+
+    Redirects are followed manually and revalidated (https only); no
+    Authorization header is sent. Any failure raises ``SunoDownloadError``
+    (``download_failed``) and never leaves a ``.part`` behind.
+    """
+    own = session is None
+    if own:
+        session = requests.Session()
+        session.trust_env = False
+    part: Path | None = None
+    try:
+        current = _validate_audio_url(url)
+        for _ in range(_AUDIO_MAX_REDIRECTS + 1):
+            try:
+                response = session.get(
+                    current, timeout=_AUDIO_TIMEOUT, allow_redirects=False, stream=True
+                )
+            except requests.RequestException:
+                raise SunoDownloadError() from None
+            try:
+                if response.status_code in _AUDIO_REDIRECT_CODES:
+                    location = str(response.headers.get("Location") or "")
+                    current = _validate_audio_url(urljoin(current, location))
+                    continue
+                if response.status_code != 200:
+                    raise SunoDownloadError()
+                ctype = (
+                    str(response.headers.get("Content-Type") or "")
+                    .split(";")[0]
+                    .strip()
+                    .lower()
+                )
+                if not (
+                    ctype.startswith("audio/") or ctype == "application/octet-stream"
+                ):
+                    raise SunoDownloadError()
+                declared: int | None = None
+                if response.headers.get("Content-Length"):
+                    try:
+                        declared = int(response.headers["Content-Length"])
+                    except (TypeError, ValueError):
+                        raise SunoDownloadError() from None
+                    if declared > MAX_AUDIO_BYTES:
+                        raise SunoDownloadError()
+                destination.mkdir(parents=True, exist_ok=True)
+                final = destination / (
+                    uuid.uuid4().hex + "." + _audio_extension(current, ctype)
+                )
+                part = final.with_name(final.name + ".part")
+                size = 0
+                try:
+                    with open(part, "wb") as handle:
+                        for chunk in response.iter_content(_AUDIO_CHUNK):
+                            if cancelled():
+                                raise InterruptedError(
+                                    "Download do áudio cancelado; o arquivo "
+                                    "parcial foi descartado."
+                                )
+                            if not chunk:
+                                continue
+                            size += len(chunk)
+                            if size > MAX_AUDIO_BYTES:
+                                raise SunoDownloadError()
+                            handle.write(chunk)
+                except (InterruptedError, MusicProviderError):
+                    raise
+                except Exception:  # truncated body, socket error, disk error
+                    raise SunoDownloadError() from None
+                if size == 0 or (declared is not None and size != declared):
+                    raise SunoDownloadError()
+                os.replace(part, final)
+                part = None
+                return final
+            finally:
+                response.close()
+        raise SunoDownloadError()  # too many redirects
+    finally:
+        if part is not None:
+            part.unlink(missing_ok=True)
+        if own:
+            session.close()
+
+
+def _write_audio_bytes(raw: bytes, destination: Path, extension: str) -> Path:
+    if not raw or len(raw) > MAX_AUDIO_BYTES:
+        raise SunoDownloadError()
+    destination.mkdir(parents=True, exist_ok=True)
+    final = destination / (uuid.uuid4().hex + "." + extension)
+    part = final.with_name(final.name + ".part")
+    try:
+        part.write_bytes(raw)
+        os.replace(part, final)
+    except OSError:
+        raise SunoDownloadError() from None
+    finally:
+        part.unlink(missing_ok=True)
+    return final
+
+
+def _save_suno_clip(
+    clip: dict[str, Any],
+    *,
+    prompt: str,
+    lyrics: str,
+    duration: int,
+    batch: str,
+    variant: int,
+    cancelled: Any,
+    session: Any,
+) -> dict[str, Any]:
+    """Save one ready clip as a library track (no remote URL is persisted)."""
+    from Plugins.Apps.music.tools import clip_id
+
+    destination = output_directory()
+    if isinstance(clip.get("audio_base64"), str) and clip["audio_base64"]:
+        try:
+            raw = base64.b64decode(clip["audio_base64"], validate=True)
+        except (binascii.Error, ValueError):
+            raise SunoDownloadError() from None
+        fmt = str(clip.get("format") or "").strip().lower()
+        path = _write_audio_bytes(
+            raw, destination, fmt if fmt in _AUDIO_EXTENSIONS else "mp3"
+        )
+    else:
+        path = _download_audio(
+            clip.get("audio_url"), destination, cancelled=cancelled, session=session
+        )
+    name = path.name
+    result = {
+        "file": name,
+        "provider": "suno_mcp",
+        "prompt": prompt,
+        "lyrics": lyrics,
+        # Indicative only: the Suno decides the real length (not validated).
+        "requested_duration": duration,
+        "audio_url": "/api/pia/music/files/" + name,
+        "remote_id": clip_id(clip),
+        "batch": batch,
+        "variant": variant,
+    }
+    title = str(clip.get("title") or "").strip()
+    if title:
+        result["title"] = title[:200]
+    save_json(destination / (name + ".json"), result)
+    from Plugins.Connectors.pia_server.media import enqueue
+
+    enqueue(path)
+    return result
+
+
+def select_suno_clips(clips: list[dict[str, Any]], needed: int) -> list[dict[str, Any]]:
+    """Clips of one call that become tracks (in order). Swappable policy:
+    with odd N the surplus clip of the last call is ignored."""
+    return list(clips[: max(0, int(needed))])
+
+
+def _validate_generation_input(prompt: Any, lyrics: Any, duration: Any) -> None:
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 8000:
         raise ValueError("Descrição obrigatória (até 8000 caracteres).")
     if not isinstance(lyrics, str) or len(lyrics) > 16000:
@@ -941,10 +1159,170 @@ def generate(
         or not 10 <= duration <= 180
     ):
         raise ValueError("Duração deve estar entre 10 e 180 segundos.")
+
+
+def generate_suno_batch(
+    prompt: str,
+    lyrics: str = "",
+    duration: int = 30,
+    count: int = 1,
+    *,
+    progress: Any = lambda text: None,
+    cancelled: Any = lambda: False,
+    cancel_event: Any = None,
+    on_track: Any = None,
+    adapter: Any = None,
+) -> list[dict[str, Any]]:
+    """Generate ``count`` Suno tracks with ceil(count/2) calls (2 clips each).
+
+    Stops at the first failed clip (no extra call) and keeps the ones already
+    saved. Every raised exception carries ``completed``, ``total`` and
+    ``items`` (tracks saved before the failure).
+    """
+    _validate_generation_input(prompt, lyrics, duration)
+    if type(count) is not int or not 1 <= count <= 10:
+        raise ValueError("Quantidade deve estar entre 1 e 10.")
+    if not _generation_lock.acquire(blocking=False):
+        raise RuntimeError("Já existe uma geração musical em andamento.")
+    try:
+        return _suno_batch_locked(
+            prompt,
+            lyrics,
+            duration,
+            count,
+            progress=progress,
+            cancelled=cancelled,
+            cancel_event=cancel_event,
+            on_track=on_track,
+            adapter=adapter,
+        )
+    finally:
+        _generation_lock.release()
+
+
+def _suno_batch_locked(
+    prompt: str,
+    lyrics: str,
+    duration: int,
+    count: int,
+    *,
+    progress: Any,
+    cancelled: Any,
+    cancel_event: Any,
+    on_track: Any,
+    adapter: Any,
+) -> list[dict[str, Any]]:
+    saved: list[dict[str, Any]] = []
+    batch = uuid.uuid4().hex
+
+    def finish(exc: BaseException) -> BaseException:
+        try:
+            exc.completed = len(saved)  # type: ignore[attr-defined]
+            exc.total = count  # type: ignore[attr-defined]
+            exc.items = list(saved)  # type: ignore[attr-defined]
+        except AttributeError:
+            pass
+        return exc
+
+    with requests.Session() as session:
+        session.trust_env = False
+
+        def save(clip: dict[str, Any]) -> None:
+            item = _save_suno_clip(
+                clip,
+                prompt=prompt,
+                lyrics=lyrics,
+                duration=duration,
+                batch=batch,
+                variant=len(saved) + 1,
+                cancelled=cancelled,
+                session=session,
+            )
+            saved.append(item)
+            if on_track is not None:
+                on_track(item, len(saved), count)
+
+        try:
+            if cancelled():
+                raise InterruptedError("Geração musical cancelada antes de iniciar.")
+            if adapter is None:
+                status = suno_status()
+                if not status.get("available"):
+                    if status.get("credential_state") == "expired":
+                        raise SunoAuthError()
+                    raise SunoUnavailableError(
+                        "Suno não está configurado. Conecte em Configurações → Música"
+                    )
+                from Plugins.Apps.music import tools as music_tools
+
+                event = cancel_event or threading.Event()
+
+                def sleep(seconds: float) -> None:
+                    # Interruptible wait (Event), never a blind time.sleep.
+                    end = time.monotonic() + max(0.0, seconds)
+                    while not cancelled() and not event.is_set():
+                        left = end - time.monotonic()
+                        if left <= 0:
+                            return
+                        event.wait(min(_SUNO_SLEEP_SLICE, left))
+
+                adapter = music_tools.SunoMcpAdapter(
+                    server_id=status["server_id"],
+                    cancel_event=cancel_event,
+                    poll_interval=music_tools.DEFAULT_POLL_INTERVAL,
+                    sleep=sleep,
+                )
+            for _call in range(math.ceil(count / 2)):
+                needed = min(2, count - len(saved))
+                if cancelled():
+                    raise InterruptedError("Geração musical cancelada.")
+                progress("Gerando música via Suno (MCP)…")
+                try:
+                    result = adapter.generate(
+                        prompt, lyrics=lyrics, duration=duration, cancelled=cancelled
+                    )
+                except BaseException as exc:
+                    # Keep clips that already have audio (timeout/cancel/error).
+                    for clip in select_suno_clips(
+                        getattr(exc, "partial_clips", None) or [], needed
+                    ):
+                        try:
+                            save(clip)
+                        except Exception:
+                            break
+                    raise
+                clips = select_suno_clips(result.get("clips") or [], needed)
+                for clip in clips:
+                    if clip.get("state", "ready") != "ready":
+                        raise SunoClipFailedError()  # Q8: stop, no extra call
+                    save(clip)
+                if len(clips) < needed:  # Q1: keep what came, no extra call
+                    raise SunoIncompleteBatchError(len(saved), count)
+        except BaseException as exc:
+            raise finish(exc)
+    return saved
+
+
+def generate(
+    prompt,
+    lyrics="",
+    provider=None,
+    duration=30,
+    progress=lambda text: None,
+    cancelled=lambda: False,
+):
+    if provider is None:
+        provider = str(settings().get("MUSIC_PROVIDER") or "local").strip().lower()
+    _validate_generation_input(prompt, lyrics, duration)
     if provider not in MUSIC_PROVIDERS:
         raise ValueError(
             "Escolha local, gemini ou suno_mcp. Flow Music é usado na interface oficial."
         )
+    if provider == "suno_mcp":
+        # One track = one Suno call; the 2nd clip is discarded (select_suno_clips).
+        return generate_suno_batch(
+            prompt, lyrics, duration, 1, progress=progress, cancelled=cancelled
+        )[0]
     if not _generation_lock.acquire(blocking=False):
         raise RuntimeError("Já existe uma geração musical em andamento.")
     try:
@@ -1021,43 +1399,6 @@ def generate(
                 else:
                     raise RuntimeError("O motor musical excedeu 30 minutos.")
                 extension = "mp3"
-            elif provider == "suno_mcp":
-                from src.mcp_chat_tools import call_suno_mcp
-
-                suno_url, suno_cmd, suno_tok = _resolve_suno_mcp_credentials()
-                progress("Gerando música via Suno (MCP)…")
-                data = call_suno_mcp(
-                    prompt,
-                    lyrics=lyrics,
-                    duration=duration,
-                    suno_url=suno_url,
-                    suno_cmd=suno_cmd,
-                    suno_token=suno_tok,
-                )
-                if isinstance(data.get("content"), list):
-                    for part in data["content"]:
-                        if isinstance(part, dict) and isinstance(part.get("text"), str):
-                            try:
-                                parsed = json.loads(part["text"])
-                                if isinstance(parsed, dict):
-                                    data = parsed
-                                    break
-                            except Exception:
-                                pass
-                if isinstance(data.get("audio_base64"), str):
-                    raw = base64.b64decode(data["audio_base64"], validate=True)
-                    extension = "wav" if data.get("format") == "wav" else "mp3"
-                elif isinstance(data.get("audio_url"), str) and data[
-                    "audio_url"
-                ].startswith(("http://", "https://")):
-                    raw = session.get(
-                        data["audio_url"], timeout=120, allow_redirects=False
-                    ).content
-                    extension = "wav" if data["audio_url"].endswith(".wav") else "mp3"
-                else:
-                    raise RuntimeError(
-                        "Resposta do servidor Suno (MCP) não trouxe áudio."
-                    )
             else:
                 from src.config import STT_GEMINI_API_KEY
 
@@ -1105,7 +1446,7 @@ def generate(
                 )
             if cancelled():
                 raise InterruptedError("Geração cancelada antes de salvar o resultado.")
-            if not raw or len(raw) > 100 * 1024**2:
+            if not raw or len(raw) > MAX_AUDIO_BYTES:
                 raise RuntimeError("Áudio musical vazio ou maior que 100 MiB.")
             destination = output_directory()
             destination.mkdir(parents=True, exist_ok=True)

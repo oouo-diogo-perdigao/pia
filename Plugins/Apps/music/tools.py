@@ -8,6 +8,8 @@ import shlex
 import subprocess
 from typing import Any
 
+from src.mcp_connectors import _CREDIT_MESSAGE_RE, is_tool_auth_error, tool_error_text
+
 
 def _mcp_http_rpc(
     url: str, method: str, params: dict[str, Any], token: str = "", req_id: int = 1
@@ -341,6 +343,7 @@ def translate_suno_error(exc: BaseException) -> Exception:
     import requests
 
     from Plugins.Apps.music import service
+    from src.mcp_connectors import MCPRpcError, safe_error
 
     if isinstance(exc, (service.MusicProviderError, InterruptedError)):
         return exc
@@ -350,6 +353,8 @@ def translate_suno_error(exc: BaseException) -> Exception:
         status = getattr(getattr(exc, "response", None), "status_code", None)
         if status in (401, 403):
             return service.SunoAuthError()
+        if status == 402:
+            return service.SunoNoCreditsError()
         if status == 408:
             return service.SunoTimeoutError()
         if status is None or status >= 500 or status in (404, 429):
@@ -359,9 +364,17 @@ def translate_suno_error(exc: BaseException) -> Exception:
         return service.SunoUnavailableError()
     if isinstance(exc, KeyError):  # servidor/conta MCP não registrado
         return service.SunoUnavailableError()
+    if isinstance(exc, MCPRpcError):
+        code = safe_error(exc)[0]
+        if code == "401":
+            return service.SunoAuthError()
+        if code == "402":
+            return service.SunoNoCreditsError()
     message = str(exc)
     if _AUTH_MESSAGE_RE.search(message):
         return service.SunoAuthError()
+    if _CREDIT_MESSAGE_RE.search(message):
+        return service.SunoNoCreditsError()
     if "desabilitado" in message.lower():
         return service.SunoUnavailableError()
     return service.SunoProtocolError()
@@ -381,7 +394,7 @@ class SunoMcpAdapter:
     timeout/cancel/error during polling the raised exception carries
     ``partial_clips`` (clips that already have audio). A single account is
     pinned for tools/list, generation and polling (no fallback, no fan-out).
-    Wiring into ``service.generate`` is T3.
+    ``service.generate``/``generate_suno_batch`` use it (T3).
     """
 
     def __init__(
@@ -491,6 +504,16 @@ class SunoMcpAdapter:
             result = self.manager.call_tool(self.server_id, name, args, **kwargs)
         except Exception as exc:
             raise translate_suno_error(exc) from None
+        if isinstance(result, dict) and result.get("isError"):
+            # Tool-level error (HTTP 200): classify by its text, never echo it.
+            # Same conservative auth rule the manager uses to record "401".
+            from Plugins.Apps.music import service
+
+            if is_tool_auth_error(result):
+                raise service.SunoAuthError()
+            if _CREDIT_MESSAGE_RE.search(tool_error_text(result)):
+                raise service.SunoNoCreditsError()
+            raise service.SunoProtocolError()
         return normalize_tool_result(result)
 
     def _remaining(self, deadline: float) -> float:
