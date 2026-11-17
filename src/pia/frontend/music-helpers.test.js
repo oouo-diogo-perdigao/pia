@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  MASKED_EDITED_FIELD_ERROR,
   MUSIC_PROVIDERS_UPDATED_EVENT,
   MUSIC_PROVIDER_LABELS,
   SUNO_CANCEL_WARNING,
@@ -9,8 +10,14 @@ import {
   SUNO_REUSE_WARNING,
   SUNO_SETTINGS_ROUTE,
   buildGeneratorOptions,
+  findSunoProvider,
   generatorHints,
   isGeneratorAvailable,
+  isMaskedSecret,
+  isSunoApiHost,
+  isSunoCatalogProvider,
+  maskedEditedFieldError,
+  notifyMusicProvidersUpdated,
   partialBatchLabel,
   buildMusicSelectPayload,
   buildSunoOAuthStartPayload,
@@ -20,8 +27,10 @@ import {
   resolveProviderAfterRefresh,
   resolveReuseProvider,
   resolveSunoConnectionStatus,
+  runWithMusicProvidersUpdate,
   selectionToMusicDraft,
   shouldShowSunoHint,
+  shouldWarnSunoOpensInLocal,
   sunoSettingsRoute,
 } from "./music-helpers.js";
 
@@ -47,15 +56,27 @@ describe("music-helpers Suno MCP & OAuth", () => {
   });
 
   it("builds /music/select and /music/suno/oauth/start payloads omitting empty secrets", () => {
-    const selectPayload = buildMusicSelectPayload({
-      provider: "suno_mcp",
-      suno_mcp_url: "  https://suno.example/mcp  ",
-      suno_mcp_command: "",
-      suno_mcp_token: "",
-      suno_mcp_auth_type: "oauth",
-      suno_mcp_client_id: " cid ",
-      suno_mcp_client_secret: "",
-    });
+    const edited = {
+      suno_mcp_url: true,
+      suno_mcp_command: true,
+      suno_mcp_client_id: true,
+      suno_mcp_client_secret: true,
+      suno_mcp_auth_url: true,
+      suno_mcp_token_url: true,
+      suno_mcp_scopes: true,
+    };
+    const selectPayload = buildMusicSelectPayload(
+      {
+        provider: "suno_mcp",
+        suno_mcp_url: "  https://suno.example/mcp  ",
+        suno_mcp_command: "",
+        suno_mcp_token: "",
+        suno_mcp_auth_type: "oauth",
+        suno_mcp_client_id: " cid ",
+        suno_mcp_client_secret: "",
+      },
+      { edited },
+    );
     assert.deepEqual(selectPayload, {
       provider: "suno_mcp",
       suno_mcp_url: "https://suno.example/mcp",
@@ -64,13 +85,16 @@ describe("music-helpers Suno MCP & OAuth", () => {
       suno_mcp_client_id: "cid",
     });
 
-    const oauthPayload = buildSunoOAuthStartPayload({
-      suno_mcp_client_id: " cid ",
-      suno_mcp_client_secret: " sec ",
-      suno_mcp_auth_url: "https://auth.example/authorize",
-      suno_mcp_token_url: "",
-      suno_mcp_scopes: "read write",
-    });
+    const oauthPayload = buildSunoOAuthStartPayload(
+      {
+        suno_mcp_client_id: " cid ",
+        suno_mcp_client_secret: " sec ",
+        suno_mcp_auth_url: "https://auth.example/authorize",
+        suno_mcp_token_url: "",
+        suno_mcp_scopes: "read write",
+      },
+      { edited },
+    );
     assert.deepEqual(oauthPayload, {
       client_id: "cid",
       client_secret: "sec",
@@ -114,8 +138,8 @@ describe("music-helpers Suno MCP & OAuth", () => {
       ),
       {
         connected: false,
-        mode: "token",
-        label: "Token configurado",
+        mode: "credential",
+        label: "Credencial configurada",
         color: "blue",
       },
     );
@@ -150,9 +174,9 @@ describe("music-helpers Suno MCP & OAuth", () => {
       ),
       {
         connected: false,
-        mode: "none",
-        label: "Não configurado",
-        color: "gray",
+        mode: "needs_auth",
+        label: "URL configurada, falta autorizar",
+        color: "yellow",
       },
     );
 
@@ -178,6 +202,398 @@ describe("music-helpers Suno MCP & OAuth", () => {
       mode: "none",
       label: "Não configurado",
       color: "gray",
+    });
+  });
+});
+
+describe("music-helpers T7: status, payload mascarado e evento", () => {
+  const t1SunoDefaults = {
+    id: "suno_mcp",
+    label: "Suno",
+    name: "Suno (MCP)",
+    kind: "mcp",
+    description: "Conexão com servidor MCP do Suno",
+    url: "",
+    command: "",
+    endpoint_configured: false,
+    credential_state: "missing",
+    token_configured: false,
+    auth_type: "none",
+    oauth_connected: false,
+    oauth_client_id: "",
+    oauth_auth_url: "",
+    oauth_token_url: "",
+    oauth_scopes: "",
+    server_id: "suno_mcp",
+    settings_route: { view: "settings", section: "Apps/music" },
+    available: false,
+  };
+
+  function t1Catalog(sunoOverrides = {}, selectionOverrides = {}) {
+    const suno = { ...t1SunoDefaults, ...sunoOverrides };
+    return {
+      providers: [
+        {
+          id: "local",
+          name: "Criador de músicas local",
+          kind: "local",
+          description: "ACE-Step local offline",
+          installed: false,
+          available: true,
+        },
+        {
+          id: "gemini",
+          name: "Gemini",
+          kind: "remote",
+          description: "Geração de música via Gemini (Lyria)",
+          model: "lyria-3.5",
+          credential_state: "missing",
+          available: false,
+        },
+        suno,
+      ],
+      selection: {
+        provider: "local",
+        gemini_model: "lyria-3.5",
+        suno_mcp_url: suno.url,
+        suno_mcp_command: suno.command,
+        suno_mcp_token_configured: suno.token_configured,
+        suno_mcp_auth_type: suno.auth_type,
+        suno_mcp_oauth_connected: suno.oauth_connected,
+        suno_mcp_oauth_client_id: suno.oauth_client_id,
+        suno_mcp_oauth_auth_url: suno.oauth_auth_url,
+        suno_mcp_oauth_token_url: suno.oauth_token_url,
+        suno_mcp_oauth_scopes: suno.oauth_scopes,
+        ...selectionOverrides,
+      },
+    };
+  }
+
+  function statusOf(catalog) {
+    return resolveSunoConnectionStatus(
+      catalog.selection,
+      findSunoProvider(catalog),
+    );
+  }
+
+  async function withWindowEvents(run) {
+    const events = [];
+    const previous = globalThis.window;
+    globalThis.window = {
+      dispatchEvent(ev) {
+        events.push(ev);
+        return true;
+      },
+    };
+    if (typeof globalThis.CustomEvent !== "function") {
+      globalThis.CustomEvent = class CustomEvent {
+        constructor(type) {
+          this.type = type;
+        }
+      };
+    }
+    try {
+      return await run(events);
+    } finally {
+      globalThis.window = previous;
+    }
+  }
+
+  it("instalação nova (sem endpoint) mostra Não configurado, não falta autorizar", () => {
+    const catalog = t1Catalog();
+    assert.deepEqual(statusOf(catalog), {
+      connected: false,
+      mode: "none",
+      label: "Não configurado",
+      color: "gray",
+    });
+  });
+
+  it("usa credential_state expired e endpoint sem credencial", () => {
+    assert.deepEqual(
+      statusOf(
+        t1Catalog({
+          url: "https://api.suno.com/mcp",
+          endpoint_configured: true,
+          credential_state: "expired",
+          available: false,
+        }),
+      ),
+      {
+        connected: false,
+        mode: "expired",
+        label: "Expirado — reautorizar",
+        color: "orange",
+      },
+    );
+    assert.deepEqual(
+      statusOf(
+        t1Catalog({
+          url: "https://api.suno.com/mcp",
+          endpoint_configured: true,
+          credential_state: "missing",
+          available: false,
+        }),
+      ),
+      {
+        connected: false,
+        mode: "needs_auth",
+        label: "URL configurada, falta autorizar",
+        color: "yellow",
+      },
+    );
+  });
+
+  it("token sem endpoint mostra Credencial configurada", () => {
+    assert.deepEqual(
+      statusOf(
+        t1Catalog({
+          endpoint_configured: false,
+          credential_state: "configured",
+          token_configured: true,
+          auth_type: "bearer",
+          available: false,
+        }),
+      ),
+      {
+        connected: false,
+        mode: "credential",
+        label: "Credencial configurada",
+        color: "blue",
+      },
+    );
+  });
+
+  it("servidor desabilitado (T1 zera endpoint_configured) fica Não configurado", () => {
+    const catalog = t1Catalog({
+      url: "https://api.suno.com/mcp",
+      endpoint_configured: false,
+      credential_state: "missing",
+      token_configured: false,
+      oauth_connected: false,
+      available: false,
+    });
+    assert.deepEqual(statusOf(catalog), {
+      connected: false,
+      mode: "none",
+      label: "Não configurado",
+      color: "gray",
+    });
+  });
+
+  it("OAuth pendente com URL padrão (oauth/start) não vira falta autorizar", () => {
+    const catalog = t1Catalog({
+      url: "https://api.suno.com/mcp",
+      endpoint_configured: true,
+      credential_state: "missing",
+      auth_type: "oauth",
+      oauth_connected: false,
+      available: false,
+    });
+    assert.deepEqual(statusOf(catalog), {
+      connected: false,
+      mode: "oauth_pending",
+      label: "OAuth pendente",
+      color: "yellow",
+    });
+    assert.deepEqual(
+      buildSunoOAuthStartPayload(
+        {
+          suno_mcp_client_id: catalog.selection.suno_mcp_oauth_client_id,
+          suno_mcp_auth_url: catalog.selection.suno_mcp_oauth_auth_url,
+        },
+        { edited: {} },
+      ),
+      {},
+    );
+    assert.deepEqual(
+      buildSunoOAuthStartPayload(
+        { suno_mcp_client_id: "novo-client" },
+        { edited: { suno_mcp_client_id: true } },
+      ),
+      { client_id: "novo-client" },
+    );
+  });
+
+  it("trata api.suno.com com qualquer id como Suno quando a credencial vale", () => {
+    assert.equal(isSunoApiHost("https://api.suno.com/mcp"), true);
+    assert.equal(isSunoApiHost("https://example.com/mcp"), false);
+    assert.equal(
+      isSunoCatalogProvider({
+        id: "minha-conta",
+        url: "https://api.suno.com/mcp",
+      }),
+      true,
+    );
+    const catalog = {
+      providers: [
+        {
+          id: "outra-conta",
+          url: "https://api.suno.com/mcp",
+          available: true,
+          credential_state: "configured",
+          oauth_connected: true,
+        },
+      ],
+    };
+    const suno = findSunoProvider(catalog);
+    assert.equal(suno.id, "outra-conta");
+    assert.equal(resolveSunoConnectionStatus({}, suno).mode, "oauth");
+    assert.equal(resolveSunoConnectionStatus({}, suno).connected, true);
+    assert.equal(isGeneratorAvailable("suno_mcp", catalog), true);
+  });
+
+  it("avisa RN04 quando Suno está salvo mas available não é true", () => {
+    assert.equal(
+      shouldWarnSunoOpensInLocal(
+        { provider: "suno_mcp" },
+        t1Catalog({
+          url: "https://api.suno.com/mcp",
+          endpoint_configured: true,
+          credential_state: "missing",
+          available: false,
+        }).providers[2],
+      ),
+      true,
+    );
+    assert.equal(
+      shouldWarnSunoOpensInLocal(
+        { provider: "suno_mcp" },
+        t1Catalog({
+          endpoint_configured: true,
+          credential_state: "configured",
+          oauth_connected: true,
+          auth_type: "oauth",
+          available: true,
+        }).providers[2],
+      ),
+      false,
+    );
+    assert.equal(
+      shouldWarnSunoOpensInLocal({ provider: "local" }, {}, "local"),
+      false,
+    );
+  });
+
+  it("omite qualquer URL/comando/OAuth não editado, inclusive URL sem query da T1", () => {
+    const draft = {
+      provider: "suno_mcp",
+      suno_mcp_url: "https://api.suno.com/mcp",
+      suno_mcp_command: "npx suno-mcp",
+      suno_mcp_auth_type: "oauth",
+      suno_mcp_client_id: "client-visivel",
+      suno_mcp_auth_url: "https://auth.suno.com/authorize",
+      suno_mcp_scopes: "music.generate",
+    };
+    assert.equal(isMaskedSecret(draft.suno_mcp_url), false);
+    assert.deepEqual(buildMusicSelectPayload(draft), {
+      provider: "suno_mcp",
+      suno_mcp_auth_type: "oauth",
+    });
+    assert.deepEqual(buildSunoOAuthStartPayload(draft), {});
+  });
+
+  it("inclui URL, comando e OAuth depois que o usuário edita o campo", () => {
+    const draft = {
+      provider: "suno_mcp",
+      suno_mcp_url: "https://mcp.example/suno",
+      suno_mcp_command: "npx suno-mcp",
+      suno_mcp_auth_type: "oauth",
+      suno_mcp_client_id: "novo-client",
+      suno_mcp_auth_url: "https://auth.example/authorize",
+    };
+    const edited = {
+      suno_mcp_url: true,
+      suno_mcp_command: true,
+      suno_mcp_client_id: true,
+      suno_mcp_auth_url: true,
+    };
+    assert.deepEqual(buildMusicSelectPayload(draft, { edited }), {
+      provider: "suno_mcp",
+      suno_mcp_url: "https://mcp.example/suno",
+      suno_mcp_command: "npx suno-mcp",
+      suno_mcp_auth_type: "oauth",
+      suno_mcp_client_id: "novo-client",
+      suno_mcp_auth_url: "https://auth.example/authorize",
+    });
+  });
+
+  it("campo mascarado editado bloqueia o salvamento; os outros campos seguem normais", () => {
+    const draft = {
+      provider: "suno_mcp",
+      suno_mcp_url: "https://api.suno.com/mcp",
+      suno_mcp_command: "npx suno --token •••• --v2",
+      suno_mcp_auth_type: "oauth",
+      suno_mcp_token: "  novo-token  ",
+      suno_mcp_client_id: "client-ok",
+    };
+    assert.equal(
+      maskedEditedFieldError(draft, { suno_mcp_command: true }),
+      MASKED_EDITED_FIELD_ERROR,
+    );
+    assert.throws(
+      () =>
+        buildMusicSelectPayload(draft, { edited: { suno_mcp_command: true } }),
+      { message: MASKED_EDITED_FIELD_ERROR },
+    );
+    const payload = buildMusicSelectPayload(draft, {
+      edited: { suno_mcp_token: true, suno_mcp_client_id: true },
+    });
+    assert.equal(payload.provider, "suno_mcp");
+    assert.equal(payload.suno_mcp_auth_type, "oauth");
+    assert.equal(payload.suno_mcp_token, "novo-token");
+    assert.equal(payload.suno_mcp_client_id, "client-ok");
+    assert.equal("suno_mcp_url" in payload, false);
+    assert.equal("suno_mcp_command" in payload, false);
+  });
+
+  it("dispara pia:music-providers-updated no window", async () => {
+    await withWindowEvents((events) => {
+      notifyMusicProvidersUpdated();
+      assert.equal(events.length, 1);
+      assert.equal(events[0].type, MUSIC_PROVIDERS_UPDATED_EVENT);
+    });
+  });
+
+  it("dispara o evento se o select ok e o oauth/start falha", async () => {
+    await withWindowEvents(async (events) => {
+      await assert.rejects(
+        () =>
+          runWithMusicProvidersUpdate(async (markMutated) => {
+            markMutated();
+            throw new Error("oauth/start falhou");
+          }),
+        { message: "oauth/start falhou" },
+      );
+      assert.equal(events.length, 1);
+      assert.equal(events[0].type, MUSIC_PROVIDERS_UPDATED_EVENT);
+    });
+  });
+
+  it("dispara o evento se o callback ok e o loadCatalog falha", async () => {
+    await withWindowEvents(async (events) => {
+      await assert.rejects(
+        () =>
+          runWithMusicProvidersUpdate(async (markMutated) => {
+            markMutated();
+            throw new Error("loadCatalog falhou");
+          }),
+        { message: "loadCatalog falhou" },
+      );
+      assert.equal(events.length, 1);
+    });
+  });
+
+  it("não dispara o evento se a ação falhar antes de mutar", async () => {
+    await withWindowEvents(async (events) => {
+      await assert.rejects(
+        () =>
+          runWithMusicProvidersUpdate(async () => {
+            throw new Error("select falhou");
+          }),
+        { message: "select falhou" },
+      );
+      assert.equal(events.length, 0);
     });
   });
 });
@@ -338,6 +754,18 @@ describe("music-helpers seletor dinâmico (Suno no app de Música)", () => {
     assert.equal(isGeneratorAvailable("suno_mcp", catalog(false)), false);
     assert.equal(isGeneratorAvailable("suno_mcp", null), false);
     assert.equal(isGeneratorAvailable("xyz", catalog(true)), false);
+    assert.equal(
+      isGeneratorAvailable("suno_mcp", {
+        providers: [
+          {
+            id: "outra-conta",
+            url: "https://api.suno.com/mcp",
+            available: true,
+          },
+        ],
+      }),
+      true,
+    );
   });
 
   it("buildGeneratorOptions e sunoSettingsRoute devolvem cópias", () => {

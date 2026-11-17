@@ -35,36 +35,93 @@ export function musicDraftSnapshot(draft = {}) {
   });
 }
 
-export function buildMusicSelectPayload(draft = {}) {
+export const MASKED_SECRET_MARKER = "••••";
+
+/** Detecta valor mascarado (•••• do cofre ou *** ) para não reenviá-lo. */
+export function isMaskedSecret(value) {
+  const text = String(value || "");
+  return text.includes(MASKED_SECRET_MARKER) || /\*{3,}/.test(text);
+}
+
+const SELECT_ENDPOINT_FIELDS = ["suno_mcp_url", "suno_mcp_command"];
+const SELECT_OAUTH_FIELDS = [
+  "suno_mcp_client_id",
+  "suno_mcp_client_secret",
+  "suno_mcp_auth_url",
+  "suno_mcp_token_url",
+  "suno_mcp_scopes",
+];
+const SELECT_SENSITIVE_FIELDS = [
+  ...SELECT_ENDPOINT_FIELDS,
+  "suno_mcp_token",
+  ...SELECT_OAUTH_FIELDS,
+];
+
+export const MASKED_EDITED_FIELD_ERROR =
+  "Remova o valor mascarado (••••) do campo editado antes de salvar. Substitua o trecho oculto pelo valor real.";
+
+function wasEdited(edited, key) {
+  return Boolean(edited && typeof edited === "object" && edited[key]);
+}
+
+function includeSensitiveField(
+  draft,
+  key,
+  edited,
+  { allowEmpty = false } = {},
+) {
+  // D5: omita qualquer URL, comando ou campo OAuth não editado — a T1 não
+  // coloca •••• na URL (só remove userinfo/query/fragment), então a decisão
+  // não pode depender de isMaskedSecret.
+  if (!wasEdited(edited, key)) return false;
+  return allowEmpty || Boolean(String(draft[key] || "").trim());
+}
+
+/** Mensagem se um campo editado ainda contém ••••; senão, string vazia. */
+export function maskedEditedFieldError(draft = {}, edited = {}) {
+  const hasMasked = SELECT_SENSITIVE_FIELDS.some(
+    (key) => wasEdited(edited, key) && isMaskedSecret(draft[key]),
+  );
+  return hasMasked ? MASKED_EDITED_FIELD_ERROR : "";
+}
+
+function assertNoMaskedEditedFields(draft, edited) {
+  const error = maskedEditedFieldError(draft, edited);
+  if (error) throw new Error(error);
+}
+
+export function buildMusicSelectPayload(draft = {}, options = {}) {
+  const edited =
+    options && typeof options === "object" ? options.edited || {} : {};
   const payload = { provider: draft.provider || "local" };
   if (payload.provider !== "suno_mcp") {
     return payload;
   }
-  payload.suno_mcp_url = String(draft.suno_mcp_url || "").trim();
-  payload.suno_mcp_command = String(draft.suno_mcp_command || "").trim();
+  assertNoMaskedEditedFields(draft, edited);
+  for (const key of SELECT_ENDPOINT_FIELDS) {
+    if (includeSensitiveField(draft, key, edited, { allowEmpty: true })) {
+      payload[key] = String(draft[key] || "").trim();
+    }
+  }
   if (draft.suno_mcp_auth_type) {
     payload.suno_mcp_auth_type = draft.suno_mcp_auth_type;
   }
-  if (String(draft.suno_mcp_token || "").trim()) {
-    payload.suno_mcp_token = String(draft.suno_mcp_token).trim();
+  const token = String(draft.suno_mcp_token || "").trim();
+  if (token && wasEdited(edited, "suno_mcp_token")) {
+    payload.suno_mcp_token = token;
   }
-  const optionalOAuthFields = [
-    ["suno_mcp_client_id", "suno_mcp_client_id"],
-    ["suno_mcp_client_secret", "suno_mcp_client_secret"],
-    ["suno_mcp_auth_url", "suno_mcp_auth_url"],
-    ["suno_mcp_token_url", "suno_mcp_token_url"],
-    ["suno_mcp_scopes", "suno_mcp_scopes"],
-  ];
-  for (const [draftKey, apiKey] of optionalOAuthFields) {
-    const val = String(draft[draftKey] || "").trim();
-    if (val) {
-      payload[apiKey] = val;
+  for (const key of SELECT_OAUTH_FIELDS) {
+    if (includeSensitiveField(draft, key, edited, { allowEmpty: false })) {
+      payload[key] = String(draft[key] || "").trim();
     }
   }
   return payload;
 }
 
-export function buildSunoOAuthStartPayload(draft = {}) {
+export function buildSunoOAuthStartPayload(draft = {}, options = {}) {
+  const edited =
+    options && typeof options === "object" ? options.edited || {} : {};
+  assertNoMaskedEditedFields(draft, edited);
   const payload = {};
   const map = [
     ["suno_mcp_client_id", "client_id"],
@@ -74,10 +131,37 @@ export function buildSunoOAuthStartPayload(draft = {}) {
     ["suno_mcp_scopes", "scopes"],
   ];
   for (const [draftKey, apiKey] of map) {
+    if (!wasEdited(edited, draftKey)) continue;
     const val = String(draft[draftKey] || "").trim();
     if (val) payload[apiKey] = val;
   }
   return payload;
+}
+
+/** True se a URL for do MCP oficial (host api.suno.com), qualquer id. */
+export function isSunoApiHost(url) {
+  try {
+    const host = new URL(String(url || "")).hostname.toLowerCase();
+    return host === "api.suno.com";
+  } catch {
+    return false;
+  }
+}
+
+/** Entrada do catálogo reconhecida como Suno (id suno_mcp ou host oficial). */
+export function isSunoCatalogProvider(item) {
+  if (!item || typeof item !== "object") return false;
+  if (item.id === "suno_mcp") return true;
+  return isSunoApiHost(item.url || item.suno_mcp_url || "");
+}
+
+export function findSunoProvider(catalog) {
+  const list = Array.isArray(catalog?.providers) ? catalog.providers : [];
+  return (
+    list.find((item) => item?.id === "suno_mcp") ||
+    list.find((item) => isSunoCatalogProvider(item)) ||
+    null
+  );
 }
 
 export function resolveSunoConnectionStatus(
@@ -102,6 +186,30 @@ export function resolveSunoConnectionStatus(
     .trim()
     .toLowerCase();
 
+  const credentialState = String(
+    activeProvider?.credential_state ?? selection?.credential_state ?? "",
+  )
+    .trim()
+    .toLowerCase();
+
+  // Preferir o flag do catálogo (T1) quando vier definido; só inferir da
+  // URL/comando se endpoint_configured não estiver presente.
+  const endpointConfigured =
+    typeof activeProvider?.endpoint_configured === "boolean"
+      ? activeProvider.endpoint_configured
+      : Boolean(String(selection?.suno_mcp_url || "").trim()) ||
+        Boolean(String(selection?.suno_mcp_command || "").trim()) ||
+        isSunoApiHost(activeProvider?.url || selection?.suno_mcp_url || "");
+
+  if (credentialState === "expired") {
+    return {
+      connected: false,
+      mode: "expired",
+      label: "Expirado — reautorizar",
+      color: "orange",
+    };
+  }
+
   if (oauthConnected) {
     return {
       connected: true,
@@ -110,6 +218,8 @@ export function resolveSunoConnectionStatus(
       color: "teal",
     };
   }
+  // oauth/start grava a URL padrão, então "OAuth pendente" precisa vir
+  // antes de needs_auth (D4).
   if (authType === "oauth") {
     return {
       connected: false,
@@ -118,12 +228,30 @@ export function resolveSunoConnectionStatus(
       color: "yellow",
     };
   }
-  if (tokenConfigured) {
+  if (tokenConfigured || credentialState === "configured") {
     return {
       connected: false,
-      mode: "token",
-      label: "Token configurado",
+      mode: "credential",
+      label: "Credencial configurada",
       color: "blue",
+    };
+  }
+  if (activeProvider?.available === true) {
+    return {
+      connected: false,
+      mode: "credential",
+      label: "Credencial configurada",
+      color: "blue",
+    };
+  }
+  // needs_auth só com endpoint configurado (D1). credential_state "missing"
+  // numa instalação nova (sem URL) não deve cair aqui.
+  if (endpointConfigured) {
+    return {
+      connected: false,
+      mode: "needs_auth",
+      label: "URL configurada, falta autorizar",
+      color: "yellow",
     };
   }
   return {
@@ -132,6 +260,18 @@ export function resolveSunoConnectionStatus(
     label: "Não configurado",
     color: "gray",
   };
+}
+
+/** RN04: aviso quando o provedor salvo é Suno, mas o catálogo diz indisponível. */
+export function shouldWarnSunoOpensInLocal(
+  selection = {},
+  activeProvider = {},
+  draftProvider = "",
+) {
+  const provider = draftProvider || selection?.provider;
+  if (provider !== "suno_mcp") return false;
+  // Não recalcular a regra: usar o available do catálogo (T1).
+  return activeProvider?.available !== true;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,6 +293,34 @@ export const SUNO_SETTINGS_ROUTE = { view: "settings", section: "Apps/music" };
 
 // Disparado por Configurações → Música (T7) depois de conectar/desconectar o Suno.
 export const MUSIC_PROVIDERS_UPDATED_EVENT = "pia:music-providers-updated";
+
+/** Avisa o app de Música (Panel) para recarregar o catálogo, sem reiniciar. */
+export function notifyMusicProvidersUpdated() {
+  if (
+    typeof window === "undefined" ||
+    typeof window.dispatchEvent !== "function"
+  ) {
+    return;
+  }
+  window.dispatchEvent(new CustomEvent(MUSIC_PROVIDERS_UPDATED_EVENT));
+}
+
+/**
+ * Executa uma mutação do catálogo (salvar, conectar, desconectar) e dispara
+ * o evento no `finally` se `markMutated()` tiver sido chamado — inclusive
+ * quando um passo posterior falha (select ok + oauth/start falhou, ou
+ * callback ok + loadCatalog falhou).
+ */
+export async function runWithMusicProvidersUpdate(action) {
+  let mutated = false;
+  try {
+    return await action(() => {
+      mutated = true;
+    });
+  } finally {
+    if (mutated) notifyMusicProvidersUpdated();
+  }
+}
 
 export const SUNO_HINT_TEXT = "Conecte o Suno em Configurações → Música";
 
@@ -191,7 +359,9 @@ function findCatalogProvider(catalog, id) {
  */
 export function isGeneratorAvailable(id, catalog) {
   if (id === "suno_mcp") {
-    return findCatalogProvider(catalog, "suno_mcp")?.available === true;
+    // T1 sempre manda id suno_mcp; o fallback do host api.suno.com fica
+    // em findSunoProvider, alinhado ao seletor e ao painel de settings.
+    return findSunoProvider(catalog)?.available === true;
   }
   return GENERATOR_OPTIONS.some((option) => option.value === id);
 }

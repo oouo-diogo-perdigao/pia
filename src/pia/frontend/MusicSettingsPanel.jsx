@@ -26,9 +26,13 @@ import {
   MUSIC_PROVIDER_LABELS,
   buildMusicSelectPayload,
   buildSunoOAuthStartPayload,
+  findSunoProvider,
+  maskedEditedFieldError,
   musicDraftSnapshot,
   resolveSunoConnectionStatus,
+  runWithMusicProvidersUpdate,
   selectionToMusicDraft,
+  shouldWarnSunoOpensInLocal,
 } from "./music-helpers";
 import { usePia } from "./shared";
 import { notify } from "./toasts";
@@ -49,7 +53,17 @@ export default function MusicSettingsPanel() {
   const [installProgress, setInstallProgress] = useState(null);
   const [savedSnapshot, setSavedSnapshot] = useState("");
   const [draft, setDraft] = useState(() => selectionToMusicDraft());
+  const [editedFields, setEditedFields] = useState({});
   const jobSourceRef = useRef(null);
+
+  function markEdited(key) {
+    setEditedFields((old) => ({ ...old, [key]: true }));
+  }
+
+  function patchDraft(key, value) {
+    markEdited(key);
+    setDraft((old) => ({ ...old, [key]: value }));
+  }
 
   const loadCatalog = useCallback(async () => {
     const data = await api("/music/providers");
@@ -57,6 +71,7 @@ export default function MusicSettingsPanel() {
     setCatalog(data);
     setDraft(nextDraft);
     setSavedSnapshot(musicDraftSnapshot(nextDraft));
+    setEditedFields({});
     setLoading(false);
     return data;
   }, []);
@@ -69,12 +84,20 @@ export default function MusicSettingsPanel() {
   const providers = Array.isArray(catalog?.providers) ? catalog.providers : [];
   const activeProvider =
     providers.find((item) => item?.id === draft.provider) || providers[0] || {};
-  const sunoProvider = providers.find((item) => item?.id === "suno_mcp") || {};
+  const sunoProvider = findSunoProvider(catalog) || {};
   const dirty = !loading && musicDraftSnapshot(draft) !== savedSnapshot;
   const sunoStatus = resolveSunoConnectionStatus(
     catalog?.selection,
     sunoProvider,
   );
+  const warnOpensInLocal = shouldWarnSunoOpensInLocal(
+    catalog?.selection,
+    sunoProvider,
+    draft.provider,
+  );
+  const sunoOauthConnected =
+    catalog?.selection?.suno_mcp_oauth_connected === true ||
+    sunoProvider.oauth_connected === true;
 
   async function installLocalEngine() {
     setInstalling(true);
@@ -115,14 +138,25 @@ export default function MusicSettingsPanel() {
     setSaving(true);
     try {
       const sourceDraft = overrideDraft || draft;
-      const payload = buildMusicSelectPayload(sourceDraft);
-      const updated = await api("/music/select", payload);
-      const nextDraft = selectionToMusicDraft(updated?.selection || {});
-      setCatalog(updated);
-      setDraft(nextDraft);
-      setSavedSnapshot(musicDraftSnapshot(nextDraft));
-      notify("Configurações de música salvas.");
-      return updated;
+      const maskedError = maskedEditedFieldError(sourceDraft, editedFields);
+      if (maskedError) {
+        notify(maskedError, "error");
+        return;
+      }
+      return await runWithMusicProvidersUpdate(async (markMutated) => {
+        const payload = buildMusicSelectPayload(sourceDraft, {
+          edited: editedFields,
+        });
+        const updated = await api("/music/select", payload);
+        markMutated();
+        const nextDraft = selectionToMusicDraft(updated?.selection || {});
+        setCatalog(updated);
+        setDraft(nextDraft);
+        setSavedSnapshot(musicDraftSnapshot(nextDraft));
+        setEditedFields({});
+        notify("Configurações de música salvas.");
+        return updated;
+      });
     } finally {
       setSaving(false);
     }
@@ -136,29 +170,41 @@ export default function MusicSettingsPanel() {
         provider: "suno_mcp",
         suno_mcp_auth_type: "oauth",
       };
+      const maskedError = maskedEditedFieldError(nextDraft, editedFields);
+      if (maskedError) {
+        notify(maskedError, "error");
+        return;
+      }
       setDraft(nextDraft);
-      if (musicDraftSnapshot(nextDraft) !== savedSnapshot) {
-        await api("/music/select", buildMusicSelectPayload(nextDraft));
-      }
-      const res = await api(
-        "/music/suno/oauth/start",
-        buildSunoOAuthStartPayload(nextDraft),
-      );
-      if (res?.auth_url && /^https?:\/\//i.test(res.auth_url)) {
-        window.open(res.auth_url, "_blank", "noopener,noreferrer");
-      }
-      if (res?.account?.oauth?.connected === true) {
-        setPendingOAuth(null);
-        notify("Conta Suno MCP conectada via OAuth.");
-      } else {
-        setPendingOAuth({
-          state: res?.state || "",
-          authUrl: res?.auth_url || "",
-          accountId: res?.account?.id || "",
-        });
-        notify("Autorização OAuth do Suno MCP iniciada.");
-      }
-      await loadCatalog();
+      await runWithMusicProvidersUpdate(async (markMutated) => {
+        if (musicDraftSnapshot(nextDraft) !== savedSnapshot) {
+          await api(
+            "/music/select",
+            buildMusicSelectPayload(nextDraft, { edited: editedFields }),
+          );
+          markMutated();
+        }
+        const res = await api(
+          "/music/suno/oauth/start",
+          buildSunoOAuthStartPayload(nextDraft, { edited: editedFields }),
+        );
+        markMutated();
+        if (res?.auth_url && /^https?:\/\//i.test(res.auth_url)) {
+          window.open(res.auth_url, "_blank", "noopener,noreferrer");
+        }
+        if (res?.account?.oauth?.connected === true) {
+          setPendingOAuth(null);
+          notify("Conta Suno MCP conectada via OAuth.");
+        } else {
+          setPendingOAuth({
+            state: res?.state || "",
+            authUrl: res?.auth_url || "",
+            accountId: res?.account?.id || "",
+          });
+          notify("Autorização OAuth do Suno MCP iniciada.");
+        }
+        await loadCatalog();
+      });
     } finally {
       setOauthBusy(false);
     }
@@ -168,16 +214,19 @@ export default function MusicSettingsPanel() {
     if (!pendingOAuth) return;
     setOauthBusy(true);
     try {
-      await api("/music/suno/oauth/callback", {
-        state: pendingOAuth.state,
-        account_id: pendingOAuth.accountId || undefined,
-        code: oauthCallbackInput.code.trim() || undefined,
-        access_token: oauthCallbackInput.access_token.trim() || undefined,
+      await runWithMusicProvidersUpdate(async (markMutated) => {
+        await api("/music/suno/oauth/callback", {
+          state: pendingOAuth.state,
+          account_id: pendingOAuth.accountId || undefined,
+          code: oauthCallbackInput.code.trim() || undefined,
+          access_token: oauthCallbackInput.access_token.trim() || undefined,
+        });
+        markMutated();
+        setPendingOAuth(null);
+        setOauthCallbackInput({ code: "", access_token: "" });
+        await loadCatalog();
+        notify("Conta OAuth do Suno MCP conectada e salva no Cofre.");
       });
-      setPendingOAuth(null);
-      setOauthCallbackInput({ code: "", access_token: "" });
-      await loadCatalog();
-      notify("Conta OAuth do Suno MCP conectada e salva no Cofre.");
     } finally {
       setOauthBusy(false);
     }
@@ -186,17 +235,21 @@ export default function MusicSettingsPanel() {
   async function disconnectSunoOAuth() {
     setOauthBusy(true);
     try {
-      const updated = await api("/music/suno/oauth/disconnect", {});
-      setPendingOAuth(null);
-      if (updated?.selection) {
-        const nextDraft = selectionToMusicDraft(updated.selection);
-        setCatalog(updated);
-        setDraft(nextDraft);
-        setSavedSnapshot(musicDraftSnapshot(nextDraft));
-      } else {
-        await loadCatalog();
-      }
-      notify("Conexão OAuth do Suno MCP removida.");
+      await runWithMusicProvidersUpdate(async (markMutated) => {
+        const updated = await api("/music/suno/oauth/disconnect", {});
+        markMutated();
+        setPendingOAuth(null);
+        if (updated?.selection) {
+          const nextDraft = selectionToMusicDraft(updated.selection);
+          setCatalog(updated);
+          setDraft(nextDraft);
+          setSavedSnapshot(musicDraftSnapshot(nextDraft));
+          setEditedFields({});
+        } else {
+          await loadCatalog();
+        }
+        notify("Conexão OAuth do Suno MCP removida.");
+      });
     } finally {
       setOauthBusy(false);
     }
@@ -254,6 +307,12 @@ export default function MusicSettingsPanel() {
                   val && setDraft((old) => ({ ...old, provider: val }))
                 }
               />
+              {warnOpensInLocal && (
+                <Text size="xs" c="dimmed" maw={260} ta="right">
+                  O Suno pode ser salvo como padrão, mas o app de Música abre em
+                  Local até a conta estar autorizada.
+                </Text>
+              )}
             </div>
           </div>
 
@@ -363,11 +422,15 @@ export default function MusicSettingsPanel() {
                   <Text size="xs" c="dimmed">
                     {sunoStatus.connected
                       ? "Conta OAuth conectada e salva no Cofre Único."
-                      : sunoStatus.mode === "oauth_pending"
-                        ? "Autorização OAuth pendente. Conclua no navegador e cole o código abaixo se necessário."
-                        : sunoStatus.mode === "token"
-                          ? "Token presente no Cofre Único (autenticação validada somente na chamada ao servidor)."
-                          : "Conecte via OAuth (DCR automático + PKCE) ou informe um token manual no Cofre Único."}
+                      : sunoStatus.mode === "expired"
+                        ? "A autorização do Suno expirou. Reconecte para voltar a gerar."
+                        : sunoStatus.mode === "needs_auth"
+                          ? "A URL (ou o comando) está configurada, mas falta autorizar o Suno."
+                          : sunoStatus.mode === "oauth_pending"
+                            ? "Autorização OAuth pendente. Conclua no navegador e cole o código abaixo se necessário."
+                            : sunoStatus.mode === "credential"
+                              ? "Credencial configurada no Cofre Único (autenticação validada somente na chamada ao servidor)."
+                              : "Conecte via OAuth (DCR automático + PKCE) ou informe um token manual no Cofre Único."}
                   </Text>
                 </div>
                 <div className="settings-row-control">
@@ -378,11 +441,11 @@ export default function MusicSettingsPanel() {
                       leftSection={<Link2 size={14} />}
                       onClick={safe(startSunoOAuth)}
                     >
-                      {sunoStatus.connected
+                      {sunoStatus.connected || sunoStatus.mode === "expired"
                         ? "Reconectar OAuth"
                         : "Conectar via OAuth"}
                     </Button>
-                    {sunoStatus.connected && (
+                    {sunoOauthConnected && (
                       <Button
                         size="xs"
                         variant="light"
@@ -501,10 +564,9 @@ export default function MusicSettingsPanel() {
                     aria-label="URL do servidor MCP do Suno"
                     placeholder="https://seu-servidor-mcp/suno"
                     value={draft.suno_mcp_url}
-                    onChange={(e) => {
-                      const next = e.currentTarget.value;
-                      setDraft((old) => ({ ...old, suno_mcp_url: next }));
-                    }}
+                    onChange={(e) =>
+                      patchDraft("suno_mcp_url", e.currentTarget.value)
+                    }
                   />
                 </div>
               </div>
@@ -524,10 +586,9 @@ export default function MusicSettingsPanel() {
                     aria-label="Comando do servidor MCP do Suno"
                     placeholder="npx suno-mcp-server"
                     value={draft.suno_mcp_command}
-                    onChange={(e) => {
-                      const next = e.currentTarget.value;
-                      setDraft((old) => ({ ...old, suno_mcp_command: next }));
-                    }}
+                    onChange={(e) =>
+                      patchDraft("suno_mcp_command", e.currentTarget.value)
+                    }
                   />
                 </div>
               </div>
@@ -555,10 +616,9 @@ export default function MusicSettingsPanel() {
                         : "Cole o token (opcional)"
                     }
                     value={draft.suno_mcp_token}
-                    onChange={(e) => {
-                      const next = e.currentTarget.value;
-                      setDraft((old) => ({ ...old, suno_mcp_token: next }));
-                    }}
+                    onChange={(e) =>
+                      patchDraft("suno_mcp_token", e.currentTarget.value)
+                    }
                   />
                 </div>
               </div>
@@ -587,26 +647,24 @@ export default function MusicSettingsPanel() {
                           label="Client ID (opcional)"
                           placeholder="Automático via DCR se vazio"
                           value={draft.suno_mcp_client_id}
-                          onChange={(e) => {
-                            const val = e.currentTarget.value;
-                            setDraft((old) => ({
-                              ...old,
-                              suno_mcp_client_id: val,
-                            }));
-                          }}
+                          onChange={(e) =>
+                            patchDraft(
+                              "suno_mcp_client_id",
+                              e.currentTarget.value,
+                            )
+                          }
                         />
                         <PasswordInput
                           size="xs"
                           label="Client Secret (opcional)"
                           placeholder="Opcional"
                           value={draft.suno_mcp_client_secret}
-                          onChange={(e) => {
-                            const val = e.currentTarget.value;
-                            setDraft((old) => ({
-                              ...old,
-                              suno_mcp_client_secret: val,
-                            }));
-                          }}
+                          onChange={(e) =>
+                            patchDraft(
+                              "suno_mcp_client_secret",
+                              e.currentTarget.value,
+                            )
+                          }
                         />
                       </Group>
                       <Group grow align="flex-start">
@@ -615,26 +673,24 @@ export default function MusicSettingsPanel() {
                           label="Authorization URL (opcional)"
                           placeholder="Usa padrão Suno se vazio"
                           value={draft.suno_mcp_auth_url}
-                          onChange={(e) => {
-                            const val = e.currentTarget.value;
-                            setDraft((old) => ({
-                              ...old,
-                              suno_mcp_auth_url: val,
-                            }));
-                          }}
+                          onChange={(e) =>
+                            patchDraft(
+                              "suno_mcp_auth_url",
+                              e.currentTarget.value,
+                            )
+                          }
                         />
                         <TextInput
                           size="xs"
                           label="Token URL (opcional)"
                           placeholder="Usa padrão Suno se vazio"
                           value={draft.suno_mcp_token_url}
-                          onChange={(e) => {
-                            const val = e.currentTarget.value;
-                            setDraft((old) => ({
-                              ...old,
-                              suno_mcp_token_url: val,
-                            }));
-                          }}
+                          onChange={(e) =>
+                            patchDraft(
+                              "suno_mcp_token_url",
+                              e.currentTarget.value,
+                            )
+                          }
                         />
                       </Group>
                       <TextInput
@@ -642,10 +698,9 @@ export default function MusicSettingsPanel() {
                         label="Escopos OAuth (opcional)"
                         placeholder="music.generate profile"
                         value={draft.suno_mcp_scopes}
-                        onChange={(e) => {
-                          const val = e.currentTarget.value;
-                          setDraft((old) => ({ ...old, suno_mcp_scopes: val }));
-                        }}
+                        onChange={(e) =>
+                          patchDraft("suno_mcp_scopes", e.currentTarget.value)
+                        }
                       />
                     </Stack>
                   </Collapse>
