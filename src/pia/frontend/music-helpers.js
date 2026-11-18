@@ -1,256 +1,35 @@
 export const MUSIC_PROVIDER_LABELS = {
   local: "Criador de músicas local (ACE-Step)",
   gemini: "Gemini (Lyria)",
-  suno_mcp: "Suno (MCP)",
+  // RN24: o id interno continua suno_mcp; o usuário só vê "Suno".
+  suno_mcp: "Suno",
 };
 
+// RN06/RN22 (T7, arquitetura servidor): sem URL, comando, token nem OAuth
+// manual no PC. O /music/select recebe só {provider, gemini_model}; o
+// suno_account_id NUNCA vai no select, só no /music/generate (T8, dba90f4).
 export function selectionToMusicDraft(selection = {}) {
   const sel = selection && typeof selection === "object" ? selection : {};
-  return {
-    provider: sel.provider || "local",
-    suno_mcp_url: sel.suno_mcp_url || "",
-    suno_mcp_command: sel.suno_mcp_command || "",
-    suno_mcp_token: "",
-    suno_mcp_auth_type: sel.suno_mcp_auth_type || "none",
-    suno_mcp_client_id: sel.suno_mcp_oauth_client_id || "",
-    suno_mcp_client_secret: "",
-    suno_mcp_auth_url: sel.suno_mcp_oauth_auth_url || "",
-    suno_mcp_token_url: sel.suno_mcp_oauth_token_url || "",
-    suno_mcp_scopes: sel.suno_mcp_oauth_scopes || "",
-  };
+  return { provider: sel.provider || "local" };
 }
 
 export function musicDraftSnapshot(draft = {}) {
-  return JSON.stringify({
-    provider: draft.provider || "local",
-    suno_mcp_url: String(draft.suno_mcp_url || "").trim(),
-    suno_mcp_command: String(draft.suno_mcp_command || "").trim(),
-    suno_mcp_token: String(draft.suno_mcp_token || ""),
-    suno_mcp_auth_type: draft.suno_mcp_auth_type || "none",
-    suno_mcp_client_id: String(draft.suno_mcp_client_id || "").trim(),
-    suno_mcp_client_secret: String(draft.suno_mcp_client_secret || ""),
-    suno_mcp_auth_url: String(draft.suno_mcp_auth_url || "").trim(),
-    suno_mcp_token_url: String(draft.suno_mcp_token_url || "").trim(),
-    suno_mcp_scopes: String(draft.suno_mcp_scopes || "").trim(),
-  });
+  return JSON.stringify({ provider: draft?.provider || "local" });
 }
 
-export const MASKED_SECRET_MARKER = "••••";
-
-/** Detecta valor mascarado (•••• do cofre ou *** ) para não reenviá-lo. */
-export function isMaskedSecret(value) {
-  const text = String(value || "");
-  return text.includes(MASKED_SECRET_MARKER) || /\*{3,}/.test(text);
-}
-
-const SELECT_ENDPOINT_FIELDS = ["suno_mcp_url", "suno_mcp_command"];
-const SELECT_OAUTH_FIELDS = [
-  "suno_mcp_client_id",
-  "suno_mcp_client_secret",
-  "suno_mcp_auth_url",
-  "suno_mcp_token_url",
-  "suno_mcp_scopes",
-];
-const SELECT_SENSITIVE_FIELDS = [
-  ...SELECT_ENDPOINT_FIELDS,
-  "suno_mcp_token",
-  ...SELECT_OAUTH_FIELDS,
-];
-
-export const MASKED_EDITED_FIELD_ERROR =
-  "Remova o valor mascarado (••••) do campo editado antes de salvar. Substitua o trecho oculto pelo valor real.";
-
-function wasEdited(edited, key) {
-  return Boolean(edited && typeof edited === "object" && edited[key]);
-}
-
-function includeSensitiveField(
-  draft,
-  key,
-  edited,
-  { allowEmpty = false } = {},
-) {
-  // D5: omita qualquer URL, comando ou campo OAuth não editado — a T1 não
-  // coloca •••• na URL (só remove userinfo/query/fragment), então a decisão
-  // não pode depender de isMaskedSecret.
-  if (!wasEdited(edited, key)) return false;
-  return allowEmpty || Boolean(String(draft[key] || "").trim());
-}
-
-/** Mensagem se um campo editado ainda contém ••••; senão, string vazia. */
-export function maskedEditedFieldError(draft = {}, edited = {}) {
-  const hasMasked = SELECT_SENSITIVE_FIELDS.some(
-    (key) => wasEdited(edited, key) && isMaskedSecret(draft[key]),
-  );
-  return hasMasked ? MASKED_EDITED_FIELD_ERROR : "";
-}
-
-function assertNoMaskedEditedFields(draft, edited) {
-  const error = maskedEditedFieldError(draft, edited);
-  if (error) throw new Error(error);
-}
-
-export function buildMusicSelectPayload(draft = {}, options = {}) {
-  const edited =
-    options && typeof options === "object" ? options.edited || {} : {};
-  const payload = { provider: draft.provider || "local" };
-  if (payload.provider !== "suno_mcp") {
-    return payload;
-  }
-  assertNoMaskedEditedFields(draft, edited);
-  for (const key of SELECT_ENDPOINT_FIELDS) {
-    if (includeSensitiveField(draft, key, edited, { allowEmpty: true })) {
-      payload[key] = String(draft[key] || "").trim();
-    }
-  }
-  if (draft.suno_mcp_auth_type) {
-    payload.suno_mcp_auth_type = draft.suno_mcp_auth_type;
-  }
-  const token = String(draft.suno_mcp_token || "").trim();
-  if (token && wasEdited(edited, "suno_mcp_token")) {
-    payload.suno_mcp_token = token;
-  }
-  for (const key of SELECT_OAUTH_FIELDS) {
-    if (includeSensitiveField(draft, key, edited, { allowEmpty: false })) {
-      payload[key] = String(draft[key] || "").trim();
-    }
+/** Corpo do POST /music/select: só provider e gemini_model. */
+export function buildMusicSelectPayload(draft = {}) {
+  const payload = { provider: draft?.provider || "local" };
+  if (typeof draft?.gemini_model === "string" && draft.gemini_model.trim()) {
+    payload.gemini_model = draft.gemini_model.trim();
   }
   return payload;
 }
 
-export function buildSunoOAuthStartPayload(draft = {}, options = {}) {
-  const edited =
-    options && typeof options === "object" ? options.edited || {} : {};
-  assertNoMaskedEditedFields(draft, edited);
-  const payload = {};
-  const map = [
-    ["suno_mcp_client_id", "client_id"],
-    ["suno_mcp_client_secret", "client_secret"],
-    ["suno_mcp_auth_url", "auth_url"],
-    ["suno_mcp_token_url", "token_url"],
-    ["suno_mcp_scopes", "scopes"],
-  ];
-  for (const [draftKey, apiKey] of map) {
-    if (!wasEdited(edited, draftKey)) continue;
-    const val = String(draft[draftKey] || "").trim();
-    if (val) payload[apiKey] = val;
-  }
-  return payload;
-}
-
-/** True se a URL for do MCP oficial (host api.suno.com), qualquer id. */
-export function isSunoApiHost(url) {
-  try {
-    const host = new URL(String(url || "")).hostname.toLowerCase();
-    return host === "api.suno.com";
-  } catch {
-    return false;
-  }
-}
-
-/** Entrada do catálogo reconhecida como Suno (id suno_mcp ou host oficial). */
-export function isSunoCatalogProvider(item) {
-  if (!item || typeof item !== "object") return false;
-  if (item.id === "suno_mcp") return true;
-  return isSunoApiHost(item.url || item.suno_mcp_url || "");
-}
-
+/** Item suno_mcp do catálogo (/music/providers) ou null. */
 export function findSunoProvider(catalog) {
   const list = Array.isArray(catalog?.providers) ? catalog.providers : [];
-  return (
-    list.find((item) => item?.id === "suno_mcp") ||
-    list.find((item) => isSunoCatalogProvider(item)) ||
-    null
-  );
-}
-
-export function resolveSunoConnectionStatus(
-  selection = {},
-  activeProvider = {},
-  pendingOAuth = null,
-) {
-  const oauthRaw =
-    selection?.suno_mcp_oauth_connected !== undefined
-      ? selection.suno_mcp_oauth_connected
-      : activeProvider?.oauth_connected;
-  const oauthConnected = oauthRaw === true;
-
-  const tokenRaw =
-    selection?.suno_mcp_token_configured !== undefined
-      ? selection.suno_mcp_token_configured
-      : activeProvider?.token_configured;
-  const tokenConfigured = tokenRaw === true;
-
-  const credentialState = String(
-    activeProvider?.credential_state ?? selection?.credential_state ?? "",
-  )
-    .trim()
-    .toLowerCase();
-
-  // Preferir o flag do catálogo (T1) quando vier definido; só inferir da
-  // URL/comando se endpoint_configured não estiver presente.
-  const endpointConfigured =
-    typeof activeProvider?.endpoint_configured === "boolean"
-      ? activeProvider.endpoint_configured
-      : Boolean(String(selection?.suno_mcp_url || "").trim()) ||
-        Boolean(String(selection?.suno_mcp_command || "").trim()) ||
-        isSunoApiHost(activeProvider?.url || selection?.suno_mcp_url || "");
-
-  if (credentialState === "expired") {
-    return {
-      connected: false,
-      mode: "expired",
-      label: "Expirado — reautorizar",
-      color: "orange",
-    };
-  }
-
-  if (oauthConnected) {
-    return {
-      connected: true,
-      mode: "oauth",
-      label: "Conta OAuth conectada (Cofre)",
-      color: "teal",
-    };
-  }
-  // Credencial configurada (bearer ou equivalente) antes de authType oauth:
-  // um auth_type:"oauth" residual de um oauth/start antigo não deve esconder
-  // o bearer atrás de "OAuth pendente".
-  if (tokenConfigured || credentialState === "configured") {
-    return {
-      connected: false,
-      mode: "credential",
-      label: "Credencial configurada",
-      color: "blue",
-    };
-  }
-  // oauth_pending só com o fluxo pendente ativo no painel. Sem pendingOAuth,
-  // cai em needs_auth se houver endpoint (D1) — inclusive depois de
-  // desconectar e com servidor desabilitado (sem endpoint → "Não configurado").
-  if (pendingOAuth) {
-    return {
-      connected: false,
-      mode: "oauth_pending",
-      label: "OAuth pendente",
-      color: "yellow",
-    };
-  }
-  // needs_auth só com endpoint configurado (D1). credential_state "missing"
-  // numa instalação nova (sem URL) não deve cair aqui.
-  if (endpointConfigured) {
-    return {
-      connected: false,
-      mode: "needs_auth",
-      label: "URL configurada, falta autorizar",
-      color: "yellow",
-    };
-  }
-  return {
-    connected: false,
-    mode: "none",
-    label: "Não configurado",
-    color: "gray",
-  };
+  return list.find((item) => item?.id === "suno_mcp") || null;
 }
 
 /** RN04: aviso quando o provedor salvo é Suno, mas o catálogo diz indisponível. */
@@ -261,7 +40,7 @@ export function shouldWarnSunoOpensInLocal(
 ) {
   const provider = draftProvider || selection?.provider;
   if (provider !== "suno_mcp") return false;
-  // Não recalcular a regra: usar o available do catálogo (T1).
+  // Não recalcular a regra: usar o available do catálogo.
   return activeProvider?.available !== true;
 }
 
