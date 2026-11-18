@@ -69,22 +69,29 @@ export const SUNO_LEGACY_DISMISS_LABEL = "Agora não";
 export const SUNO_TEXT_CONNECTED = "Conta Suno conectada.";
 export const SUNO_TEXT_CONNECT_FAILED =
   "Não foi possível conectar a conta Suno. Tente de novo.";
-export const SUNO_TEXT_ACCOUNT_MISMATCH =
-  "A conta autorizada no Suno não é a mesma que você pediu para reconectar.";
-export const SUNO_TEXT_IDENTITY_UNAVAILABLE =
-  "O Suno não informou qual conta foi autorizada. Tente de novo.";
-export const SUNO_TEXT_CONNECT_NOT_FOUND =
-  "A tentativa de conexão expirou ou não foi encontrada. Tente conectar de novo.";
-export const SUNO_TEXT_OAUTH_DENIED =
-  "A autorização foi negada no Suno. Nenhuma conta foi conectada.";
-export const SUNO_TEXT_OAUTH_INVALID =
-  "O Suno devolveu uma autorização inválida. Tente conectar de novo.";
-export const SUNO_TEXT_ACCOUNT_NOT_FOUND =
-  "Esta conta Suno não está mais conectada. Confira a lista em Configurações → Música.";
 export const SUNO_TEXT_UNAVAILABLE_ACCOUNT = "indisponível";
+
+// Anexo A do requisitos-PO.md (textos aprovados pelo PO, 17/11 ~22:30 BRT).
+export const sunoAccountMismatchText = (name) =>
+  name
+    ? `A conta autorizada no Suno é diferente da conta ${name} que você pediu para reconectar. Entre no Suno com a conta ${name} e tente de novo.`
+    : "A conta autorizada no Suno é diferente da que você pediu para reconectar. Entre no Suno com a conta certa e tente de novo.";
+export const SUNO_TEXT_ACCOUNT_MISMATCH = sunoAccountMismatchText("");
+export const SUNO_TEXT_IDENTITY_UNAVAILABLE =
+  "O Suno não informou qual conta foi autorizada, então nenhuma conta foi conectada. Tente de novo.";
+// Prevalece sobre o texto do backend.
+export const SUNO_TEXT_CONNECT_NOT_FOUND =
+  "Esta tentativa de conexão expirou. Clique em Conectar conta Suno para começar de novo.";
+export const SUNO_TEXT_OAUTH_DENIED =
+  "A autorização foi cancelada no Suno. Nenhuma conta foi conectada.";
+export const SUNO_TEXT_OAUTH_INVALID =
+  "Não foi possível concluir a autorização com o Suno. Tente conectar de novo.";
+export const SUNO_TEXT_ACCOUNT_NOT_FOUND =
+  "Esta conta Suno não está mais conectada. Escolha outra conta ou reconecte em Configurações → Música.";
+// RN16: este code nunca bloqueia nem esconde o "Baixar novamente".
 export const SUNO_TEXT_NOT_ORIGIN =
-  "Não foi possível baixar esta música neste computador.";
-export const GENERIC_ERROR_TEXT = "Falha na solicitação.";
+  'Esta geração foi iniciada em outro computador. Use "Baixar novamente" no Histórico para trazer as músicas para cá.';
+export const GENERIC_ERROR_TEXT = "Algo deu errado. Tente de novo.";
 
 // --- Codes -> texto ----------------------------------------------------------
 const NO_CREDITS_CODES = new Set([
@@ -122,7 +129,7 @@ export function sunoErrorText(code, { accountName = "", fallback = "" } = {}) {
     case "suno_account_owned_elsewhere": // nome antigo (antes do v3 final)
       return SUNO_TEXT_ACCOUNT_TAKEN;
     case "suno_account_mismatch":
-      return SUNO_TEXT_ACCOUNT_MISMATCH;
+      return sunoAccountMismatchText(name);
     case "suno_identity_unavailable":
       return SUNO_TEXT_IDENTITY_UNAVAILABLE;
     case "suno_connect_not_found":
@@ -554,8 +561,11 @@ export async function pollSunoConnect({
   }
 }
 
-/** Resultado final do connect -> {ok, text, color}. */
-export function connectResultMessage(result) {
+/**
+ * Resultado final do connect -> {ok, text, color}. `accountName` é a conta
+ * pedida no Reconectar (replace_account_id), usada no suno_account_mismatch.
+ */
+export function connectResultMessage(result, { accountName = "" } = {}) {
   const state = result?.state;
   if (state === "connected")
     return { ok: true, text: SUNO_TEXT_CONNECTED, color: "teal" };
@@ -565,7 +575,10 @@ export function connectResultMessage(result) {
   return {
     ok: false,
     text: result?.code
-      ? sunoErrorText(result.code, { fallback: SUNO_TEXT_CONNECT_FAILED })
+      ? sunoErrorText(result.code, {
+          accountName,
+          fallback: SUNO_TEXT_CONNECT_FAILED,
+        })
       : SUNO_TEXT_CONNECT_FAILED,
     color: "red",
   };
@@ -578,10 +591,10 @@ export function buildConnectPayload(replaceAccountId = null) {
     : {};
 }
 
-/** Texto da confirmação do Desconectar por conta (RN06/CA04). */
+/** Texto da confirmação do Desconectar por conta (RN06/CA04; Anexo A). */
 export function disconnectConfirmText(account) {
-  const name = sunoAccountName(account) || "esta conta";
-  return `Desconectar a conta Suno ${name}? Ela deixa de poder ser usada para gerar músicas nesta conta PIA. As músicas já baixadas continuam no computador.`;
+  const name = sunoAccountName(account);
+  return `Desconectar a conta Suno${name ? " " + name : ""}? Ela não poderá mais ser usada para gerar músicas em nenhum computador desta conta PIA. As músicas já baixadas e o histórico continuam como estão.`;
 }
 
 // --- Apelido da conta (RN07) ---------------------------------------------

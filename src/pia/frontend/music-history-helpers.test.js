@@ -2,6 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   HISTORY_DELETE_CONFIRM,
+  HISTORY_EMPTY_TEXT,
+  HISTORY_STATE_RUNNING,
   HISTORY_OTHER_DEVICE_LOCAL_TEXT,
   HISTORY_UNAVAILABLE_TEXT,
   applyHistoryPage,
@@ -25,6 +27,7 @@ import {
   visibleHistoryItems,
 } from "./music-history-helpers.js";
 import { SUNO_REUSE_WARNING } from "./music-helpers.js";
+import { describeSunoError } from "./music-suno-helpers.js";
 
 const file = (name) => ({
   file: name,
@@ -257,6 +260,33 @@ describe("music-history-helpers: ação por availability (RN25/RN16)", () => {
     );
   });
 
+  it("RN16: not_origin_device não bloqueia nem esconde o Baixar novamente", () => {
+    const items = normalizeHistoryPage({
+      items: [item("1", { this_device: false })],
+    }).items;
+    const track = items[0].tracks[1];
+    assert.deepEqual(historyTrackAction(track), { kind: "redownload" });
+    // Depois de um erro not_origin_device, a lista e a ação não mudam:
+    // o Panel só mostra a mensagem e libera o botão.
+    const error = describeSunoError({
+      type: "error",
+      error: "x",
+      code: "not_origin_device",
+    });
+    assert.match(error.text, /Use "Baixar novamente" no Histórico/);
+    assert.equal(error.route, null);
+    const after = replaceHistoryTrack(
+      items,
+      "1",
+      2,
+      trackFromRedownloadEvent({ type: "error" }),
+    );
+    assert.equal(after, items);
+    assert.deepEqual(historyTrackAction(after[0].tracks[1]), {
+      kind: "redownload",
+    });
+  });
+
   it("valor desconhecido (inclusive o other_device_suno removido) não tem ação", () => {
     for (const availability of ["other_device_suno", "xyz", undefined, null])
       assert.deepEqual(historyTrackAction({ availability }), { kind: "none" });
@@ -396,8 +426,12 @@ describe("music-history-helpers: offline (RN25)", () => {
   });
 
   it("texto da exclusão diz que o arquivo local fica e some em todos os PCs", () => {
-    assert.match(HISTORY_DELETE_CONFIRM, /todos os computadores/);
-    assert.match(HISTORY_DELETE_CONFIRM, /continuam na pasta Música\/PIA/);
+    assert.equal(
+      HISTORY_DELETE_CONFIRM,
+      "Excluir esta geração do histórico? O prompt, a letra e os links serão apagados da PIA Server e o item some em todos os computadores da conta. Os arquivos de música deste computador continuam na pasta Música/PIA. Não dá para desfazer.",
+    );
+    assert.equal(HISTORY_STATE_RUNNING, "Em andamento");
+    assert.equal(HISTORY_EMPTY_TEXT, "Nenhuma música gerada ainda.");
   });
 });
 

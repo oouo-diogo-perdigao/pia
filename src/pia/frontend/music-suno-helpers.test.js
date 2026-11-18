@@ -445,7 +445,9 @@ describe("music-suno-helpers: codes e textos", () => {
     ]) {
       const text = sunoErrorText(code, { fallback: "backend" });
       assert.ok(
-        text && text !== "backend" && text !== "Falha na solicitação.",
+        text &&
+          text !== "backend" &&
+          text !== "Algo deu errado. Tente de novo.",
         code,
       );
     }
@@ -457,7 +459,7 @@ describe("music-suno-helpers: codes e textos", () => {
       sunoErrorText("xyz", { fallback: "texto do backend" }),
       "texto do backend",
     );
-    assert.equal(sunoErrorText(null), "Falha na solicitação.");
+    assert.equal(sunoErrorText(null), "Algo deu errado. Tente de novo.");
   });
 
   it("atalhos: não pareado → PIA Server; conta → Música", () => {
@@ -859,6 +861,77 @@ describe("music-suno-helpers: formatos finais da T6 (435c4cd)", () => {
       { code: "invalid_label", details: {} },
     );
     assert.match(describeSunoError(err).text, /de 1 a 80 caracteres/);
+  });
+});
+
+describe("music-suno-helpers: textos do Anexo A do PO", () => {
+  it("codes do connect e da conta com o texto exato do PO", () => {
+    assert.equal(
+      sunoErrorText("suno_account_mismatch", { accountName: "Ana" }),
+      "A conta autorizada no Suno é diferente da conta Ana que você pediu para reconectar. Entre no Suno com a conta Ana e tente de novo.",
+    );
+    assert.equal(
+      sunoErrorText("suno_account_mismatch"),
+      "A conta autorizada no Suno é diferente da que você pediu para reconectar. Entre no Suno com a conta certa e tente de novo.",
+    );
+    assert.equal(
+      sunoErrorText("suno_identity_unavailable"),
+      "O Suno não informou qual conta foi autorizada, então nenhuma conta foi conectada. Tente de novo.",
+    );
+    // O texto do PO vale mais que o do backend.
+    assert.equal(
+      sunoErrorText("suno_connect_not_found", {
+        fallback:
+          "Tentativa de conexão não encontrada. Tente conectar de novo.",
+      }),
+      "Esta tentativa de conexão expirou. Clique em Conectar conta Suno para começar de novo.",
+    );
+    assert.equal(
+      sunoErrorText("suno_oauth_denied"),
+      "A autorização foi cancelada no Suno. Nenhuma conta foi conectada.",
+    );
+    assert.equal(
+      sunoErrorText("suno_oauth_invalid"),
+      "Não foi possível concluir a autorização com o Suno. Tente conectar de novo.",
+    );
+    assert.equal(
+      sunoErrorText("suno_account_not_found"),
+      "Esta conta Suno não está mais conectada. Escolha outra conta ou reconecte em Configurações → Música.",
+    );
+    assert.deepEqual(
+      sunoErrorRoute("suno_account_not_found"),
+      MUSIC_SETTINGS_ROUTE,
+    );
+    assert.equal(
+      sunoErrorText("not_origin_device"),
+      'Esta geração foi iniciada em outro computador. Use "Baixar novamente" no Histórico para trazer as músicas para cá.',
+    );
+    assert.equal(sunoErrorRoute("not_origin_device"), null);
+    assert.equal(
+      sunoErrorText("codigo_novo"),
+      "Algo deu errado. Tente de novo.",
+    );
+  });
+
+  it("mismatch no Reconectar cita a conta pedida", () => {
+    assert.equal(
+      connectResultMessage(
+        { state: "failed", code: "suno_account_mismatch" },
+        { accountName: "Bia" },
+      ).text,
+      "A conta autorizada no Suno é diferente da conta Bia que você pediu para reconectar. Entre no Suno com a conta Bia e tente de novo.",
+    );
+  });
+
+  it("confirmação do Desconectar com o nome da conta", () => {
+    assert.equal(
+      disconnectConfirmText({ id: "a", label: "Ana", name: "N" }),
+      "Desconectar a conta Suno Ana? Ela não poderá mais ser usada para gerar músicas em nenhum computador desta conta PIA. As músicas já baixadas e o histórico continuam como estão.",
+    );
+    assert.match(
+      disconnectConfirmText({ id: "x", email: "e@x" }),
+      /^Desconectar a conta Suno e@x\?/,
+    );
   });
 });
 

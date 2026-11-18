@@ -225,7 +225,9 @@ export default function MusicSettingsPanel() {
     });
     if (!alive.current || token !== connectToken.current) return;
     setConnecting(null);
-    const message = connectResultMessage(result);
+    const message = connectResultMessage(result, {
+      accountName: replaceAccount?.name || "",
+    });
     setConnectNotice(
       message.text ? { text: message.text, color: message.color } : null,
     );
