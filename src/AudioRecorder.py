@@ -4,12 +4,15 @@ import io
 import queue
 import wave
 import numpy as np
-import sounddevice as sd
 import os
 import site
 from threading import Event
+from typing import TYPE_CHECKING
 
 from .config import STT_SAMPLE_RATE, STT_CHANNELS, logging
+
+if TYPE_CHECKING:
+    import sounddevice as sd
 
 # Configuração de DLLs NVIDIA
 venv_path = site.getsitepackages()[0]
@@ -132,6 +135,10 @@ class AudioRecorder:
         self._raw_frames = []
 
         logging.info("[AUDIO] Abrindo fluxo do microfone (%d Hz)...", self.sample_rate)
+        # Import tardio: o sounddevice inicializa o PortAudio ao ser importado,
+        # o que quebra a coleta de testes em runners sem servidor de áudio.
+        import sounddevice as sd
+
         self.stream = sd.InputStream(
             samplerate=self.sample_rate,
             channels=self.channels,
