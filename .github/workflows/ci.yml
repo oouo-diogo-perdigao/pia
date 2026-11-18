@@ -9,7 +9,7 @@ on:
 jobs:
   backend:
     name: Backend (Python)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -41,7 +41,7 @@ jobs:
 
   frontend:
     name: Frontend (React)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: src/pia/frontend
