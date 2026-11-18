@@ -807,7 +807,7 @@ def test_music_providers_and_selection_persists_without_optional_fields(api):
     assert ids == ["local", "gemini", "suno_mcp"]
     assert cat_data["selection"]["provider"] == "local"
 
-    # Seleciona Suno (MCP) sem enviar campos técnicos de local/gemini
+    # Seleciona Suno; os campos do modo local/manual (RN18) são ignorados.
     st_sel, sel_data, _ = request(
         payload={
             "provider": "suno_mcp",
@@ -819,12 +819,12 @@ def test_music_providers_and_selection_persists_without_optional_fields(api):
         headers={"Cookie": cookie, "Origin": origin},
     )
     assert st_sel == 200
-    assert sel_data["selection"]["provider"] == "suno_mcp"
-    assert (
-        sel_data["selection"]["suno_mcp_url"] == "https://suno-mcp.example.com/generate"
-    )
-    assert sel_data["selection"]["suno_mcp_token_configured"] is True
+    assert sel_data["selection"] == {
+        "provider": "suno_mcp",
+        "gemini_model": "lyria-3.5",
+    }
     assert "suno-secret-token" not in json.dumps(sel_data)
+    assert "suno-mcp.example.com" not in json.dumps(sel_data)
 
     # Seleciona Gemini sem exigir campos de Suno ou local
     st_gem, gem_data, _ = request(

@@ -825,6 +825,7 @@ class RssTranscriptionUpdater:
                     url,
                 ],
                 capture_output=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 text=True,
                 check=True,
                 timeout=60,

@@ -4,6 +4,7 @@ from src.user_paths import user_path
 import json
 import mimetypes
 from pathlib import Path
+import re
 import secrets
 import time
 from http.cookies import SimpleCookie
@@ -12,6 +13,8 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from .service import get_service
 
 ROOT = Path(__file__).resolve().parent
+# Stable machine code an error may carry into the 400 JSON (e.g. "suno_not_connected").
+_ERROR_CODE_RE = re.compile(r"[a-z0-9_]{1,64}")
 _sessions = {}
 
 
@@ -439,7 +442,11 @@ def route(handler):
     except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
         pass
     except (ValueError, KeyError, StopIteration) as exc:
-        respond(handler, 400, {"error": str(exc) or "Solicitação inválida."})
+        body = {"error": str(exc) or "Solicitação inválida."}
+        code = getattr(exc, "code", None)
+        if isinstance(code, str) and _ERROR_CODE_RE.fullmatch(code):
+            body["code"] = code
+        respond(handler, 400, body)
     except Exception as exc:
         respond(handler, 500, {"error": str(exc)})
     return True

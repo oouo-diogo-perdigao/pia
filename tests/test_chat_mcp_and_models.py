@@ -14,7 +14,6 @@ if str(ROOT) not in sys.path:
 from src.desktop_backend import DesktopBackend  # noqa: E402
 from src.llm_routing import available_chat_models, select_models  # noqa: E402
 from src.mcp_chat_tools import (  # noqa: E402
-    call_suno_mcp,
     rpg_sessions,
     storage_get,
     storage_list,
@@ -255,8 +254,9 @@ def test_screenshot_saves_to_chat_assets(monkeypatch, tmp_path):
     assert Path(result["path"]).exists()
 
 
-def test_suno_mcp_http_and_multiturn_music_tool(monkeypatch):
-    from src import chat_tools, tool_registry
+def test_multiturn_music_tool_is_allowed():
+    # The direct Suno MCP chat call (call_suno_mcp) was removed in T8 (RN18).
+    from src import chat_tools, mcp_chat_tools, tool_registry
 
     history = [
         {"role": "user", "content": "Crie uma letra sobre piratas do espaço"},
@@ -264,40 +264,8 @@ def test_suno_mcp_http_and_multiturn_music_tool(monkeypatch):
     ]
     tools = chat_tools.allowed_tools("agora crie essa musica", history=history)
     assert "pia_music" in tools
-
-    class _FakeResp:
-        status_code = 200
-
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "result": {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(
-                                {
-                                    "audio_url": "https://example.com/song.mp3",
-                                    "title": "Piratas do Espaço",
-                                }
-                            ),
-                        }
-                    ]
-                },
-            }
-
-    monkeypatch.setattr("requests.post", lambda *a, **kw: _FakeResp())
-    out = call_suno_mcp(
-        "synthwave",
-        lyrics="Navegando entre estrelas...",
-        suno_url="http://localhost:8999/mcp",
-    )
-    assert out["content"][0]["type"] == "text"
     assert "pia_music" in {t["name"] for t in tool_registry.TOOLS}
+    assert not hasattr(mcp_chat_tools, "call_suno_mcp")
 
 
 def test_tts_stop_endpoint_calls_manager(monkeypatch, tmp_path):

@@ -1,4 +1,5 @@
 import { formatTime } from "./forms";
+import { isFinalProgressState, progressColor } from "./progress-helpers";
 import React, {
   useState,
   useRef,
@@ -117,8 +118,8 @@ export function WorkProgress({ value }) {
       </Group>
       <Progress
         value={percent}
-        animated={!["completed", "error"].includes(value.state)}
-        color={value.state === "error" ? "red" : "violet"}
+        animated={!isFinalProgressState(value.state)}
+        color={progressColor(value.state)}
         size="sm"
         mt="xs"
       />

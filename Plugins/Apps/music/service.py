@@ -70,219 +70,278 @@ def settings():
 
 
 MUSIC_PROVIDERS = ("local", "gemini", "suno_mcp")
-_SUNO_MCP_SERVER_ID = "suno_mcp"
 
 
-def _suno_connector_state() -> dict[str, Any]:
-    state = {
-        "auth_type": "none",
-        "oauth_connected": False,
-        "oauth_client_id": "",
-        "oauth_auth_url": "",
-        "oauth_token_url": "",
-        "oauth_scopes": "",
-        "has_token": False,
+class MusicProviderError(RuntimeError):
+    """Provider error with a friendly, secret-free message and a stable ``code``."""
+
+    code = "error"
+    default_message = "Falha ao gerar a música."
+
+    def __init__(self, message: str | None = None):
+        super().__init__(message or self.default_message)
+
+
+class SunoAuthError(MusicProviderError):
+    code = "suno_auth"
+    default_message = "Autorização do Suno expirou. Reconecte em Configurações → Música"
+
+
+class SunoUnavailableError(MusicProviderError):
+    code = "suno_unavailable"
+    default_message = "Suno indisponível no momento, tente de novo ou use outro gerador"
+
+
+class SunoTimeoutError(MusicProviderError):
+    code = "suno_timeout"
+    default_message = (
+        "O Suno não respondeu a tempo; a geração pode ter sido concluída lá"
+    )
+
+
+class SunoProtocolError(MusicProviderError):
+    """Unexpected/incompatible answer from the Suno MCP (code ``error``)."""
+
+    default_message = "O Suno recusou ou não entendeu a solicitação; nenhuma nova tentativa foi feita."
+
+
+class SunoNoCreditsError(MusicProviderError):
+    """Identifiable lack of credits (HTTP 402 or explicit credits code, Q7)."""
+
+    code = "suno_no_credits"
+    default_message = "Sem créditos no Suno. Verifique sua conta."
+
+
+class SunoDownloadError(MusicProviderError):
+    """The clip was generated but its audio could not be fetched/saved (Q2)."""
+
+    code = "download_failed"
+    default_message = (
+        "Não foi possível baixar o áudio gerado pelo Suno, tente de novo ou "
+        "use outro gerador"
+    )
+
+
+class SunoClipFailedError(MusicProviderError):
+    """A clip came back failed/without audio; the batch stops there (Q8)."""
+
+    default_message = (
+        "O Suno não conseguiu gerar uma das músicas; as que ficaram prontas "
+        "foram salvas."
+    )
+
+
+def tracks_ready_text(completed: int, total: int) -> str:
+    """ "k de N músicas prontas" (singular when total == 1)."""
+    noun = "música pronta" if total == 1 else "músicas prontas"
+    return f"{completed} de {total} {noun}"
+
+
+class SunoIncompleteBatchError(MusicProviderError):
+    """The Suno returned fewer clips than requested (Q1); saved ones are kept."""
+
+    code = "incomplete_batch"
+    # No "k de N" suffix: that lives in the notification, completed/total and
+    # the job's ready_text (TechLead decision (b)).
+    default_message = "O Suno devolveu menos músicas que o esperado."
+
+    def __init__(self, completed: int = 0, total: int = 0):
+        super().__init__()
+        self.completed = completed
+        self.total = total
+
+
+SUNO_SETTINGS_ROUTE = {"view": "settings", "section": "Apps/music"}
+# RN08: cancel stops the wait; a generation already sent keeps going there.
+SUNO_CANCEL_MESSAGE = (
+    "A espera foi cancelada. O Suno pode continuar a geração já enviada e "
+    "consumir créditos."
+)
+SUNO_CANCEL_BEFORE_SEND_MESSAGE = (
+    "Geração cancelada antes de enviar ao Suno; nenhum crédito foi consumido."
+)
+# --- Suno provider boundary (RN01/RN18/RN20) -------------------------------
+# The Suno OAuth and token live only on the PIA Server. This computer never
+# holds a Suno credential: the local/manual mode (URL, command, bearer,
+# MUSIC_SUNO_MCP_TOKEN, local OAuth/PKCE/DCR and the direct MCP adapter) was
+# removed in T8. T6 plugs the PIA Server client into the two seams below:
+# ``_remote_suno_status()`` and ``suno_backend()``. Everything else (catalog,
+# refusal, job worker, errors) reads them and does not change.
+
+SUNO_REMOTE_SETTINGS = {"max_count": 10, "duration": [10, 180], "instrumental": True}
+
+# RN02: hint per unavailability reason (stable codes, also used as the
+# refusal ``code`` of a Suno job).
+SUNO_HINTS = {
+    "pia_server_unpaired": (
+        "Para usar o Suno, entre na PIA Server em Configurações → PIA Server.",
+        {"view": "settings", "section": "Connectors/pia_server"},
+    ),
+    "suno_not_connected": (
+        "Conecte o Suno em Configurações → Música.",
+        dict(SUNO_SETTINGS_ROUTE),
+    ),
+    "suno_credential_expired": (
+        "A conexão com o Suno expirou. Reconecte em Configurações → Música.",
+        dict(SUNO_SETTINGS_ROUTE),
+    ),
+    "pia_server_unreachable": (
+        "Não foi possível falar com a PIA Server agora. O Suno volta a aparecer "
+        "quando a conexão voltar.",
+        None,
+    ),
+    "pia_server_unsupported": (
+        "Não foi possível falar com a PIA Server agora. O Suno volta a aparecer "
+        "quando a conexão voltar.",
+        None,
+    ),
+}
+SUNO_UNAVAILABLE_REASONS = tuple(SUNO_HINTS)
+
+
+def suno_hint(reason: str | None) -> dict[str, Any] | None:
+    if not reason:
+        return None
+    text, route = SUNO_HINTS.get(reason, SUNO_HINTS["pia_server_unreachable"])
+    # route is the object navigate() takes (VERSÃO FINAL item 5), not a string.
+    return {"text": text, "route": dict(route) if route else None}
+
+
+def _remote_suno_status() -> dict[str, Any]:
+    """Suno status as reported by the PIA Server (T6).
+
+    ``GET /device/account`` (capability ``suno:3``) + ``GET /device/suno/status``
+    through ``remote_suno`` (short cache). Keys: available, reason, connected,
+    credential_state, expires_at, accounts, selected_account_id, settings,
+    active_job. Never returns a token.
+    """
+    from Plugins.Apps.music import remote_suno
+
+    return remote_suno.suno_item()
+
+
+def suno_status() -> dict[str, Any]:
+    """Public, secret-free Suno status used by catalog, refusal and worker."""
+    try:
+        remote = dict(_remote_suno_status() or {})
+    except Exception:
+        remote = {"available": False, "reason": "pia_server_unreachable"}
+    available = remote.get("available") is True
+    reason = None
+    if not available:
+        reason = str(remote.get("reason") or "")
+        if reason not in SUNO_UNAVAILABLE_REASONS:
+            reason = "pia_server_unreachable"
+    return {
+        "id": "suno_mcp",
+        "label": "Suno",
+        "name": "Suno",
+        "kind": "remote",
+        "available": available,
+        "reason": reason,
+        "hint": suno_hint(reason),
+        "connected": remote.get("connected") is True,
+        "credential_state": str(remote.get("credential_state") or "missing"),
+        "expires_at": remote.get("expires_at"),
+        "settings": json.loads(
+            json.dumps(remote.get("settings") or SUNO_REMOTE_SETTINGS)
+        ),
+        "accounts": list(remote.get("accounts") or []),
+        "selected_account_id": remote.get("selected_account_id"),
+        "active_job": remote.get("active_job"),
+        "settings_route": dict(SUNO_SETTINGS_ROUTE),
     }
-    try:
-        from src.mcp_connectors import get_mcp_manager
 
-        mgr = get_mcp_manager()
-        srv = mgr.get_server(_SUNO_MCP_SERVER_ID)
+
+SUNO_CONNECT_MESSAGE = SUNO_HINTS["suno_not_connected"][0]
+
+
+class SunoJobRefusedError(ValueError):
+    """Suno job refused before it is created. A ValueError (HTTP 400) with a
+    stable ``code``: the unavailability reason (``suno_not_connected``,
+    ``suno_credential_expired``, ``pia_server_unpaired``…)."""
+
+    def __init__(self, message: str, code: str):
+        super().__init__(message)
+        self.code = code
+
+
+def resolve_music_provider(provider: Any = None) -> str:
+    """Requested provider, or the saved ``MUSIC_PROVIDER`` when omitted."""
+    if provider is None or (isinstance(provider, str) and not provider.strip()):
+        provider = settings().get("MUSIC_PROVIDER") or "local"
+    return str(provider).strip().lower()
+
+
+def suno_job_refusal() -> SunoJobRefusedError | None:
+    """Error to raise when a Suno job must be refused before it exists, or None."""
+    status = suno_status()
+    if status.get("available"):
+        return None
+    reason = status.get("reason") or "pia_server_unreachable"
+    if reason == "suno_credential_expired":
+        return SunoJobRefusedError(SunoAuthError.default_message, reason)
+    return SunoJobRefusedError(suno_hint(reason)["text"], reason)
+
+
+def suno_job_account(suno_account_id: Any = None) -> dict[str, Any]:
+    """Suno account of a new job (RN09/RN10), or a 400 ``RemoteMusicError``:
+    ``suno_account_required`` with 2+ valid accounts and no explicit id (no
+    fallback to default_account_id or the saved choice), ``suno_job_active``
+    while the PIA account has a job, ``suno_account_not_found``..."""
+    from Plugins.Apps.music import remote_suno
+
+    return remote_suno.resolve_account(suno_account_id)
+
+
+def suno_backend() -> Any:
+    """PIA Server client of the batch worker (T6): ``create(data, account)``
+    starts the job on the server and ``run(runner, ...)`` follows it and
+    downloads every ready track. Never talks to the Suno directly."""
+    from Plugins.Apps.music import remote_suno
+
+    return remote_suno.BACKEND
+
+
+def suno_known_secrets() -> list[str]:
+    """Secrets known right now for ``redact_secrets``. No Suno token exists on
+    this computer (RN16); the PIA Server device token is the only credential
+    the Suno flow uses. Never raises: redaction must not break the worker.
+    """
+    try:
+        token = str(
+            section_values("Connectors/pia_server").get("PIA_SERVER_DEVICE_TOKEN") or ""
+        ).strip()
     except Exception:
-        return state
-
-    accounts = srv.get("accounts") or []
-    acc = accounts[0] if accounts else {}
-    acc_id = str(acc.get("id") or "default")
-    oauth = acc.get("oauth") or {}
-    vault_oauth = bool(
-        mgr._get_secret(_SUNO_MCP_SERVER_ID, acc_id, "oauth_access_token").strip()
-    )
-    vault_bearer = bool(
-        mgr._get_secret(_SUNO_MCP_SERVER_ID, "_server", "bearer_token").strip()
-        or mgr._get_secret(_SUNO_MCP_SERVER_ID, acc_id, "bearer_token").strip()
-    )
-    oauth_connected = bool(oauth.get("connected") and vault_oauth)
-    has_token = bool(vault_oauth or vault_bearer)
-    state.update(
-        {
-            "auth_type": str(
-                acc.get("auth_type")
-                or (
-                    "oauth"
-                    if oauth.get("client_id") or oauth_connected
-                    else ("bearer" if has_token else "none")
-                )
-            ),
-            "oauth_connected": oauth_connected,
-            "oauth_client_id": str(oauth.get("client_id") or ""),
-            "oauth_auth_url": str(oauth.get("auth_url") or ""),
-            "oauth_token_url": str(oauth.get("token_url") or ""),
-            "oauth_scopes": str(oauth.get("scopes") or ""),
-            "has_token": has_token,
-        }
-    )
-    return state
+        token = ""
+    return [token] if token else []
 
 
-def _ensure_suno_mcp_server(
-    *,
-    suno_url: str | None = None,
-    suno_cmd: str | None = None,
-    suno_token: str | None = None,
-    oauth_payload: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    from src.mcp_connectors import get_mcp_manager
+_AMZ_PARAM_RE = re.compile(r"(?i)\bx-amz-[a-z0-9-]+\s*[=:]\s*[^&\s'\"]*")
+_REDACTED = "••••"
+_MIN_KNOWN_SECRET = 6
 
-    cfg = settings()
-    url = (
-        str(suno_url).strip()
-        if suno_url is not None
-        else str(cfg.get("MUSIC_SUNO_MCP_URL") or "").strip()
-    )
-    cmd = (
-        str(suno_cmd).strip()
-        if suno_cmd is not None
-        else str(cfg.get("MUSIC_SUNO_MCP_COMMAND") or "").strip()
-    )
-    mgr = get_mcp_manager()
+
+def redact_secrets(text: Any, extra: Any = (), limit: int = 2000) -> str:
+    """Text safe for job logs/errors/notifications (CA10).
+
+    Masks URLs (no query), ``Bearer …``, ``token=``/``sig=``/``signature=``
+    (``mcp_connectors.redact_error_text``), any ``X-Amz-*`` parameter, and the
+    literal value of known secrets passed in ``extra``. Never raises.
+    """
+    from src.mcp_connectors import redact_error_text
+
     try:
-        existing = mgr.get_server(_SUNO_MCP_SERVER_ID)
-    except KeyError:
-        existing = None
-
-    transport = "stdio" if (cmd and not url) else "http_streaming"
-    payload: dict[str, Any] = {
-        "id": _SUNO_MCP_SERVER_ID,
-        "name": "Suno (MCP)",
-        "transport": transport,
-        "url": url,
-        "command": cmd,
-        "enabled": True,
-    }
-    if suno_token is not None and str(suno_token).strip():
-        payload["bearer_token"] = str(suno_token).strip()
-
-    if oauth_payload:
-        existing_accounts = [dict(a) for a in ((existing or {}).get("accounts") or [])]
-        target_acc_id = str(oauth_payload.get("account_id") or "").strip()
-        target_idx = 0
-        if target_acc_id and existing_accounts:
-            matched_idx = next(
-                (
-                    idx
-                    for idx, item in enumerate(existing_accounts)
-                    if item.get("id") == target_acc_id
-                ),
-                None,
-            )
-            if matched_idx is None:
-                raise ValueError(
-                    f"Conta '{target_acc_id}' não encontrada no servidor '{_SUNO_MCP_SERVER_ID}'."
-                )
-            target_idx = matched_idx
-        acc = (
-            dict(existing_accounts[target_idx])
-            if existing_accounts
-            else {"id": target_acc_id or "default", "name": "Suno OAuth"}
-        )
-        oauth = dict(acc.get("oauth") or {})
-        for key in ("client_id", "auth_url", "token_url", "scopes", "redirect_uri"):
-            if key in oauth_payload and oauth_payload[key] is not None:
-                oauth[key] = str(oauth_payload[key]).strip()
-        if oauth_payload.get("client_secret"):
-            oauth["client_secret"] = str(oauth_payload["client_secret"]).strip()
-        acc["oauth"] = oauth
-        if oauth_payload.get("auth_type"):
-            acc["auth_type"] = str(oauth_payload["auth_type"]).strip()
-        elif oauth.get("client_id") or oauth.get("auth_url"):
-            acc["auth_type"] = "oauth"
-        if existing_accounts:
-            existing_accounts[target_idx] = acc
-            payload["accounts"] = existing_accounts
-        else:
-            payload["accounts"] = [acc]
-
-    return mgr.save_server(payload, server_id=_SUNO_MCP_SERVER_ID)
-
-
-def _resolve_suno_mcp_credentials(cfg: dict[str, Any]) -> tuple[str, str, str]:
-    suno_url = str(cfg.get("MUSIC_SUNO_MCP_URL") or "").strip()
-    suno_cmd = str(cfg.get("MUSIC_SUNO_MCP_COMMAND") or "").strip()
-    suno_tok = str(cfg.get("MUSIC_SUNO_MCP_TOKEN") or "").strip()
-    try:
-        from src.mcp_connectors import get_mcp_manager
-
-        mgr = get_mcp_manager()
-        raw = mgr._find_raw(_SUNO_MCP_SERVER_ID)
-        suno_url = suno_url or str(raw.get("url") or "").strip()
-        suno_cmd = suno_cmd or str(raw.get("command") or "").strip()
-        accounts = [a for a in (raw.get("accounts") or []) if a.get("enabled", True)]
-        acc = accounts[0] if accounts else None
-        headers, _ = mgr._resolve_credentials(raw, acc)
-        auth_header = headers.get("Authorization") or ""
-        if auth_header.startswith("Bearer "):
-            vault_tok = auth_header[len("Bearer ") :].strip()
-            if vault_tok:
-                suno_tok = vault_tok
+        out = str(text if text is not None else "")
+        for secret in sorted(
+            {str(s) for s in (extra or ()) if s}, key=len, reverse=True
+        ):
+            if len(secret) >= _MIN_KNOWN_SECRET:
+                out = out.replace(secret, _REDACTED)
+        out = _AMZ_PARAM_RE.sub(_REDACTED, out)
+        return redact_error_text(out, limit=limit)
     except Exception:
-        pass
-    return suno_url, suno_cmd, suno_tok
-
-
-def suno_oauth_start(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    data = dict(payload or {})
-    from src.mcp_connectors import SUNO_OAUTH_DEFAULTS, get_mcp_manager
-
-    cfg = settings()
-    suno_url = str(cfg.get("MUSIC_SUNO_MCP_URL") or "").strip()
-    suno_cmd = str(cfg.get("MUSIC_SUNO_MCP_COMMAND") or "").strip()
-    if not suno_url and not suno_cmd:
-        suno_url = SUNO_OAUTH_DEFAULTS["mcp_url"]
-        from src.settings_store import get_store
-
-        get_store().save("Apps/music", {"MUSIC_SUNO_MCP_URL": suno_url})
-
-    _ensure_suno_mcp_server(suno_url=suno_url, oauth_payload=data)
-    mgr = get_mcp_manager()
-    return mgr.start_oauth(
-        _SUNO_MCP_SERVER_ID,
-        account_id=data.get("account_id"),
-        payload=data,
-    )
-
-
-def suno_oauth_callback(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    data = dict(payload or {})
-    from src.mcp_connectors import get_mcp_manager
-
-    _ensure_suno_mcp_server()
-    mgr = get_mcp_manager()
-    return mgr.complete_oauth(_SUNO_MCP_SERVER_ID, payload=data)
-
-
-def suno_oauth_disconnect() -> dict[str, Any]:
-    from src.mcp_connectors import get_mcp_manager
-
-    mgr = get_mcp_manager()
-    try:
-        servers = mgr._raw_servers()
-        srv = next((s for s in servers if s.get("id") == _SUNO_MCP_SERVER_ID), None)
-        if srv:
-            for acc in srv.get("accounts") or []:
-                mgr._set_secret(
-                    _SUNO_MCP_SERVER_ID, acc["id"], "oauth_access_token", ""
-                )
-                mgr._set_secret(
-                    _SUNO_MCP_SERVER_ID, acc["id"], "oauth_refresh_token", ""
-                )
-                oauth = acc.setdefault("oauth", {})
-                oauth["connected"] = False
-                oauth["token_masked"] = ""
-            mgr._save_raw_servers(servers)
-    except Exception:
-        pass
-    return {"ok": True, **providers_catalog()}
+        return ""
 
 
 def providers_catalog():
@@ -292,18 +351,21 @@ def providers_catalog():
         selected = "local"
     local_installed = (CACHE / "ace-step/.venv").is_dir()
     from src.config import STT_GEMINI_API_KEY, setting
+    from Plugins.Apps.music import suno_legacy
 
     gemini_key = bool(
         setting("GEMINI_API_KEY") or setting("AGE_GEMINI_API_KEY") or STT_GEMINI_API_KEY
     )
-    suno_url = str(cfg.get("MUSIC_SUNO_MCP_URL") or "").strip()
-    suno_cmd = str(cfg.get("MUSIC_SUNO_MCP_COMMAND") or "").strip()
-    suno_state = _suno_connector_state()
-    suno_token = (
-        bool(str(cfg.get("MUSIC_SUNO_MCP_TOKEN") or "").strip())
-        or suno_state["has_token"]
-    )
-    suno_configured = bool(suno_url or suno_cmd)
+    suno = suno_status()
+    try:
+        legacy = suno_legacy.legacy_state()
+        suno["legacy_credentials"] = {
+            "present": legacy["present"],
+            "prompt": legacy["prompt"],
+        }
+    except Exception:
+        suno["legacy_credentials"] = {"present": False, "prompt": False}
+    suno["description"] = "Geração pelo Suno conectado na PIA Server"
     return {
         "providers": [
             {
@@ -323,36 +385,11 @@ def providers_catalog():
                 "credential_state": "configured" if gemini_key else "missing",
                 "available": gemini_key,
             },
-            {
-                "id": "suno_mcp",
-                "name": "Suno (MCP)",
-                "kind": "mcp",
-                "description": "Conexão com servidor MCP do Suno",
-                "url": suno_url,
-                "command": suno_cmd,
-                "credential_state": "configured" if suno_token else "missing",
-                "token_configured": suno_token,
-                "auth_type": suno_state["auth_type"],
-                "oauth_connected": suno_state["oauth_connected"],
-                "oauth_client_id": suno_state["oauth_client_id"],
-                "oauth_auth_url": suno_state["oauth_auth_url"],
-                "oauth_token_url": suno_state["oauth_token_url"],
-                "oauth_scopes": suno_state["oauth_scopes"],
-                "available": suno_configured,
-            },
+            suno,
         ],
         "selection": {
             "provider": selected,
             "gemini_model": str(cfg.get("MUSIC_GEMINI_MODEL") or "lyria-3.5"),
-            "suno_mcp_url": suno_url,
-            "suno_mcp_command": suno_cmd,
-            "suno_mcp_token_configured": suno_token,
-            "suno_mcp_auth_type": suno_state["auth_type"],
-            "suno_mcp_oauth_connected": suno_state["oauth_connected"],
-            "suno_mcp_oauth_client_id": suno_state["oauth_client_id"],
-            "suno_mcp_oauth_auth_url": suno_state["oauth_auth_url"],
-            "suno_mcp_oauth_token_url": suno_state["oauth_token_url"],
-            "suno_mcp_oauth_scopes": suno_state["oauth_scopes"],
         },
     }
 
@@ -361,16 +398,6 @@ def select_provider(
     *,
     provider: str | None = None,
     gemini_model: str | None = None,
-    suno_mcp_url: str | None = None,
-    suno_mcp_command: str | None = None,
-    suno_mcp_token: str | None = None,
-    suno_mcp_auth_type: str | None = None,
-    suno_mcp_client_id: str | None = None,
-    suno_mcp_client_secret: str | None = None,
-    suno_mcp_auth_url: str | None = None,
-    suno_mcp_token_url: str | None = None,
-    suno_mcp_scopes: str | None = None,
-    suno_mcp_redirect_uri: str | None = None,
 ):
     from src.settings_store import get_store
 
@@ -384,45 +411,8 @@ def select_provider(
         updates["MUSIC_PROVIDER"] = norm
     if gemini_model is not None and str(gemini_model).strip():
         updates["MUSIC_GEMINI_MODEL"] = str(gemini_model).strip()
-    if suno_mcp_url is not None:
-        raw_url = str(suno_mcp_url).strip()
-        if raw_url:
-            parsed = urlsplit(raw_url)
-            if parsed.scheme not in ("http", "https") or not parsed.netloc:
-                raise ValueError("URL do Suno MCP deve usar http:// ou https://.")
-        updates["MUSIC_SUNO_MCP_URL"] = raw_url
-    if suno_mcp_command is not None:
-        updates["MUSIC_SUNO_MCP_COMMAND"] = str(suno_mcp_command).strip()
-    if suno_mcp_token is not None:
-        updates["MUSIC_SUNO_MCP_TOKEN"] = str(suno_mcp_token).strip()
     if updates:
         get_store().save("Apps/music", updates)
-
-    oauth_fields = {
-        k: v
-        for k, v in {
-            "auth_type": suno_mcp_auth_type,
-            "client_id": suno_mcp_client_id,
-            "client_secret": suno_mcp_client_secret,
-            "auth_url": suno_mcp_auth_url,
-            "token_url": suno_mcp_token_url,
-            "scopes": suno_mcp_scopes,
-            "redirect_uri": suno_mcp_redirect_uri,
-        }.items()
-        if v is not None
-    }
-    if (
-        suno_mcp_url is not None
-        or suno_mcp_command is not None
-        or suno_mcp_token is not None
-        or oauth_fields
-    ):
-        _ensure_suno_mcp_server(
-            suno_url=suno_mcp_url,
-            suno_cmd=suno_mcp_command,
-            suno_token=suno_mcp_token,
-            oauth_payload=oauth_fields or None,
-        )
     return providers_catalog()
 
 
@@ -635,16 +625,31 @@ def library():
     return sorted(items.values(), key=lambda item: item["modified"], reverse=True)[:100]
 
 
-def generate(
-    prompt,
-    lyrics="",
-    provider=None,
-    duration=30,
-    progress=lambda text: None,
-    cancelled=lambda: False,
-):
-    if provider is None:
-        provider = str(settings().get("MUSIC_PROVIDER") or "local").strip().lower()
+# --- Suno audio download helpers (T6) ---------------------------------------
+# Shared with remote_suno.download_track (proxy of the PIA Server). The direct
+# download of Suno audio links and the per-call MCP batch were removed in T9.
+MAX_AUDIO_BYTES = 100 * 1024**2
+_AUDIO_CHUNK = 64 * 1024
+_AUDIO_CONTENT_EXTENSIONS = {
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/wave": "wav",
+    "audio/flac": "flac",
+    "audio/x-flac": "flac",
+}
+
+
+def _discard(path: Path) -> None:
+    """Best-effort removal of a temp/orphan file (never masks the real error)."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _validate_generation_input(prompt: Any, lyrics: Any, duration: Any) -> None:
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 8000:
         raise ValueError("Descrição obrigatória (até 8000 caracteres).")
     if not isinstance(lyrics, str) or len(lyrics) > 16000:
@@ -655,10 +660,76 @@ def generate(
         or not 10 <= duration <= 180
     ):
         raise ValueError("Duração deve estar entre 10 e 180 segundos.")
+
+
+def generate_suno_batch(
+    prompt: str,
+    lyrics: str = "",
+    duration: int = 30,
+    count: int = 1,
+    *,
+    progress: Any = lambda text: None,
+    cancelled: Any = lambda: False,
+    cancel_event: Any = None,
+    on_track: Any = None,
+    on_progress: Any = None,
+    runner: Any = None,
+    suno_account_id: Any = None,
+) -> list[dict[str, Any]]:
+    """Generate ``count`` Suno tracks on the PIA Server (T6).
+
+    ``runner`` comes from ``suno_backend().create`` (or is created here) and
+    every ready track, extras included, is downloaded into OUTPUT (RN12).
+    Every raised exception carries ``completed``, ``total`` and ``items``.
+    """
+    backend = suno_backend()
+    if runner is None:
+        try:
+            refusal = suno_job_refusal()
+            if refusal is not None:
+                raise refusal
+            data = {
+                "prompt": prompt,
+                "lyrics": lyrics,
+                "duration": duration,
+                "count": count,
+            }
+            runner = backend.create(data, suno_job_account(suno_account_id))
+        except BaseException as exc:
+            exc.completed, exc.total, exc.items = 0, count, []
+            raise
+    return backend.run(
+        runner,
+        progress=progress,
+        cancelled=cancelled,
+        cancel_event=cancel_event,
+        on_track=on_track,
+        on_progress=on_progress,
+    )
+
+
+def generate(
+    prompt,
+    lyrics="",
+    provider=None,
+    duration=30,
+    progress=lambda text: None,
+    cancelled=lambda: False,
+):
+    if provider is None:
+        provider = str(settings().get("MUSIC_PROVIDER") or "local").strip().lower()
+    _validate_generation_input(prompt, lyrics, duration)
     if provider not in MUSIC_PROVIDERS:
         raise ValueError(
             "Escolha local, gemini ou suno_mcp. Flow Music é usado na interface oficial."
         )
+    if provider == "suno_mcp":
+        # One requested track; an extra clip is saved too (RN12) but the
+        # caller gets the requested one.
+        items = generate_suno_batch(
+            prompt, lyrics, duration, 1, progress=progress, cancelled=cancelled
+        )
+        return next((i for i in items if not i.get("extra")), items[0])
     if not _generation_lock.acquire(blocking=False):
         raise RuntimeError("Já existe uma geração musical em andamento.")
     try:
@@ -735,44 +806,6 @@ def generate(
                 else:
                     raise RuntimeError("O motor musical excedeu 30 minutos.")
                 extension = "mp3"
-            elif provider == "suno_mcp":
-                from src.mcp_chat_tools import call_suno_mcp
-
-                cfg = settings()
-                suno_url, suno_cmd, suno_tok = _resolve_suno_mcp_credentials(cfg)
-                progress("Gerando música via Suno (MCP)…")
-                data = call_suno_mcp(
-                    prompt,
-                    lyrics=lyrics,
-                    duration=duration,
-                    suno_url=suno_url,
-                    suno_cmd=suno_cmd,
-                    suno_token=suno_tok,
-                )
-                if isinstance(data.get("content"), list):
-                    for part in data["content"]:
-                        if isinstance(part, dict) and isinstance(part.get("text"), str):
-                            try:
-                                parsed = json.loads(part["text"])
-                                if isinstance(parsed, dict):
-                                    data = parsed
-                                    break
-                            except Exception:
-                                pass
-                if isinstance(data.get("audio_base64"), str):
-                    raw = base64.b64decode(data["audio_base64"], validate=True)
-                    extension = "wav" if data.get("format") == "wav" else "mp3"
-                elif isinstance(data.get("audio_url"), str) and data[
-                    "audio_url"
-                ].startswith(("http://", "https://")):
-                    raw = session.get(
-                        data["audio_url"], timeout=120, allow_redirects=False
-                    ).content
-                    extension = "wav" if data["audio_url"].endswith(".wav") else "mp3"
-                else:
-                    raise RuntimeError(
-                        "Resposta do servidor Suno (MCP) não trouxe áudio."
-                    )
             else:
                 from src.config import STT_GEMINI_API_KEY
 
@@ -820,7 +853,7 @@ def generate(
                 )
             if cancelled():
                 raise InterruptedError("Geração cancelada antes de salvar o resultado.")
-            if not raw or len(raw) > 100 * 1024**2:
+            if not raw or len(raw) > MAX_AUDIO_BYTES:
                 raise RuntimeError("Áudio musical vazio ou maior que 100 MiB.")
             destination = output_directory()
             destination.mkdir(parents=True, exist_ok=True)

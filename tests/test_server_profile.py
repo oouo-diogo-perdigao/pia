@@ -1,3 +1,4 @@
+import base64
 import json
 
 from Plugins.Connectors.pia_server.profile import SECTION, snapshot
@@ -223,3 +224,148 @@ def test_automatic_profile_retries_without_losing_pending_changes(isolated_profi
     assert dict(store.chats()) == {chat: "Offline"}
     assert sync(store, post, b"device-key", "profile-test")[1] == "2"
     assert remote["chats"]["chats"][0][:2] == [chat, "Offline"]
+
+
+MCP_PREFIX = "mcp:connector:"
+MCP_VALUES = ("fixture-mcp-access-value", "fixture-mcp-refresh-value")
+
+
+class _RegisteringVault:
+    """Like KeyringVault: stores the value and registers the name in vault_entries."""
+
+    def __init__(self, settings):
+        self.settings = settings
+
+    def get(self, name):
+        return self.settings.vault.get(name)
+
+    def set(self, name, value):
+        self.settings.vault.set(name, value)
+        self.settings.register_secret(name)
+
+    def delete(self, name):
+        self.settings.vault.delete(name)
+
+
+def _connect_mcp_oauth(settings):
+    from src.mcp_connectors import MCPConnectorManager
+
+    manager = MCPConnectorManager(
+        store=WorkspaceStore(settings.path), vault=_RegisteringVault(settings)
+    )
+    manager._set_secret("suno_mcp", "default", "oauth_access_token", MCP_VALUES[0])
+    manager._set_secret("suno_mcp", "default", "oauth_refresh_token", MCP_VALUES[1])
+    names = {row[0] for row in settings.rows("vault_entries")}
+    assert {name for name in names if name.startswith(MCP_PREFIX)} == {
+        "mcp:connector:suno_mcp:default:oauth_access_token",
+        "mcp:connector:suno_mcp:default:oauth_refresh_token",
+    }
+
+
+def _assert_no_mcp(blob):
+    text = json.dumps(blob)
+    assert MCP_PREFIX not in text
+    assert not any(value in text for value in MCP_VALUES)
+
+
+def test_profile_snapshot_and_sync_work_with_mcp_oauth_connected(
+    isolated_profile, monkeypatch, tmp_path
+):
+    from Plugins.Connectors.pia_server.profile_sync import sync
+    from src import settings_store
+
+    other = settings_store.SettingsStore(
+        tmp_path / "other" / "workspace.sqlite3", type(isolated_profile.vault)()
+    )
+    first, second = WorkspaceStore(isolated_profile.path), WorkspaceStore(other.path)
+    isolated_profile.save("general", {"OPENAI_COMPAT_API_KEY": "shared-value"})
+    _connect_mcp_oauth(isolated_profile)
+    chat = first.new_chat("Com MCP")
+    first.append(chat, "user", "Oi")
+
+    local = json.loads(json.dumps(snapshot(first)))
+    backup = decode(local["backup"], "")
+    _assert_no_mcp(backup)
+    assert backup["secrets"]["setting:general:OPENAI_COMPAT_API_KEY"] == "shared-value"
+
+    revision, remote, written = "0", None, []
+
+    def post(action, data):
+        nonlocal revision, remote
+        if action == "read":
+            result = {"revision": revision}
+            if not data.get("metadata") and remote is not None:
+                result["snapshot"] = remote
+            return result
+        written.append(json.loads(json.dumps(data)))
+        remote = json.loads(json.dumps(data["snapshot"]))
+        revision = str(int(revision) + 1)
+        return {"revision": revision}
+
+    def step(settings, workspace):
+        monkeypatch.setattr(settings_store, "_store", settings)
+        return sync(workspace, post, b"device-key", "profile-test")[1]
+
+    assert step(isolated_profile, first) == "1"
+    assert step(other, second) == "1"
+    assert written
+    for payload in written:
+        _assert_no_mcp(payload)
+        _assert_no_mcp(decode(payload["snapshot"]["backup"], ""))
+    assert dict(second.chats()) == {chat: "Com MCP"}
+    assert other.vault.get("setting:general:OPENAI_COMPAT_API_KEY") == "shared-value"
+    assert not any(row[0].startswith(MCP_PREFIX) for row in other.rows("vault_entries"))
+    # The local MCP OAuth stays on the device that connected it.
+    assert step(isolated_profile, first) == "1"
+    assert (
+        isolated_profile.vault.get("mcp:connector:suno_mcp:default:oauth_access_token")
+        == MCP_VALUES[0]
+    )
+
+
+def test_profile_sync_accepts_remote_revision_with_legacy_mcp_secrets(
+    isolated_profile,
+):
+    from Plugins.Connectors.pia_server.profile import pack
+    from Plugins.Connectors.pia_server.profile_sync import sync
+
+    store = WorkspaceStore(isolated_profile.path)
+    legacy = json.loads(json.dumps(snapshot(store)))
+    payload = decode(legacy["backup"], "")
+    payload["secrets"]["mcp:connector:suno_mcp:default:oauth_access_token"] = (
+        MCP_VALUES[0]
+    )
+    legacy["backup"] = pack(payload)
+
+    def post(action, data):
+        if action == "read":
+            return {"revision": "7", "snapshot": legacy}
+        _assert_no_mcp(data)
+        return {"revision": "8"}
+
+    assert sync(store, post, b"device-key", "profile-test")[1] in ("7", "8")
+    assert (
+        isolated_profile.vault.get("mcp:connector:suno_mcp:default:oauth_access_token")
+        is None
+    )
+
+
+def test_profile_snapshot_filters_mcp_secrets_defensively(
+    isolated_profile, monkeypatch
+):
+    from Plugins.Connectors.pia_server import profile
+
+    real_decode = profile.decode
+
+    def leaky_decode(data, password):
+        value = real_decode(data, password)
+        leaked = "mcp:connector:other:default:oauth_access_token"
+        value["secrets"][leaked] = MCP_VALUES[0]
+        return value
+
+    monkeypatch.setattr(profile, "decode", leaky_decode)
+    result = profile.snapshot(WorkspaceStore(isolated_profile.path))
+    # Inspect the packed bytes: decode() would already hide the key on read.
+    raw = base64.b64decode(result["backup"])
+    assert b"mcp:" not in raw
+    assert MCP_VALUES[0].encode() not in raw

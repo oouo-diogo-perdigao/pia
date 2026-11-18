@@ -290,43 +290,46 @@ def test_plugins_and_skills_catalog_and_dispatch(tmp_path, monkeypatch):
     assert len(ACCOUNT_MODES) == 3
 
 
-def test_suno_mcp_oauth_persistence_and_usage(tmp_path, monkeypatch):
-    from Plugins.Apps.music import service as music_service
-    from Plugins.Apps.music.tools import call_suno_mcp
+def test_generic_mcp_oauth_pkce_persistence_and_exchange(tmp_path, monkeypatch):
+    """Generic MCP OAuth keeps working after the local Suno OAuth left (T8)."""
+    import base64
+    import hashlib
+    from urllib.parse import parse_qs, urlsplit
     from src import mcp_connectors, settings_store
     from src.core.secrets.vault import MemoryVault
     from src.workspace_store import WorkspaceStore
 
-    db_path = tmp_path / "settings.sqlite3"
-    sstore = settings_store.SettingsStore(path=db_path)
-    monkeypatch.setattr(settings_store, "_store", sstore)
-
     vault = MemoryVault()
+    sstore = settings_store.SettingsStore(
+        path=tmp_path / "settings.sqlite3", vault=vault
+    )
+    monkeypatch.setattr(settings_store, "_store", sstore)
     wstore = WorkspaceStore(tmp_path / "ws.sqlite3")
     mgr = mcp_connectors.MCPConnectorManager(store=wstore, vault=vault)
     monkeypatch.setattr(mcp_connectors, "_manager", mgr)
+    assert not hasattr(mcp_connectors, "SUNO_OAUTH_DEFAULTS")
+    assert not hasattr(mcp_connectors, "_is_suno_server")
 
-    cat = music_service.select_provider(
-        provider="suno_mcp",
-        suno_mcp_url="https://suno.example.com/mcp",
-        suno_mcp_auth_type="oauth",
-        suno_mcp_client_id="suno-cid",
-        suno_mcp_client_secret="suno-csecret",
-        suno_mcp_auth_url="https://suno.example.com/oauth/authorize",
-        suno_mcp_token_url="https://suno.example.com/oauth/token",
-        suno_mcp_scopes="music.generate",
+    mgr.save_server(
+        {
+            "id": "music_gen",
+            "name": "Music Gen",
+            "transport": "http_streaming",
+            "url": "https://gen.example.com/mcp",
+            "accounts": [{"id": "acc1", "name": "Conta", "auth_type": "oauth"}],
+        },
+        server_id="music_gen",
     )
-    assert cat["selection"]["provider"] == "suno_mcp"
-    assert cat["selection"]["suno_mcp_auth_type"] == "oauth"
-    assert cat["selection"]["suno_mcp_oauth_client_id"] == "suno-cid"
-
-    start = music_service.suno_oauth_start(
-        {"redirect_uri": "http://127.0.0.1:8762/oauth/cb"}
-    )
-    assert start["ok"] is True
-    assert "client_id=suno-cid" in start["auth_url"]
-
-    seen_token_post = {}
+    oauth_cfg = {
+        "account_id": "acc1",
+        "client_id": "gen-cid",
+        "client_secret": "gen-csecret",
+        "auth_url": "https://gen.example.com/oauth/authorize",
+        "token_url": "https://gen.example.com/oauth/token",
+        "scopes": "music.generate",
+        "redirect_uri": "http://127.0.0.1:8762/oauth/cb",
+    }
+    seen = {}
 
     class FakeResp:
         def __init__(self, payload):
@@ -340,98 +343,90 @@ def test_suno_mcp_oauth_persistence_and_usage(tmp_path, monkeypatch):
         def json(self):
             return self._payload
 
+    token_payload = {
+        "access_token": "gen-oauth-access-9999",
+        "refresh_token": "gen-oauth-refresh-1111",
+    }
+
     def fake_post(url, **kwargs):
-        if url == "https://suno.example.com/oauth/token":
-            seen_token_post["url"] = url
-            seen_token_post["data"] = kwargs.get("data")
-            return FakeResp(
-                {
-                    "access_token": "suno-oauth-access-9999",
-                    "refresh_token": "suno-oauth-refresh-1111",
-                }
-            )
-        seen_token_post["mcp_headers"] = kwargs.get("headers")
-        return FakeResp(
-            {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "result": {"audio_url": "https://cdn.example.com/a.mp3"},
-            }
-        )
+        if url == "https://gen.example.com/oauth/token":
+            seen["token_data"] = kwargs.get("data")
+            return FakeResp(dict(token_payload))
+        raise AssertionError(f"Unexpected POST {url}")  # no DCR for generic MCP
 
     monkeypatch.setattr("requests.post", fake_post)
 
-    cb = music_service.suno_oauth_callback(
-        {"state": start["state"], "code": "auth-code-xyz"}
+    start = mgr.start_oauth("music_gen", account_id="acc1", payload=oauth_cfg)
+    assert start["ok"] is True
+    qs = parse_qs(urlsplit(start["auth_url"]).query)
+    assert qs["client_id"] == ["gen-cid"]
+    assert qs["redirect_uri"] == ["http://127.0.0.1:8762/oauth/cb"]
+    assert qs["code_challenge_method"] == ["S256"]
+    challenge = qs["code_challenge"][0]
+
+    cb = mgr.complete_oauth(
+        "music_gen",
+        payload={
+            "state": start["state"],
+            "account_id": "acc1",
+            "code": "auth-code-xyz",
+            "code_verifier": "attacker-verifier-override",
+        },
     )
     assert cb["ok"] is True
     assert cb["account"]["oauth"]["connected"] is True
-    assert seen_token_post["data"]["grant_type"] == "authorization_code"
-    assert seen_token_post["data"]["code"] == "auth-code-xyz"
-    assert seen_token_post["data"]["client_secret"] == "suno-csecret"
-
-    # Stored in UnifiedVault and exposed in catalog
+    data = seen["token_data"]
+    assert data["grant_type"] == "authorization_code"
+    assert data["code"] == "auth-code-xyz"
+    assert data["client_secret"] == "gen-csecret"
+    assert data["code_verifier"] != "attacker-verifier-override"
     assert (
-        vault.get("mcp:connector:suno_mcp:default:oauth_access_token")
-        == "suno-oauth-access-9999"
+        base64.urlsafe_b64encode(
+            hashlib.sha256(data["code_verifier"].encode("ascii")).digest()
+        )
+        .rstrip(b"=")
+        .decode("ascii")
+        == challenge
     )
-    cat2 = music_service.providers_catalog()
-    assert cat2["selection"]["suno_mcp_oauth_connected"] is True
-    assert cat2["selection"]["suno_mcp_token_configured"] is True
-
-    # call_suno_mcp automatically resolves OAuth token from UnifiedVault
-    res = call_suno_mcp("Lo-fi chill beat", suno_url="https://suno.example.com/mcp")
-    assert res["audio_url"] == "https://cdn.example.com/a.mp3"
     assert (
-        seen_token_post["mcp_headers"]["Authorization"]
-        == "Bearer suno-oauth-access-9999"
+        vault.get("mcp:connector:music_gen:acc1:oauth_access_token")
+        == "gen-oauth-access-9999"
     )
+    assert "gen-oauth-access-9999" not in str(mgr.get_server("music_gen"))
 
-    # Preserves secondary accounts when updating Suno OAuth
-    mgr.save_server(
-        {
-            "id": "suno_mcp",
-            "name": "Suno (MCP)",
-            "transport": "http_streaming",
-            "url": "https://suno.example.com/mcp",
-            "accounts": [
-                mgr.get_server("suno_mcp")["accounts"][0],
-                {"id": "secondary", "name": "Conta Extra", "auth_type": "bearer"},
-            ],
-        },
-        server_id="suno_mcp",
-    )
-    music_service.select_provider(suno_mcp_scopes="music.generate music.read")
-    srv_after = mgr.get_server("suno_mcp")
-    assert [a["id"] for a in srv_after["accounts"]] == ["default", "secondary"]
+    # Single-use, missing, wrong server/account and expired states are rejected.
+    with pytest.raises(ValueError, match="State OAuth"):
+        mgr.complete_oauth("music_gen", payload={"state": start["state"], "code": "r"})
+    with pytest.raises(ValueError, match="State OAuth"):
+        mgr.complete_oauth("music_gen", payload={"code": "missing-state"})
+    start2 = mgr.start_oauth("music_gen", account_id="acc1")
+    with pytest.raises(ValueError, match="servidor"):
+        mgr.complete_oauth("other_srv", payload={"state": start2["state"], "code": "c"})
+    start3 = mgr.start_oauth("music_gen", account_id="acc1")
+    with pytest.raises(ValueError, match="conta"):
+        mgr.complete_oauth(
+            "music_gen",
+            payload={"state": start3["state"], "account_id": "wrong", "code": "c"},
+        )
+    start4 = mgr.start_oauth("music_gen", account_id="acc1")
+    states_map = wstore.get(mcp_connectors.OAUTH_STATE_KEY, {})
+    states_map[start4["state"]]["created_at"] = "2020-01-01T00:00:00+00:00"
+    wstore.set(mcp_connectors.OAUTH_STATE_KEY, states_map)
+    with pytest.raises(ValueError, match="expirado"):
+        mgr.complete_oauth("music_gen", payload={"state": start4["state"], "code": "c"})
 
-    # Empty access_token response from token_url must fail and not mark connected=True
-    music_service.suno_oauth_disconnect()
-    assert (
-        music_service.providers_catalog()["selection"]["suno_mcp_oauth_connected"]
-        is False
-    )
-    monkeypatch.setattr("requests.post", lambda url, **kw: FakeResp({}))
-    start_bad = music_service.suno_oauth_start({"account_id": "default"})
+    # An empty access_token answer fails without marking the account connected.
+    vault.delete("mcp:connector:music_gen:acc1:oauth_access_token")
+    token_payload.clear()
+    start5 = mgr.start_oauth("music_gen", account_id="acc1")
     with pytest.raises(ValueError, match="access_token"):
-        music_service.suno_oauth_callback(
-            {"state": start_bad["state"], "account_id": "default", "code": "bad-code"}
+        mgr.complete_oauth(
+            "music_gen",
+            payload={"state": start5["state"], "account_id": "acc1", "code": "bad"},
         )
-    assert (
-        music_service.providers_catalog()["selection"]["suno_mcp_oauth_connected"]
-        is False
-    )
+    assert mgr.get_server("music_gen")["accounts"][0]["oauth"]["connected"] is False
 
-    # Unknown explicit account_id in _ensure_suno_mcp_server must fail without modifying existing accounts
-    with pytest.raises(ValueError, match="missing"):
-        music_service._ensure_suno_mcp_server(
-            oauth_payload={"account_id": "missing", "client_id": "new"}
-        )
-    srv_unchanged = mgr.get_server("suno_mcp")
-    assert srv_unchanged["accounts"][0]["oauth"]["client_id"] == "suno-cid"
-    assert [a["id"] for a in srv_unchanged["accounts"]] == ["default", "secondary"]
-
-    # complete_oauth with code and no token_url must reject without marking connected=True
+    # complete_oauth with a code and no token_url rejects without connecting.
     mgr.save_server(
         {
             "id": "no_token_url_srv",
@@ -456,168 +451,448 @@ def test_suno_mcp_oauth_persistence_and_usage(tmp_path, monkeypatch):
     assert vault.get("mcp:connector:no_token_url_srv:acc1:oauth_access_token") is None
 
 
-def test_suno_mcp_dcr_pkce_and_no_false_positive_token(tmp_path, monkeypatch):
-    import base64
-    import hashlib
-    from urllib.parse import parse_qs, urlsplit
-    from Plugins.Apps.music import service as music_service
-    from src import mcp_connectors, settings_store
-    from src.core.secrets.vault import MemoryVault
-    from src.workspace_store import WorkspaceStore
+# --- T2: handshake Streamable HTTP, timeout configurável e fallback de contas ---
 
-    vault = MemoryVault()
-    sstore = settings_store.SettingsStore(
-        path=tmp_path / "settings.sqlite3", vault=vault
-    )
-    monkeypatch.setattr(settings_store, "_store", sstore)
-    wstore = WorkspaceStore(tmp_path / "ws.sqlite3")
-    mgr = mcp_connectors.MCPConnectorManager(store=wstore, vault=vault)
-    monkeypatch.setattr(mcp_connectors, "_manager", mgr)
 
-    # Selecting Suno URL without token or OAuth must NOT report connected/token_configured
-    cat0 = music_service.select_provider(
-        provider="suno_mcp",
-        suno_mcp_url="https://api.suno.com/mcp",
-        suno_mcp_token="",
-    )
-    suno_item = next(p for p in cat0["providers"] if p["id"] == "suno_mcp")
-    assert suno_item["token_configured"] is False
-    assert suno_item["credential_state"] == "missing"
-    assert cat0["selection"]["suno_mcp_token_configured"] is False
-    assert cat0["selection"]["suno_mcp_oauth_connected"] is False
+class _HandshakeResp:
+    def __init__(self, status=200, payload=None, headers=None):
+        import requests
 
-    # Stale connected=True without vault secret must not cause false positive
-    raw_servers = mgr._raw_servers()
-    raw_servers[0]["accounts"] = [
-        {"id": "default", "name": "Suno", "oauth": {"connected": True}}
-    ]
-    mgr._save_raw_servers(raw_servers)
-    assert mgr.get_server("suno_mcp")["accounts"][0]["oauth"]["connected"] is False
-    assert (
-        music_service.providers_catalog()["selection"]["suno_mcp_oauth_connected"]
-        is False
-    )
+        self.status_code = status
+        self._payload = payload if payload is not None else {}
+        self.headers = requests.structures.CaseInsensitiveDict(
+            {"Content-Type": "application/json", **(headers or {})}
+        )
+        self.text = json.dumps(self._payload)
+        self.content = self.text.encode()
 
-    # DCR + PKCE S256 in suno_oauth_start when client_id is empty
-    seen = {}
+    def json(self):
+        return self._payload
 
-    class FakeResp:
-        def __init__(self, payload):
-            self._payload = payload
-            self.content = b"{}"
+    def raise_for_status(self):
+        import requests
 
-        def raise_for_status(self):
-            return None
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} Error", response=self)
 
-        def json(self):
-            return self._payload
+
+def _fake_mcp_server(monkeypatch, *, session_id="sess-1", init_status=200, plan=None):
+    """Fake Streamable HTTP server. ``plan`` maps method -> list of statuses."""
+    calls = []
+    plan = {k: list(v) for k, v in (plan or {}).items()}
+    counter = {"init": 0}
 
     def fake_post(url, **kwargs):
-        if url == mcp_connectors.SUNO_OAUTH_DEFAULTS["register_url"]:
-            seen["dcr_json"] = kwargs.get("json")
-            return FakeResp({"client_id": "dcr--official-test-id"})
-        if url == mcp_connectors.SUNO_OAUTH_DEFAULTS["token_url"]:
-            seen["token_data"] = kwargs.get("data")
-            return FakeResp(
-                {"access_token": "suno-pkce-token-42", "refresh_token": "ref-42"}
+        body = kwargs.get("json") or {}
+        method = body.get("method")
+        calls.append(
+            {
+                "method": method,
+                "headers": dict(kwargs.get("headers") or {}),
+                "timeout": kwargs.get("timeout"),
+            }
+        )
+        if method == "initialize":
+            counter["init"] += 1
+            sid = f"{session_id}-{counter['init']}" if session_id else ""
+            return _HandshakeResp(
+                init_status,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {"protocolVersion": "2025-11-25"},
+                },
+                {"Mcp-Session-Id": sid} if sid else {},
             )
-        raise AssertionError(f"Unexpected POST {url}")
+        if method == "notifications/initialized":
+            return _HandshakeResp(202, {})
+        statuses = plan.get(method) or [200]
+        status = statuses.pop(0) if len(statuses) > 1 else statuses[0]
+        plan[method] = statuses
+        return _HandshakeResp(
+            status,
+            {"jsonrpc": "2.0", "id": body.get("id"), "result": {"ok": True}},
+        )
 
     monkeypatch.setattr("requests.post", fake_post)
+    return calls
 
-    start = music_service.suno_oauth_start({})
-    assert start["ok"] is True
-    assert seen["dcr_json"] == {
-        "client_name": "pia.travelrpg.com",
-        "redirect_uris": ["https://pia.travelrpg.com/oauth/callback"],
-    }
-    parsed = urlsplit(start["auth_url"])
-    assert (
-        f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-        == "https://studio-api-prod.suno.com/api/v2/external/oauth/authorize/"
-    )
-    qs = parse_qs(parsed.query)
-    assert qs["client_id"] == ["dcr--official-test-id"]
-    assert qs["redirect_uri"] == ["https://pia.travelrpg.com/oauth/callback"]
-    assert qs["response_type"] == ["code"]
-    assert qs["code_challenge_method"] == ["S256"]
-    assert qs["scope"] == [mcp_connectors.SUNO_OAUTH_DEFAULTS["scopes"]]
-    challenge = qs["code_challenge"][0]
 
-    # Callback exchanges code + code_verifier + redirect_uri and persists token in vault
-    cb = music_service.suno_oauth_callback(
-        {"state": start["state"], "code": "suno-auth-code-1"}
-    )
-    assert cb["ok"] is True
-    assert cb["account"]["oauth"]["connected"] is True
-    assert seen["token_data"]["grant_type"] == "authorization_code"
-    assert seen["token_data"]["code"] == "suno-auth-code-1"
-    assert seen["token_data"]["client_id"] == "dcr--official-test-id"
-    assert (
-        seen["token_data"]["redirect_uri"] == "https://pia.travelrpg.com/oauth/callback"
-    )
-    verifier = seen["token_data"]["code_verifier"]
-    expected_challenge = (
-        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest())
-        .rstrip(b"=")
-        .decode("ascii")
-    )
-    assert expected_challenge == challenge
-    assert (
-        vault.get("mcp:connector:suno_mcp:default:oauth_access_token")
-        == "suno-pkce-token-42"
-    )
-
-    # Security checks: _is_suno_server restricts to exact ID or api.suno.com hostname
-    assert (
-        mcp_connectors._is_suno_server("suno_mcp", {"url": "https://other.test"})
-        is True
-    )
-    assert (
-        mcp_connectors._is_suno_server("custom", {"url": "https://api.suno.com/mcp"})
-        is True
-    )
-    assert (
-        mcp_connectors._is_suno_server(
-            "my-suno-clone",
-            {"name": "Suno Clone", "url": "https://evil.example.com/mcp"},
-        )
-        is False
-    )
-
-    # Reusing the same state (single-use) or missing/invalid/expired/mismatched state must fail
-    with pytest.raises(ValueError, match="State OAuth"):
-        music_service.suno_oauth_callback({"state": start["state"], "code": "replay"})
-    with pytest.raises(ValueError, match="State OAuth"):
-        music_service.suno_oauth_callback({"code": "missing-state"})
-
-    start2 = music_service.suno_oauth_start({"account_id": "default"})
-    with pytest.raises(ValueError, match="servidor"):
-        mgr.complete_oauth("other_srv", payload={"state": start2["state"], "code": "c"})
-
-    start3 = music_service.suno_oauth_start({"account_id": "default"})
-    with pytest.raises(ValueError, match="conta"):
-        mgr.complete_oauth(
-            "suno_mcp",
-            payload={"state": start3["state"], "account_id": "wrong_acc", "code": "c"},
-        )
-
-    # Expired state is rejected
-    start4 = music_service.suno_oauth_start({"account_id": "default"})
-    states_map = wstore.get(mcp_connectors.OAUTH_STATE_KEY, {})
-    states_map[start4["state"]]["created_at"] = "2020-01-01T00:00:00+00:00"
-    wstore.set(mcp_connectors.OAUTH_STATE_KEY, states_map)
-    with pytest.raises(ValueError, match="expirado"):
-        music_service.suno_oauth_callback({"state": start4["state"], "code": "c"})
-
-    # Attacker-supplied code_verifier in payload must NOT override state's stored code_verifier
-    start5 = music_service.suno_oauth_start({"account_id": "default"})
-    cb5 = music_service.suno_oauth_callback(
+def _http_server(mgr, **extra):
+    return mgr.save_server(
         {
-            "state": start5["state"],
-            "code": "suno-auth-code-5",
-            "code_verifier": "attacker-verifier-override",
+            "id": "hs",
+            "name": "HS",
+            "transport": "http_streaming",
+            "url": "https://mcp.example.com/mcp",
+            "bearer_token": "hs-secret-token",
+            **extra,
         }
     )
-    assert cb5["ok"] is True
-    assert seen["token_data"]["code_verifier"] != "attacker-verifier-override"
+
+
+def test_http_handshake_initialize_and_session_header(tmp_path, monkeypatch):
+    mgr, _, _ = _make_manager(tmp_path)
+    srv = _http_server(mgr)
+    calls = _fake_mcp_server(monkeypatch)
+    assert mgr.call_tool(srv["id"], "do", {"a": 1}) == {"ok": True}
+    assert [c["method"] for c in calls] == [
+        "initialize",
+        "notifications/initialized",
+        "tools/call",
+    ]
+    assert "Mcp-Session-Id" not in calls[0]["headers"]
+    for call in calls[1:]:
+        assert call["headers"]["Mcp-Session-Id"] == "sess-1-1"
+        assert call["headers"]["MCP-Protocol-Version"] == "2025-11-25"
+        assert call["headers"]["Authorization"] == "Bearer hs-secret-token"
+    # Sessão reaproveitada na próxima chamada (sem novo initialize)
+    mgr.call_tool(srv["id"], "do", {})
+    assert [c["method"] for c in calls[3:]] == ["tools/call"]
+    assert calls[3]["headers"]["Mcp-Session-Id"] == "sess-1-1"
+    # Segredo nunca entra na chave do cache de sessão
+    assert "hs-secret-token" not in json.dumps(list(mgr._http_sessions))
+
+
+def test_http_handshake_reinitializes_once_on_expired_session(tmp_path, monkeypatch):
+    import requests
+
+    mgr, _, _ = _make_manager(tmp_path)
+    srv = _http_server(mgr)
+    calls = _fake_mcp_server(monkeypatch, plan={"tools/call": [404, 200]})
+    assert mgr.call_tool(srv["id"], "do", {}) == {"ok": True}
+    methods = [c["method"] for c in calls]
+    assert methods.count("initialize") == 2
+    assert methods.count("tools/call") == 2
+    assert calls[-1]["headers"]["Mcp-Session-Id"] == "sess-1-2"
+
+    calls.clear()
+    mgr2, _, _ = _make_manager(tmp_path / "b")
+    srv2 = _http_server(mgr2)
+    calls = _fake_mcp_server(monkeypatch, plan={"tools/call": [404, 404, 404]})
+    with pytest.raises(requests.HTTPError):
+        mgr2.call_tool(srv2["id"], "do", {})
+    assert [c["method"] for c in calls].count("tools/call") == 2  # só 1 retry
+
+
+def test_http_handshake_stateless_servers(tmp_path, monkeypatch):
+    mgr, _, _ = _make_manager(tmp_path)
+    srv = _http_server(mgr)
+    # Servidor que responde initialize sem Mcp-Session-Id
+    calls = _fake_mcp_server(monkeypatch, session_id="")
+    mgr.call_tool(srv["id"], "do", {})
+    assert "Mcp-Session-Id" not in calls[-1]["headers"]
+    assert calls[-1]["method"] == "tools/call"
+
+    # Servidor legado que rejeita initialize com 405: segue sem sessão
+    mgr2, _, _ = _make_manager(tmp_path / "b")
+    srv2 = _http_server(mgr2)
+    calls2 = _fake_mcp_server(monkeypatch, init_status=405)
+    assert mgr2.call_tool(srv2["id"], "do", {}) == {"ok": True}
+    assert [c["method"] for c in calls2] == ["initialize", "tools/call"]
+    assert "Mcp-Session-Id" not in calls2[-1]["headers"]
+
+
+def test_http_handshake_auth_error_propagates(tmp_path, monkeypatch):
+    import requests
+
+    mgr, _, _ = _make_manager(tmp_path)
+    srv = _http_server(mgr)
+    calls = _fake_mcp_server(monkeypatch, init_status=401)
+    with pytest.raises(requests.HTTPError):
+        mgr.call_tool(srv["id"], "do", {})
+    assert [c["method"] for c in calls] == ["initialize"]
+
+
+def test_call_tool_timeout_is_configurable(tmp_path, monkeypatch):
+    mgr, _, _ = _make_manager(tmp_path)
+    srv = _http_server(mgr)
+    calls = _fake_mcp_server(monkeypatch)
+    mgr.call_tool(srv["id"], "do", {}, timeout=420)
+    assert calls[0]["timeout"] == 30  # handshake limitado a 30 s
+    assert calls[-1]["timeout"] == 420
+    mgr.call_tool(srv["id"], "do", {})
+    assert calls[-1]["timeout"] == 30  # padrão preservado
+
+    seen = []
+
+    def fake_rpc(url, method, params, headers, *, req_id=1, timeout=15):
+        seen.append(timeout)
+        return {"ok": True}
+
+    srv_acc = mgr.save_server(
+        {
+            "id": "acc-srv",
+            "name": "Acc",
+            "url": "https://mcp.example.com/mcp",
+            "account_mode": "alternating",
+            "accounts": [{"id": "x", "name": "X", "bearer_token": "t"}],
+        }
+    )
+    monkeypatch.setattr(mgr, "_rpc_http", fake_rpc)
+    mgr.call_tool(srv_acc["id"], "do", {}, timeout=99)
+    assert seen == [99]
+
+
+def test_call_tool_can_disable_account_fallback(tmp_path, monkeypatch):
+    mgr, _, _ = _make_manager(tmp_path)
+    srv = mgr.save_server(
+        {
+            "id": "multi",
+            "name": "Multi",
+            "url": "https://mcp.example.com/mcp",
+            "account_mode": "distributed",
+            "accounts": [
+                {"id": "acc1", "name": "1", "bearer_token": "tok-1"},
+                {"id": "acc2", "name": "2", "bearer_token": "tok-2"},
+            ],
+        }
+    )
+    used = []
+
+    def fake_rpc(url, method, params, headers, *, req_id=1, timeout=15):
+        used.append(headers.get("Authorization"))
+        raise RuntimeError("falhou")
+
+    monkeypatch.setattr(mgr, "_rpc_http", fake_rpc)
+    with pytest.raises(RuntimeError):
+        mgr.call_tool(srv["id"], "paid", {}, retry_other_accounts=False)
+    assert used == ["Bearer tok-1"]
+
+
+def test_list_tools_caches_and_raises(tmp_path, monkeypatch):
+    mgr, _, _ = _make_manager(tmp_path)
+    srv = _http_server(mgr)
+
+    def fake_rpc(url, method, params, headers, *, req_id=1, timeout=15):
+        assert method == "tools/list"
+        return {"tools": [{"name": "make_song", "inputSchema": {"type": "object"}}]}
+
+    monkeypatch.setattr(mgr, "_rpc_http", fake_rpc)
+    tools = mgr.list_tools(srv["id"], timeout=12)
+    assert [t["name"] for t in tools] == ["make_song"]
+    assert mgr._find_raw(srv["id"])["cached_tools"][0]["name"] == "make_song"
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr(mgr, "_rpc_http", broken)
+    with pytest.raises(RuntimeError):
+        mgr.list_tools(srv["id"])
+
+
+# --- Review T1/T2: itens 3, 4, 5, 6 e 11 ---
+
+
+def _http_401(token):
+    import requests
+
+    resp = requests.Response()
+    resp.status_code = 401
+    return requests.HTTPError(
+        f"401 Client Error: Unauthorized for url: "
+        f"https://api.suno.com/mcp?access_token={token}&x=1 Bearer {token}",
+        response=resp,
+    )
+
+
+def test_safe_error_masks_urls_and_secrets():
+    from src.mcp_connectors import redact_error_text, safe_error
+
+    code, msg = safe_error(_http_401("seg-123"))
+    assert code == "401"
+    assert "seg-123" not in msg
+    assert "https://api.suno.com/mcp" in msg
+    assert "?" not in msg
+    assert "token=••••" in redact_error_text("falhou token=abc&sig=def")
+    assert "abc" not in redact_error_text("falhou token=abc&sig=def")
+    import requests
+
+    assert safe_error(requests.Timeout("t"))[0] == "timeout"
+    assert safe_error(requests.ConnectionError("c"))[0] == "connection"
+    assert safe_error(RuntimeError("x"))[0] == "RuntimeError"
+
+
+def test_call_tool_records_safe_last_error_code(tmp_path, monkeypatch):
+    mgr, _, _ = _make_manager(tmp_path)
+    srv = mgr.save_server(
+        {
+            "id": "s",
+            "name": "S",
+            "url": "https://api.suno.com/mcp",
+            "accounts": [{"id": "a1", "name": "A1", "bearer_token": "tok"}],
+        }
+    )
+
+    def boom(*args, **kwargs):
+        raise _http_401("vazou-999")
+
+    monkeypatch.setattr(mgr, "_rpc_http", boom)
+    with pytest.raises(Exception):
+        mgr.call_tool(srv["id"], "x", {})
+    acc = mgr._find_raw("s")["accounts"][0]
+    assert acc["last_error_code"] == "401"
+    assert "vazou-999" not in json.dumps(mgr._raw_servers())
+
+    # Sem contas: o erro fica no servidor, também sem segredo
+    mgr.save_server(
+        {"id": "s2", "name": "S2", "url": "https://x.test/mcp", "bearer_token": "b"}
+    )
+    with pytest.raises(Exception):
+        mgr.call_tool("s2", "x", {})
+    raw = mgr._find_raw("s2")
+    assert raw["last_error_code"] == "401"
+    assert "vazou-999" not in raw["last_error"]
+
+    # Incremental devolve o erro limpo
+    mgr.save_server(
+        {
+            "id": "inc",
+            "name": "Inc",
+            "url": "https://x.test/mcp",
+            "account_mode": "incremental",
+            "accounts": [{"id": "a", "name": "A", "bearer_token": "t"}],
+        }
+    )
+    res = mgr.call_tool("inc", "x", {})
+    assert "vazou-999" not in json.dumps(res)
+
+
+def test_save_server_preserves_last_error_until_new_credential(tmp_path):
+    mgr, _, _ = _make_manager(tmp_path)
+    mgr.save_server(
+        {"id": "s", "name": "S", "url": "https://x.test", "bearer_token": "b1"}
+    )
+    servers = mgr._raw_servers()
+    servers[0]["last_error"] = "401 Error"
+    servers[0]["last_error_code"] = "401"
+    mgr._save_raw_servers(servers)
+    mgr.save_server({"id": "s", "name": "S renomeado"}, server_id="s")
+    assert mgr._find_raw("s")["last_error_code"] == "401"
+    mgr.save_server({"id": "s", "bearer_token": "b2"}, server_id="s")
+    assert mgr._find_raw("s")["last_error_code"] is None
+
+    # Conta: idem
+    mgr.save_server(
+        {
+            "id": "c",
+            "name": "C",
+            "url": "https://x.test",
+            "accounts": [{"id": "a", "name": "A", "bearer_token": "t1"}],
+        }
+    )
+    servers = mgr._raw_servers()
+    acc = next(s for s in servers if s["id"] == "c")["accounts"][0]
+    acc["last_error_code"] = "401"
+    mgr._save_raw_servers(servers)
+    mgr.save_server({"id": "c", "accounts": [{"id": "a", "name": "A"}]}, server_id="c")
+    assert mgr._find_raw("c")["accounts"][0]["last_error_code"] == "401"
+    mgr.save_server(
+        {"id": "c", "accounts": [{"id": "a", "name": "A", "bearer_token": "t2"}]},
+        server_id="c",
+    )
+    assert mgr._find_raw("c")["accounts"][0]["last_error_code"] is None
+
+
+def test_list_tools_records_and_clears_errors(tmp_path, monkeypatch):
+    mgr, _, _ = _make_manager(tmp_path)
+    mgr.save_server(
+        {
+            "id": "s",
+            "name": "S",
+            "url": "https://x.test",
+            "accounts": [{"id": "a", "name": "A", "bearer_token": "t"}],
+        }
+    )
+
+    def boom(*args, **kwargs):
+        raise _http_401("tk")
+
+    monkeypatch.setattr(mgr, "_rpc_http", boom)
+    with pytest.raises(Exception):
+        mgr.list_tools("s")
+    assert mgr._find_raw("s")["accounts"][0]["last_error_code"] == "401"
+    monkeypatch.setattr(mgr, "_rpc_http", lambda *a, **k: {"tools": []})
+    assert mgr.list_tools("s") == []
+    assert mgr._find_raw("s")["accounts"][0]["last_error_code"] is None
+
+
+def _two_account_server(mgr, mode):
+    return mgr.save_server(
+        {
+            "id": mode,
+            "name": mode,
+            "url": "https://x.test/mcp",
+            "account_mode": mode,
+            "accounts": [
+                {"id": "acc1", "name": "1", "bearer_token": "tok-1"},
+                {"id": "acc2", "name": "2", "bearer_token": "tok-2"},
+            ],
+        }
+    )
+
+
+def test_single_account_in_any_mode_and_pinning(tmp_path, monkeypatch):
+    mgr, _, _ = _make_manager(tmp_path)
+    used = []
+
+    def fake_rpc(url, method, params, headers, *, req_id=1, timeout=15):
+        used.append(headers.get("Authorization"))
+        return {"ok": True}
+
+    monkeypatch.setattr(mgr, "_rpc_http", fake_rpc)
+
+    _two_account_server(mgr, "incremental")
+    res = mgr.call_tool("incremental", "paid", {}, retry_other_accounts=False)
+    assert res == {"ok": True}
+    assert used == ["Bearer tok-1"]  # sem fan-out
+
+    used.clear()
+    _two_account_server(mgr, "distributed")
+    chosen = mgr.select_account("distributed")
+    assert chosen == "acc1"
+    cursor = mgr._find_raw("distributed")["rr_cursor"]
+    for _ in range(3):  # geração + polling na mesma conta, sem girar o cursor
+        mgr.call_tool("distributed", "x", {}, account_id=chosen)
+    assert used == ["Bearer tok-1"] * 3
+    assert mgr._find_raw("distributed")["rr_cursor"] == cursor
+    assert mgr.select_account("distributed") == "acc2"
+
+    used.clear()
+    mgr.list_tools("distributed", account_id="acc2")
+    assert used == ["Bearer tok-2"]
+    with pytest.raises(KeyError):
+        mgr.call_tool("distributed", "x", {}, account_id="nao-existe")
+
+    _two_account_server(mgr, "alternating")
+    assert mgr.select_account("alternating") == "acc1"
+
+
+def test_select_account_without_accounts_returns_none(tmp_path):
+    mgr, _, _ = _make_manager(tmp_path)
+    mgr.save_server(
+        {"id": "s", "name": "S", "url": "https://x.test", "bearer_token": "b"}
+    )
+    assert mgr.select_account("s") is None
+
+
+def test_stateless_initialize_logs_debug_without_secret(tmp_path, monkeypatch, caplog):
+    import logging
+
+    mgr, _, _ = _make_manager(tmp_path)
+    mgr.save_server(
+        {
+            "id": "hs",
+            "name": "HS",
+            "url": "https://mcp.example.com/mcp?api_key=segredo-77",
+            "bearer_token": "hs-secret-token",
+        }
+    )
+    _fake_mcp_server(monkeypatch, init_status=400)
+    with caplog.at_level(logging.DEBUG, logger="src.mcp_connectors"):
+        mgr.call_tool("hs", "do", {})
+    text = caplog.text
+    assert "HTTP 400" in text
+    assert "https://mcp.example.com/mcp" in text
+    assert "segredo-77" not in text
+    assert "hs-secret-token" not in text

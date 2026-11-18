@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Anchor, Button, Stack, Text, TextInput } from "@mantine/core";
 import { api } from "./api";
+import { legalLinks } from "./legal-links";
 import "./login.css";
 
 export default function ServerLogin({ server }) {
@@ -8,6 +9,7 @@ export default function ServerLogin({ server }) {
   const [attempt, setAttempt] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const legal = legalLinks(address, server);
 
   async function begin(event) {
     event.preventDefault();
@@ -111,6 +113,19 @@ export default function ServerLogin({ server }) {
               <img src="/pia/google-signin.png" alt="" />
               Continuar com Google
             </button>
+            <p className="pia-legal-footer">
+              Ao continuar, você concorda com os{" "}
+              <a href={legal.termos} target="_blank" rel="noreferrer">
+                Termos de Serviço
+                <span className="sr-only"> (abre no navegador)</span>
+              </a>{" "}
+              e declara ter lido a{" "}
+              <a href={legal.privacidade} target="_blank" rel="noreferrer">
+                Política de Privacidade
+                <span className="sr-only"> (abre no navegador)</span>
+              </a>
+              .
+            </p>
             <details className="pia-login-options">
               <summary>Usar outro servidor</summary>
               <TextInput

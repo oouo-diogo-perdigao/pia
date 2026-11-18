@@ -122,3 +122,18 @@ def test_tool_loop_uses_results_and_allowlist(monkeypatch):
     responses = iter([first])
     with pytest.raises(ValueError):
         tool_registry.complete_with_tools(Agent(), [], allowed=["pia_music"])
+
+
+# --- Mensagens amigáveis (o SunoMcpAdapter saiu na T8 e os helpers de clip na T9) ---
+
+
+def test_friendly_messages_match_rn06():
+    assert str(service.SunoAuthError()) == (
+        "Autorização do Suno expirou. Reconecte em Configurações → Música"
+    )
+    assert str(service.SunoUnavailableError()) == (
+        "Suno indisponível no momento, tente de novo ou use outro gerador"
+    )
+    assert str(service.SunoTimeoutError()) == (
+        "O Suno não respondeu a tempo; a geração pode ter sido concluída lá"
+    )

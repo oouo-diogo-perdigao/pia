@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Badge,
   Button,
@@ -9,9 +9,10 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-import { Check, KeyRound, Plug } from "lucide-react";
+import { Check, ExternalLink, Info, KeyRound, Plug } from "lucide-react";
 import { api, safe } from "./api";
 import { usePia } from "./shared";
+import { legalLinks, legalServer } from "./legal-links";
 import {
   ICE_SIZE_OPTIONS,
   LLM_MODEL_OPTIONS,
@@ -63,6 +64,87 @@ function VaultLinkRow({ title, description, configured, onOpenVault }) {
         </Button>
       </div>
     </div>
+  );
+}
+
+const LEGAL_ROWS = [
+  {
+    key: "privacidade",
+    title: "Política de Privacidade",
+    description:
+      "Quais dados a PIA coleta, como usa, inclusive em treinamento de modelos, e como pedir acesso ou exclusão.",
+  },
+  {
+    key: "termos",
+    title: "Termos de Serviço",
+    description:
+      "Regras de uso: serviço gratuito, em desenvolvimento e sem garantias.",
+  },
+];
+
+function LegalLinksCard() {
+  const { t } = usePia();
+  const [server, setServer] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    api("/integrations/pia_server/account")
+      .then((account) => {
+        if (active) setServer(legalServer(account?.server));
+      })
+      .catch(() => {
+        if (active) setServer(legalServer());
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const links = server ? legalLinks(server) : null;
+
+  return (
+    <section className="legal-settings" aria-labelledby="sobre-legal-t">
+      <h3 className="settings-section-title" id="sobre-legal-t">
+        {t("Sobre e legal")}
+      </h3>
+      <div className="settings-card">
+        {LEGAL_ROWS.map(({ key, title, description }) => (
+          <div className="settings-row" key={key}>
+            <div className="settings-row-info">
+              <Text size="sm" fw={600}>
+                {t(title)}
+              </Text>
+              <Text size="xs" c="dimmed">
+                {t(description)}
+              </Text>
+            </div>
+            <div className="settings-row-control">
+              <Button
+                component="a"
+                className="legal-settings-action"
+                size="xs"
+                variant="light"
+                href={links?.[key]}
+                target="_blank"
+                rel="noreferrer"
+                disabled={!links}
+                aria-label={t("Abrir no navegador") + ": " + t(title)}
+                rightSection={<ExternalLink size={14} aria-hidden="true" />}
+              >
+                {t("Abrir no navegador")}
+              </Button>
+            </div>
+          </div>
+        ))}
+        <div className="settings-row legal-settings-note">
+          <Text size="xs" c="dimmed">
+            <Info size={14} aria-hidden="true" />{" "}
+            {t("Os links abrem no navegador e usam o servidor configurado:")}{" "}
+            <span className="legal-settings-server">{server || "…"}</span>
+          </Text>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -128,6 +210,8 @@ export default function GeneralSettingsTabs({
             />
           </div>
         </div>
+
+        <LegalLinksCard />
       </Stack>
     );
   }
