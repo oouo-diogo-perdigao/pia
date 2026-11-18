@@ -88,9 +88,10 @@ export const SUNO_TEXT_OAUTH_INVALID =
   "Não foi possível concluir a autorização com o Suno. Tente conectar de novo.";
 export const SUNO_TEXT_ACCOUNT_NOT_FOUND =
   "Esta conta Suno não está mais conectada. Escolha outra conta ou reconecte em Configurações → Música.";
-// RN16: este code nunca bloqueia nem esconde o "Baixar novamente".
+// Só para faixa gerada localmente em outro PC; nunca bloqueia nem esconde o
+// "Baixar novamente" das faixas `redownload` (RN16).
 export const SUNO_TEXT_NOT_ORIGIN =
-  'Esta geração foi iniciada em outro computador. Use "Baixar novamente" no Histórico para trazer as músicas para cá.';
+  "O áudio desta música ficou no computador que a gerou e não pode ser baixado aqui.";
 export const GENERIC_ERROR_TEXT = "Algo deu errado. Tente de novo.";
 
 // --- Codes -> texto ----------------------------------------------------------

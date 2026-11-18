@@ -24,10 +24,17 @@ import {
   replaceHistoryTrack,
   reuseFromHistory,
   trackFromRedownloadEvent,
+  historyDeleteErrorMessage,
   visibleHistoryItems,
 } from "./music-history-helpers.js";
 import { SUNO_REUSE_WARNING } from "./music-helpers.js";
-import { describeSunoError } from "./music-suno-helpers.js";
+import {
+  GENERIC_ERROR_TEXT,
+  PIA_SERVER_SETTINGS_ROUTE,
+  SUNO_TEXT_SERVER_DOWN,
+  SUNO_TEXT_UNPAIRED,
+  describeSunoError,
+} from "./music-suno-helpers.js";
 
 const file = (name) => ({
   file: name,
@@ -302,7 +309,10 @@ describe("music-history-helpers: ação por availability (RN25/RN16)", () => {
       error: "x",
       code: "not_origin_device",
     });
-    assert.match(error.text, /Use "Baixar novamente" no Histórico/);
+    assert.equal(
+      error.text,
+      "O áudio desta música ficou no computador que a gerou e não pode ser baixado aqui.",
+    );
     assert.equal(error.route, null);
     const after = replaceHistoryTrack(
       items,
@@ -568,5 +578,56 @@ describe("music-history-helpers: fallback da biblioteca local", () => {
     assert.equal(items[0].tracks[0].availability, "local_file");
     assert.equal(items[0].count, 2);
     assert.equal(items[1].source, "local");
+  });
+});
+
+describe("music-history-helpers: erros do Excluir (Anexo A)", () => {
+  it("sem conexão: texto próprio, sem atalho", () => {
+    const msg = historyDeleteErrorMessage("pia_server_unreachable");
+    assert.equal(
+      msg.text,
+      "Não foi possível excluir agora porque a PIA Server está sem conexão. Tente de novo quando a conexão voltar.",
+    );
+    assert.equal(msg.route, null);
+    assert.notEqual(msg.text, SUNO_TEXT_SERVER_DOWN);
+  });
+
+  it("não pareado: texto próprio com atalho para PIA Server", () => {
+    const msg = historyDeleteErrorMessage({
+      message:
+        "Para usar o Suno, entre na PIA Server em Configurações → PIA Server.",
+      code: "pia_server_unpaired",
+    });
+    assert.equal(
+      msg.text,
+      "Para excluir itens do histórico da conta, entre na PIA Server em Configurações → PIA Server.",
+    );
+    assert.deepEqual(msg.route, {
+      view: "settings",
+      section: "Connectors/pia_server",
+    });
+    assert.deepEqual(msg.route, PIA_SERVER_SETTINGS_ROUTE);
+    assert.notEqual(msg.text, SUNO_TEXT_UNPAIRED);
+  });
+
+  it("outros codes seguem o mapeamento geral", () => {
+    const err = {
+      message: "Item do histórico não encontrado.",
+      code: "history_item_not_found",
+    };
+    assert.deepEqual(historyDeleteErrorMessage(err), describeSunoError(err));
+    assert.equal(
+      historyDeleteErrorMessage(err).text,
+      "Item do histórico não encontrado.",
+    );
+    assert.equal(historyDeleteErrorMessage(null).text, GENERIC_ERROR_TEXT);
+    assert.equal(historyDeleteErrorMessage("xyz").text, GENERIC_ERROR_TEXT);
+  });
+
+  it("o mapeamento geral (fora do Excluir) não muda", () => {
+    assert.equal(
+      describeSunoError({ code: "pia_server_unpaired" }).text,
+      SUNO_TEXT_UNPAIRED,
+    );
   });
 });

@@ -904,7 +904,7 @@ describe("music-suno-helpers: textos do Anexo A do PO", () => {
     );
     assert.equal(
       sunoErrorText("not_origin_device"),
-      'Esta geração foi iniciada em outro computador. Use "Baixar novamente" no Histórico para trazer as músicas para cá.',
+      "O áudio desta música ficou no computador que a gerou e não pode ser baixado aqui.",
     );
     assert.equal(sunoErrorRoute("not_origin_device"), null);
     assert.equal(

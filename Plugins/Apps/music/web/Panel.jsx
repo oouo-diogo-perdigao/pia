@@ -62,6 +62,7 @@ import {
   HISTORY_REUSE_LABEL,
   applyHistoryPage,
   historyDateLabel,
+  historyDeleteErrorMessage,
   historyFilePath,
   historyFromLibrary,
   historyGeneratorLabel,
@@ -408,8 +409,8 @@ export default function Music({ sub = "principal" }) {
       }));
     } catch (error) {
       // Offline: pia_server_unreachable; não pareado: pia_server_unpaired
-      // (com atalho). O item continua na lista.
-      setHistoryError(describeSunoError(error));
+      // (com atalho). Textos próprios do Excluir; o item continua na lista.
+      setHistoryError(historyDeleteErrorMessage(error));
     }
   }
   // RN16/CA15: "Baixar novamente" vira job; o evento track troca só a faixa.
