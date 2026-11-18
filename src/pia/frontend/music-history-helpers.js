@@ -114,12 +114,13 @@ export function applyHistoryPage(state, response, { append = false } = {}) {
 }
 
 /**
- * Faixa atualizada vinda do evento `track` do job de redownload. Aceita
- * {track}, {item} no formato de faixa do histórico, ou {item} no formato da
- * biblioteca (/music: tem `file` string e `audio_url`).
+ * Faixa atualizada vinda do job de redownload. Aceita o evento `track`
+ * ({track}, {item} no formato de faixa do histórico, ou {item} no formato da
+ * biblioteca: `file` string e `audio_url`) e o `done` da T6
+ * ({result: {track, history_id}}).
  */
 export function trackFromRedownloadEvent(event) {
-  const raw = event?.track || event?.item || null;
+  const raw = event?.track || event?.item || event?.result?.track || null;
   if (!raw || typeof raw !== "object") return null;
   if (raw.availability || raw.file?.audio_url || raw.n != null) {
     const out = { ...raw };

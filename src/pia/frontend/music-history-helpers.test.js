@@ -182,6 +182,35 @@ describe("music-history-helpers: evento track do redownload", () => {
     assert.equal(trackFromRedownloadEvent({ item: { foo: 1 } }), null);
     assert.equal(trackFromRedownloadEvent({}), null);
   });
+  it("formatos reais da T6 (a19ccb6): track {item, track, history_id} e done {result}", () => {
+    const payload = {
+      n: 2,
+      title: "B+",
+      duration: 20,
+      extra: true,
+      label: "Suno · extra",
+      availability: "local_file",
+      file: file("e.mp3"),
+    };
+    // `item` é o arquivo da biblioteca; a faixa vem em `track`.
+    assert.deepEqual(
+      trackFromRedownloadEvent({
+        type: "track",
+        item: file("e.mp3"),
+        track: payload,
+        history_id: "h-1",
+      }),
+      payload,
+    );
+    assert.deepEqual(
+      trackFromRedownloadEvent({
+        type: "done",
+        result: { track: payload, history_id: "h-1" },
+      }),
+      payload,
+    );
+    assert.equal(trackFromRedownloadEvent({ type: "done", result: {} }), null);
+  });
 });
 
 describe("music-history-helpers: ação por availability (RN25/RN16)", () => {

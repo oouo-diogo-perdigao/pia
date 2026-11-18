@@ -452,6 +452,13 @@ export default function Music({ sub = "principal" }) {
           finish();
         }
         if (event.type === "done") {
+          // A T6 repete a faixa em result.track: cobre um "track" perdido.
+          const updated = trackFromRedownloadEvent(event);
+          if (updated)
+            setHistory((old) => ({
+              ...old,
+              items: replaceHistoryTrack(old.items, item.id, track.n, updated),
+            }));
           finish();
           refresh().catch(() => {});
         }
