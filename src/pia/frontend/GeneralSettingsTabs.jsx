@@ -9,10 +9,10 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-import { Check, ExternalLink, KeyRound, Plug } from "lucide-react";
+import { Check, ExternalLink, Info, KeyRound, Plug } from "lucide-react";
 import { api, safe } from "./api";
 import { usePia } from "./shared";
-import { legalLinks } from "./legal-links";
+import { legalLinks, legalServer } from "./legal-links";
 import {
   ICE_SIZE_OPTIONS,
   LLM_MODEL_OPTIONS,
@@ -67,61 +67,84 @@ function VaultLinkRow({ title, description, configured, onOpenVault }) {
   );
 }
 
+const LEGAL_ROWS = [
+  {
+    key: "privacidade",
+    title: "Política de Privacidade",
+    description:
+      "Quais dados a PIA coleta, como usa, inclusive em treinamento de modelos, e como pedir acesso ou exclusão.",
+  },
+  {
+    key: "termos",
+    title: "Termos de Serviço",
+    description:
+      "Regras de uso: serviço gratuito, em desenvolvimento e sem garantias.",
+  },
+];
+
 function LegalLinksCard() {
   const { t } = usePia();
-  const [links, setLinks] = useState(null);
+  const [server, setServer] = useState(null);
 
   useEffect(() => {
     let active = true;
     api("/integrations/pia_server/account")
       .then((account) => {
-        if (active) setLinks(legalLinks(account?.server));
+        if (active) setServer(legalServer(account?.server));
       })
       .catch(() => {
-        if (active) setLinks(legalLinks());
+        if (active) setServer(legalServer());
       });
     return () => {
       active = false;
     };
   }, []);
 
-  const rows = [
-    { key: "privacidade", title: "Política de Privacidade" },
-    { key: "termos", title: "Termos de Serviço" },
-  ];
+  const links = server ? legalLinks(server) : null;
 
   return (
-    <div>
-      <div className="settings-section-title">{t("Sobre e legal")}</div>
+    <section className="legal-settings" aria-labelledby="sobre-legal-t">
+      <h3 className="settings-section-title" id="sobre-legal-t">
+        {t("Sobre e legal")}
+      </h3>
       <div className="settings-card">
-        {rows.map(({ key, title }) => (
+        {LEGAL_ROWS.map(({ key, title, description }) => (
           <div className="settings-row" key={key}>
             <div className="settings-row-info">
               <Text size="sm" fw={600}>
                 {t(title)}
               </Text>
               <Text size="xs" c="dimmed">
-                {t("Abre no navegador a página do servidor PIA configurado.")}
+                {t(description)}
               </Text>
             </div>
             <div className="settings-row-control">
               <Button
                 component="a"
+                className="legal-settings-action"
                 size="xs"
                 variant="light"
                 href={links?.[key]}
                 target="_blank"
                 rel="noreferrer"
                 disabled={!links}
-                rightSection={<ExternalLink size={14} />}
+                aria-label={t("Abrir no navegador") + ": " + t(title)}
+                rightSection={<ExternalLink size={14} aria-hidden="true" />}
               >
-                {t("Abrir")}
+                {t("Abrir no navegador")}
               </Button>
             </div>
           </div>
         ))}
+        <div className="settings-row legal-settings-note">
+          <Text size="xs" c="dimmed">
+            <Info size={14} aria-hidden="true" />{" "}
+            {t("Os links abrem no navegador e usam o servidor configurado:")}{" "}
+            <span className="legal-settings-server">{server || "…"}</span>
+          </Text>
+        </div>
       </div>
-    </div>
+    </section>
   );
 }
 
