@@ -830,3 +830,28 @@ button:disabled {
 .chat-mcp-account-badge {
   letter-spacing: 0.01em;
 }
+/* Card "Sobre e legal" (feature 0002, spec UX 3.2). O foco padrão do Mantine
+   (#523b88) dá 1,74:1 no card; nos elementos novos usamos #b6a2ff (7,16:1). */
+.legal-settings {
+  margin: 0;
+}
+h3.settings-section-title {
+  margin-top: 0;
+  line-height: inherit;
+}
+.legal-settings-note {
+  padding-block: 10px;
+}
+.legal-settings-note svg {
+  vertical-align: -2px;
+  margin-right: 4px;
+}
+.legal-settings-server {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: #c6bed8;
+  overflow-wrap: anywhere;
+}
+.settings-card .legal-settings-action:focus-visible {
+  outline: 2px solid #b6a2ff;
+  outline-offset: 2px;
+}

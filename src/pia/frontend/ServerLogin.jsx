@@ -113,14 +113,16 @@ export default function ServerLogin({ server }) {
               <img src="/pia/google-signin.png" alt="" />
               Continuar com Google
             </button>
-            <p className="pia-login-legal">
+            <p className="pia-legal-footer">
               Ao continuar, você concorda com os{" "}
               <a href={legal.termos} target="_blank" rel="noreferrer">
                 Termos de Serviço
+                <span className="sr-only"> (abre no navegador)</span>
               </a>{" "}
               e declara ter lido a{" "}
               <a href={legal.privacidade} target="_blank" rel="noreferrer">
                 Política de Privacidade
+                <span className="sr-only"> (abre no navegador)</span>
               </a>
               .
             </p>
