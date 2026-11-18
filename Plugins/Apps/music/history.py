@@ -629,10 +629,14 @@ def list_history(cursor: Any = None, limit: Any = PAGE_LIMIT) -> dict[str, Any]:
             upper = state.get("b")
             # Local-only items (queued, never sent, legacy) between the previous
             # page boundary and this one; all the rest on the last page.
+            # An entry that already has a server id (synced or re-downloaded)
+            # is the server's: if it is not listed, it was deleted, possibly on
+            # another PC (CA24/RN25). Hide it; the file stays in the folder.
+            synced = {e["id"] for e in local_entries.values() if e.get("generation_id")}
             extra = [
                 i
                 for i in _local_items(
-                    tombstones, exclude=seen | set(state.get("x") or [])
+                    tombstones, exclude=seen | synced | set(state.get("x") or [])
                 )
                 if (upper is None or (i["created_at"] or "") < upper)
                 and (not next_server or (i["created_at"] or "") >= oldest)
