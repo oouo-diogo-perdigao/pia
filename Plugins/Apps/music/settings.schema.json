@@ -25,5 +25,11 @@
     "default": "lyria-3.5",
     "label": "Music Gemini Model",
     "link": "https://aistudio.google.com/apikey"
+  },
+  {
+    "name": "MUSIC_SUNO_ACCOUNT_ID",
+    "type": "string",
+    "default": "",
+    "label": "Suno Account"
   }
 ]

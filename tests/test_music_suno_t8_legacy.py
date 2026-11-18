@@ -136,8 +136,9 @@ def test_catalog_keeps_suno_mcp_id_without_local_mode_fields(legacy):
     suno = next(p for p in catalog["providers"] if p["id"] == "suno_mcp")
     assert suno["label"] == "Suno"
     assert suno["available"] is False
-    assert suno["reason"] == "pia_server_unsupported"
-    assert suno["hint"]["text"].startswith("Não foi possível falar com a PIA Server")
+    # T6: the seam asks the PIA Server; the test profile is not paired.
+    assert suno["reason"] == "pia_server_unpaired"
+    assert suno["hint"]["text"].startswith("Para usar o Suno, entre na PIA Server")
     assert suno["legacy_credentials"] == {"present": True, "prompt": True}
     for gone in (
         "url",
@@ -175,7 +176,8 @@ def test_remote_status_seam_drives_catalog_and_refusal(legacy, monkeypatch):
     status = service.suno_status()
     assert status["hint"] == {
         "text": "Para usar o Suno, entre na PIA Server em Configurações → PIA Server.",
-        "route": "settings/pia_server",
+        # T6: route object accepted by navigate() (proposta-api-T7 item 5).
+        "route": {"view": "settings", "section": "Connectors/pia_server"},
     }
     assert service.suno_job_refusal().code == "pia_server_unpaired"
     monkeypatch.setattr(
@@ -196,9 +198,10 @@ def test_batch_without_server_client_never_calls_the_suno(legacy, monkeypatch):
 
     monkeypatch.setattr("requests.post", no_network)
     monkeypatch.setattr("requests.Session.request", no_network)
-    with pytest.raises(service.SunoUnavailableError) as err:
+    # T6: refused by the PIA Server seam (not paired) before any call.
+    with pytest.raises(service.SunoJobRefusedError) as err:
         service.generate_suno_batch("piano", "", 30, 1)
-    assert err.value.code == "suno_unavailable"
+    assert err.value.code == "pia_server_unpaired"
     assert (err.value.completed, err.value.total) == (0, 1)
     assert not hasattr(service, "suno_oauth_start")
     assert not hasattr(service, "_ensure_suno_mcp_server")

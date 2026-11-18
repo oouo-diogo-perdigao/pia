@@ -824,16 +824,10 @@ class WorkspaceService:
 
             return get_tts_service().selection()
         if path == "/music/providers":
-            from Plugins.Apps.music import service as music_service
-
-            return music_service.providers_catalog()
+            # T6: through the music app API (resumes this PC's Suno job).
+            return self.apps.load("music").route("GET", path, data, query, self)
         if path == "/music/select" and method == "POST":
-            from Plugins.Apps.music import service as music_service
-
-            return music_service.select_provider(
-                provider=data.get("provider"),
-                gemini_model=data.get("gemini_model"),
-            )
+            return self.apps.load("music").route(method, path, data, query, self)
         if path == "/music/suno/legacy-credentials" and method == "GET":
             from Plugins.Apps.music import suno_legacy
 
@@ -846,6 +840,10 @@ class WorkspaceService:
             from Plugins.Apps.music import suno_legacy
 
             return suno_legacy.dismiss_legacy()
+        if path.startswith("/music/"):
+            # T6: catalog, select, Suno via PIA Server and history live in the
+            # music app API (shared job registry with /apps/music/*).
+            return self.apps.load("music").route(method, path, data, query, self)
         if path == "/mcp/servers":
             from src.mcp_connectors import ACCOUNT_MODES, get_mcp_manager
 

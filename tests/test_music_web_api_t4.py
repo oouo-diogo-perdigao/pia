@@ -70,10 +70,26 @@ def _item(n):
     }
 
 
+class _NoServerBackend:
+    """T6 seam faked: the server job is not created (the batch is faked)."""
+
+    @staticmethod
+    def create(data, account):
+        return None
+
+
+def _server_ready(monkeypatch):
+    monkeypatch.setattr(
+        service, "suno_job_account", lambda *_a: {"id": "acc-1", "label": "a@suno"}
+    )
+    monkeypatch.setattr(service, "suno_backend", lambda: _NoServerBackend())
+
+
 @pytest.fixture
 def suno_ready(monkeypatch):
     """Suno available (status faked) and no known secret by default."""
     monkeypatch.setattr(service, "suno_job_refusal", lambda: None)
+    _server_ready(monkeypatch)
     monkeypatch.setattr(service, "suno_known_secrets", lambda: [PLANTED])
 
     def no_chat_generate(**_kw):
@@ -291,6 +307,7 @@ def test_secret_rotated_during_job_never_leaks(monkeypatch):
     that appears during the job is redacted in event.error, logs and the
     notification."""
     monkeypatch.setattr(service, "suno_job_refusal", lambda: None)
+    _server_ready(monkeypatch)
     known = ["initial-device-token-0001"]
     monkeypatch.setattr(service, "suno_known_secrets", lambda: list(known))
     rotated = "rotated-device-token-7777"
@@ -384,14 +401,15 @@ def test_expired_suno_refused_before_job_suno_credential_expired(monkeypatch):
     assert context.jobs == {} and web_api._latest is None and called == []
 
 
-def test_suno_not_wired_to_server_is_refused_pia_server_unsupported(monkeypatch):
-    # T8: until T6 wires the PIA Server client, Suno is unavailable.
+def test_unpaired_suno_is_refused_pia_server_unpaired(monkeypatch):
+    # T6 replaces the T8 placeholder (pia_server_unsupported): the seam now
+    # asks the PIA Server, and this PC is not paired in the test profile.
     called = []
     monkeypatch.setattr(service, "generate_suno_batch", lambda **k: called.append(k))
     context = Context()
     with pytest.raises(service.SunoJobRefusedError) as err:
         web_api.handle("generate", {**SUNO, "count": 1}, context)
-    assert err.value.code == "pia_server_unsupported"
+    assert err.value.code == "pia_server_unpaired"
     assert context.jobs == {} and called == []
 
 
