@@ -218,6 +218,45 @@ describe("music-history-helpers: ação por availability (RN25/RN16)", () => {
       "Áudio no computador que gerou",
     );
   });
+  it("áudio local apagado (T6): availability null e file null, sem ação", () => {
+    assert.deepEqual(historyTrackAction({ availability: null, file: null }), {
+      kind: "none",
+    });
+    const page = normalizeHistoryPage({
+      items: [
+        {
+          id: "z",
+          provider: "local",
+          suno_account: null,
+          tracks: [{ n: 1, availability: null, file: null }],
+        },
+      ],
+    });
+    assert.equal(page.items[0].suno_account, null);
+    assert.equal(historyTrackTitle(page.items[0].tracks[0]), "Versão 1");
+    assert.equal(historyTrackLabel(page.items[0].tracks[0]), "");
+  });
+
+  it("evento track do redownload da T6 ({item, track, history_id})", () => {
+    const payload = {
+      n: 2,
+      title: "T",
+      extra: true,
+      label: "Suno · extra",
+      availability: "local_file",
+      file: file("b.mp3"),
+    };
+    assert.deepEqual(
+      trackFromRedownloadEvent({
+        type: "track",
+        item: payload.file,
+        track: payload,
+        history_id: "1",
+      }),
+      payload,
+    );
+  });
+
   it("valor desconhecido (inclusive o other_device_suno removido) não tem ação", () => {
     for (const availability of ["other_device_suno", "xyz", undefined, null])
       assert.deepEqual(historyTrackAction({ availability }), { kind: "none" });

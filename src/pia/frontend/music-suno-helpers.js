@@ -202,6 +202,23 @@ export function normalizeSettingsRoute(route) {
   return null;
 }
 
+/**
+ * hint do backend: objeto {text, route:{view, section}|null} (T6) ou, por
+ * defesa, string (só texto). `explicitRoute` diz se o backend decidiu o
+ * atalho (route presente, inclusive null = sem atalho).
+ */
+export function parseHint(hint) {
+  if (typeof hint === "string")
+    return { text: hint.trim(), route: null, explicitRoute: false };
+  if (!hint || typeof hint !== "object")
+    return { text: "", route: null, explicitRoute: false };
+  return {
+    text: typeof hint.text === "string" ? hint.text.trim() : "",
+    route: normalizeSettingsRoute(hint.route),
+    explicitRoute: "route" in hint,
+  };
+}
+
 // --- Contas Suno (RN06/RN07/RN09) -------------------------------------------
 const EXPIRED_STATES = new Set(["expired", "refresh_failed"]);
 const ACTIVE_JOB_STATES = new Set(["queued", "pending", "running"]);
@@ -243,6 +260,7 @@ export function sunoAccounts(catalogOrItem) {
         usable,
         reason: acc.reason || null,
         hint: acc.hint || null,
+        hintText: parseHint(acc.hint).text,
         expiresAt: acc.expires_at || null,
         activeJob:
           acc.active_job && typeof acc.active_job === "object"
@@ -348,9 +366,11 @@ export function findActiveSunoJob(catalogOrItem) {
   }
   for (const { job, accountId } of candidates) {
     const state = String(job.state || "running").toLowerCase();
-    if (!ACTIVE_JOB_STATES.has(state) || !job.job_id) continue;
+    // job_id pode vir null (T6): o job existe e bloqueia o Gerar, mas não
+    // há o que acompanhar pelo watchJob.
+    if (!ACTIVE_JOB_STATES.has(state)) continue;
     return {
-      jobId: String(job.job_id),
+      jobId: job.job_id ? String(job.job_id) : null,
       state,
       thisDevice: job.this_device === true,
       accountId: accountId != null ? String(accountId) : null,
@@ -368,7 +388,7 @@ export function findActiveSunoJob(catalogOrItem) {
  */
 export function resolveResumeJob(catalog, followingJobId = null) {
   const job = findActiveSunoJob(catalog);
-  if (!job || !job.thisDevice) return null;
+  if (!job || !job.thisDevice || !job.jobId) return null;
   return job.jobId === followingJobId ? null : job.jobId;
 }
 
@@ -380,7 +400,7 @@ export function resolveResumeJob(catalog, followingJobId = null) {
 export function activeJobBlockText(catalog, followingJobId = null) {
   const job = findActiveSunoJob(catalog);
   if (!job) return "";
-  return followingJobId && job.jobId === String(followingJobId)
+  return followingJobId && job.jobId && job.jobId === String(followingJobId)
     ? ""
     : SUNO_TEXT_JOB_ACTIVE;
 }
@@ -440,7 +460,7 @@ export function sunoUnavailableHint(catalog) {
   const item = findSunoProvider(catalog);
   if (item?.available === true) return null;
   const reason = item?.reason || null;
-  const backendRoute = normalizeSettingsRoute(item?.hint?.route);
+  const backendHint = parseHint(item?.hint);
   const accounts = sunoAccounts(item);
   let text;
   let route;
@@ -463,17 +483,17 @@ export function sunoUnavailableHint(catalog) {
     text = SUNO_TEXT_NOT_CONNECTED;
     route = MUSIC_SETTINGS_ROUTE;
   } else {
-    text = item?.hint?.text || SUNO_TEXT_NOT_CONNECTED;
+    text = backendHint.text || SUNO_TEXT_NOT_CONNECTED;
     route = MUSIC_SETTINGS_ROUTE;
   }
-  return {
-    text,
-    route: route
-      ? {
-          ...(reason === "pia_server_unpaired" ? route : backendRoute || route),
-        }
-      : null,
-  };
+  // Com hint objeto do backend, vale o route dele (null = sem atalho);
+  // sem hint (ou hint string), o atalho padrão do motivo.
+  if (backendHint.explicitRoute)
+    return {
+      text,
+      route: backendHint.route ? { ...backendHint.route } : null,
+    };
+  return { text, route: route ? { ...route } : null };
 }
 
 // --- Connect assíncrono (RN06/CA04/CA07) -------------------------------------
@@ -565,10 +585,11 @@ export function disconnectConfirmText(account) {
 }
 
 // --- Apelido da conta (RN07) ---------------------------------------------
-// Rota num lugar só: a T6 pode trocar para POST .../rename {label}.
-export const SUNO_RENAME_METHOD = "PATCH";
+// Rota num lugar só. A T6 (435c4cd) usa POST .../rename {label}, porque o
+// servidor local não tem do_PATCH; label inválido -> 400 invalid_label.
+export const SUNO_RENAME_METHOD = "POST";
 export const sunoRenamePath = (accountId) =>
-  "/music/suno/accounts/" + encodeURIComponent(String(accountId));
+  "/music/suno/accounts/" + encodeURIComponent(String(accountId)) + "/rename";
 
 /** {path, method, data} do apelido; label vazio/igual devolve null. */
 export function buildSunoRenameRequest(account, label) {

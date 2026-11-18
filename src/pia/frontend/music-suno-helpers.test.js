@@ -28,6 +28,7 @@ import {
   hasLegacyCredentials,
   legacyCredentialsState,
   normalizeSettingsRoute,
+  parseHint,
   pollSunoConnect,
   progressDisplay,
   progressReadyText,
@@ -319,15 +320,36 @@ describe("music-suno-helpers: job ativo (RN10/RN15)", () => {
     assert.equal(resolveResumeJob(cat), null);
   });
 
-  it("ignora job terminal ou sem job_id", () => {
+  it("ignora job terminal", () => {
     for (const active_job of [
       { job_id: "j", state: "completed" },
       { job_id: "j", state: "interrupted" },
-      { state: "running" },
       null,
     ])
       assert.equal(findActiveSunoJob(catalogWith({ active_job })), null);
     assert.equal(findActiveSunoJob(null), null);
+  });
+
+  it("job_id null (T6): bloqueia o Gerar, mas não retoma pelo watchJob", () => {
+    const cat = catalogWith({
+      accounts: [account("a")],
+      active_job: {
+        job_id: null,
+        state: "running",
+        this_device: true,
+        suno_account_id: "a",
+        completed: 0,
+        total: 2,
+        extra_ready: 0,
+      },
+    });
+    const job = findActiveSunoJob(cat);
+    assert.equal(job.jobId, null);
+    assert.equal(job.thisDevice, true);
+    assert.equal(resolveResumeJob(cat), null);
+    assert.equal(resolveResumeJob(cat, null), null);
+    assert.equal(activeJobBlockText(cat), SUNO_TEXT_JOB_ACTIVE);
+    assert.equal(activeJobBlockText(cat, null), SUNO_TEXT_JOB_ACTIVE);
   });
 
   it("job ativo bloqueia o Gerar do Suno para qualquer conta, salvo o acompanhado", () => {
@@ -664,12 +686,12 @@ describe("music-suno-helpers: connect assíncrono (RN06/CA04/CA07)", () => {
 });
 
 describe("music-suno-helpers: apelido, credenciais antigas e progresso", () => {
-  it("apelido usa a rota única (PATCH /music/suno/accounts/<id>)", () => {
+  it("apelido usa a rota única (POST /music/suno/accounts/<id>/rename)", () => {
     assert.deepEqual(
       buildSunoRenameRequest({ id: "a b", label: "Velho" }, "  Novo "),
       {
-        path: "/music/suno/accounts/a%20b",
-        method: "PATCH",
+        path: "/music/suno/accounts/a%20b/rename",
+        method: "POST",
         data: { label: "Novo" },
       },
     );
@@ -731,6 +753,112 @@ describe("music-suno-helpers: apelido, credenciais antigas e progresso", () => {
     );
     assert.equal(connectionNotice({ connection: "ok" }), "");
     assert.equal(connectionNotice(null), "");
+  });
+});
+
+describe("music-suno-helpers: formatos finais da T6 (435c4cd)", () => {
+  it("parseHint aceita objeto e string", () => {
+    assert.deepEqual(
+      parseHint({
+        text: " t ",
+        route: { view: "settings", section: "Apps/music" },
+      }),
+      {
+        text: "t",
+        route: { view: "settings", section: "Apps/music" },
+        explicitRoute: true,
+      },
+    );
+    assert.deepEqual(parseHint({ text: "t", route: null }), {
+      text: "t",
+      route: null,
+      explicitRoute: true,
+    });
+    assert.deepEqual(parseHint("só texto"), {
+      text: "só texto",
+      route: null,
+      explicitRoute: false,
+    });
+    assert.deepEqual(parseHint(null), {
+      text: "",
+      route: null,
+      explicitRoute: false,
+    });
+  });
+
+  it("hint.route null do backend: dica sem atalho", () => {
+    const hint = sunoUnavailableHint(
+      catalogWith({
+        available: false,
+        reason: "suno_not_connected",
+        hint: {
+          text: "Conecte o Suno em Configurações → Música.",
+          route: null,
+        },
+      }),
+    );
+    assert.deepEqual(hint, { text: SUNO_TEXT_NOT_CONNECTED, route: null });
+  });
+
+  it("hint string (defesa): mantém o atalho padrão do motivo", () => {
+    const hint = sunoUnavailableHint(
+      catalogWith({
+        available: false,
+        reason: "pia_server_unpaired",
+        hint: "texto antigo",
+      }),
+    );
+    assert.deepEqual(hint, {
+      text: SUNO_TEXT_UNPAIRED,
+      route: PIA_SERVER_SETTINGS_ROUTE,
+    });
+  });
+
+  it("hint do item na T6 para não pareado traz o route da PIA Server", () => {
+    const hint = sunoUnavailableHint(
+      catalogWith({
+        available: false,
+        reason: "pia_server_unpaired",
+        hint: { text: "x", route: { ...PIA_SERVER_SETTINGS_ROUTE } },
+      }),
+    );
+    assert.deepEqual(hint.route, PIA_SERVER_SETTINGS_ROUTE);
+  });
+
+  it("conta indisponível traz reason e hint (texto em hintText)", () => {
+    const [acc] = sunoAccounts(
+      catalogWith({
+        accounts: [
+          account("x", {
+            credential_state: "unavailable",
+            available: false,
+            reason: "suno_credential_expired",
+            hint: {
+              text: "A conexão com o Suno expirou. Reconecte em Configurações → Música.",
+              route: { view: "settings", section: "Apps/music" },
+            },
+          }),
+        ],
+      }),
+    );
+    assert.equal(acc.usable, false);
+    assert.equal(acc.expired, true);
+    assert.equal(acc.reason, "suno_credential_expired");
+    assert.match(acc.hintText, /expirou/);
+    assert.equal(
+      sunoAccounts(catalogWith({ accounts: [account("y")] }))[0].hintText,
+      "",
+    );
+  });
+
+  it("invalid_label usa a mensagem do backend", () => {
+    const err = Object.assign(
+      new Error(
+        "O apelido da conta Suno deve ter de 1 a 80 caracteres, sem caracteres de controle.",
+      ),
+      { code: "invalid_label", details: {} },
+    );
+    assert.match(describeSunoError(err).text, /de 1 a 80 caracteres/);
   });
 });
 

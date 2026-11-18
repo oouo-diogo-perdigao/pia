@@ -611,6 +611,14 @@ export default function MusicSettingsPanel() {
                       </Badge>
                     </Group>
                   )}
+                  {renaming?.id !== account.id &&
+                    !account.usable &&
+                    !account.expired &&
+                    account.hintText && (
+                      <Text size="xs" c="dimmed">
+                        {account.hintText}
+                      </Text>
+                    )}
                 </div>
                 <div className="settings-row-control">
                   <Group gap="xs" wrap="wrap">
