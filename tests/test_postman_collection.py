@@ -49,25 +49,32 @@ def test_catalogue_matches_generated_artifact_and_real_dispatch():
     assert (
         next(v for v in collection["variable"] if v["key"] == "api_key")["value"] == ""
     )
-    # Shape T1 de /music/providers e /music/select (sem segredos em claro).
+    # /music/select e /music/providers sem o modo Suno local/manual (T8, RN18).
     select = next(r for r in requests if r["url"].endswith("/api/pia/music/select"))
-    select_body = json.loads(select["body"]["raw"])
-    assert select_body["provider"] in {"local", "gemini", "suno_mcp"}
-    assert "suno_mcp_url" in select_body
-    assert "suno_mcp_auth_type" in select_body
-    assert select_body.get("suno_mcp_token") == ""
-    assert select_body.get("suno_mcp_client_secret") == ""
+    assert json.loads(select["body"]["raw"]) == {
+        "provider": "suno_mcp",
+        "gemini_model": "lyria-3.5",
+    }
     providers = next(
         r for r in requests if r["url"].endswith("/api/pia/music/providers")
     )
-    assert "credential_state" in providers.get("description", "")
-    assert "settings_route" in providers.get("description", "")
+    for key in ("credential_state", "reason", "legacy_credentials"):
+        assert key in providers.get("description", "")
     app_select = next(
         r for r in requests if r["url"].endswith("/api/pia/apps/music/select")
     )
-    app_body = json.loads(app_select["body"]["raw"])
-    assert app_body["provider"] in {"local", "gemini", "suno_mcp"}
-    assert app_body.get("suno_mcp_token") == ""
+    assert json.loads(app_select["body"]["raw"]) == json.loads(select["body"]["raw"])
+    assert not any("/suno/oauth" in path or "suno-oauth" in path for _, path in routes)
+    assert ("GET", "/api/pia/music/suno/legacy-credentials") in routes
+    remove = next(
+        r
+        for r in requests
+        if r["url"].endswith("/api/pia/music/suno/legacy-credentials/remove")
+    )
+    assert remove["method"] == "POST"
+    assert json.loads(remove["body"]["raw"]) == {"confirm": True}
+    assert "confirmation_required" in remove["description"]
+    assert ("POST", "/api/pia/music/suno/legacy-credentials/dismiss") in routes
 
     app_generate = next(
         item
@@ -83,7 +90,7 @@ def test_catalogue_matches_generated_artifact_and_real_dispatch():
     assert examples and examples[0]["code"] == 400
     example_body = json.loads(examples[0]["body"])
     assert example_body == {
-        "error": "Conecte o Suno em Configurações → Música",
+        "error": "Conecte o Suno em Configurações → Música.",
         "code": "suno_not_connected",
     }
     v1_generate = next(

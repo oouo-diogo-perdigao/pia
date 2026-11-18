@@ -1,22 +1,18 @@
 """T4: job worker of the music app (partial batches, codes, redaction).
 
-Only fakes and the local mock MCP (tests/fixtures/fake_suno_mcp.py): no real
-Suno call. Concurrency uses Event/release (no sleep) and every worker thread
+Only fakes: no real Suno call (the local mock MCP integration left in T8,
+RN18; T6 adds the fake PIA Server). Concurrency uses Event/release (no sleep) and every worker thread
 is joined.
 """
 
 import json
-import sys
 import threading
-from types import SimpleNamespace
 
 import pytest
 
 from Plugins.Apps.music import service
-from Plugins.Apps.music import tools as music_tools
 from Plugins.Apps.music import web_api
 from src import mcp_connectors
-from tests.fixtures.fake_suno_mcp import FakeSunoMcpServer
 
 PLANTED = "planted-secret-token-123"
 WAIT = 10
@@ -277,78 +273,6 @@ def test_unexpected_exception_is_generic_and_detail_goes_to_redacted_log(
     assert "KeyError" in logs and PLANTED not in logs
 
 
-def test_secret_rotated_during_job_never_leaks(tmp_path, monkeypatch):
-    """A refresh in the middle of the batch writes new secrets: they must be
-    redacted in event.error, the logs and the notification."""
-    mgr = _isolated_manager(tmp_path, monkeypatch)
-    mgr.save_server(
-        {
-            "id": "suno_mcp",
-            "name": "Suno",
-            "transport": "http_streaming",
-            "url": "https://mcp.example.invalid/mcp",
-            "bearer_token": "initial-bearer-0001",
-        },
-        server_id="suno_mcp",
-    )
-    monkeypatch.setattr(service, "suno_job_refusal", lambda: None)
-    new_access, new_refresh, new_client = (
-        "rotated-access-token-7777",
-        "rotated-refresh-token-8888",
-        "rotated-client-secret-9999",
-    )
-
-    def behaviour(on_track, progress, **_kw):
-        progress("antes do refresh com initial-bearer-0001")
-        # Refresh in the middle of the batch (vault rotated by mcp_connectors).
-        mgr._set_secret("suno_mcp", "_server", "oauth_access_token", new_access)
-        mgr._set_secret("suno_mcp", "_server", "oauth_refresh_token", new_refresh)
-        mgr._set_secret("suno_mcp", "_server", "oauth_client_secret", new_client)
-        progress(f"depois do refresh: {new_access} {new_refresh} {new_client}")
-        on_track(_item(1), 1, 3)
-        exc = service.SunoUnavailableError(
-            f"Suno caiu ({new_access} / {new_refresh} / {new_client})"
-        )
-        exc.completed, exc.total = 1, 3
-        raise exc
-
-    _fake_batch(monkeypatch, behaviour)
-    context = Context()
-    job = _run(context, {**SUNO, "count": 3})
-
-    error = _error(job)
-    assert error["error"].startswith("Suno caiu (")
-    blob = json.dumps(job.events, ensure_ascii=False) + json.dumps(
-        context.notifications, ensure_ascii=False
-    )
-    for needle in ("initial-bearer-0001", new_access, new_refresh, new_client):
-        assert needle not in blob, needle
-    assert len(_events(job, "log")) == 2
-    assert context.notifications[-1][2] == (
-        "1 de 3 músicas prontas (geração interrompida)"
-    )
-
-
-def test_known_secrets_include_refresh_and_client_secret(tmp_path, monkeypatch):
-    mgr = _isolated_manager(tmp_path, monkeypatch)
-    mgr.save_server(
-        {
-            "id": "suno_mcp",
-            "name": "Suno",
-            "transport": "http_streaming",
-            "url": "https://mcp.example.invalid/mcp",
-            "accounts": [{"id": "acc1", "name": "Conta"}],
-        },
-        server_id="suno_mcp",
-    )
-    mgr._set_secret("suno_mcp", "acc1", "oauth_access_token", "acc-access-1")
-    mgr._set_secret("suno_mcp", "acc1", "oauth_refresh_token", "acc-refresh-1")
-    mgr._set_secret("suno_mcp", "acc1", "oauth_client_secret", "acc-client-1")
-    known = service.suno_known_secrets()
-    for value in ("acc-access-1", "acc-refresh-1", "acc-client-1"):
-        assert value in known
-
-
 def test_redact_secrets_rules():
     text = (
         "Bearer abc.def https://h/p?sig=1&X-Amz-Signature=2 "
@@ -362,18 +286,49 @@ def test_redact_secrets_rules():
     assert service.redact_secrets(None) == ""
 
 
-def test_known_secrets_is_the_resolved_token(tmp_path, monkeypatch):
-    _isolated_manager(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        service, "_suno_resolve", lambda include_secrets=False: {"token": " tk-1 "}
+def test_secret_rotated_during_job_never_leaks(monkeypatch):
+    """The worker reads the known secrets again for every log/error: a secret
+    that appears during the job is redacted in event.error, logs and the
+    notification."""
+    monkeypatch.setattr(service, "suno_job_refusal", lambda: None)
+    known = ["initial-device-token-0001"]
+    monkeypatch.setattr(service, "suno_known_secrets", lambda: list(known))
+    rotated = "rotated-device-token-7777"
+
+    def behaviour(on_track, progress, **_kw):
+        progress("antes com initial-device-token-0001")
+        known.append(rotated)
+        progress(f"depois: {rotated}")
+        on_track(_item(1), 1, 3)
+        exc = service.SunoUnavailableError(f"Suno caiu ({rotated})")
+        exc.completed, exc.total = 1, 3
+        raise exc
+
+    _fake_batch(monkeypatch, behaviour)
+    context = Context()
+    job = _run(context, {**SUNO, "count": 3})
+
+    assert _error(job)["error"].startswith("Suno caiu (")
+    blob = json.dumps(job.events, ensure_ascii=False) + json.dumps(
+        context.notifications, ensure_ascii=False
     )
-    assert service.suno_known_secrets() == ["tk-1"]
+    for needle in ("initial-device-token-0001", rotated):
+        assert needle not in blob, needle
+    assert len(_events(job, "log")) == 2
+    assert context.notifications[-1][2] == (
+        "1 de 3 músicas prontas (geração interrompida)"
+    )
 
-    def boom(include_secrets=False):
-        raise RuntimeError("store down")
 
-    monkeypatch.setattr(service, "_suno_resolve", boom)
+def test_known_secrets_is_the_device_token_never_old_suno_entries(
+    tmp_path, monkeypatch, isolated_profile
+):
+    mgr = _isolated_manager(tmp_path, monkeypatch)
+    mgr._set_secret("suno_mcp", "default", "oauth_access_token", "old-suno-access-1")
     assert service.suno_known_secrets() == []
+    token = "D" * 43
+    isolated_profile.save("Connectors/pia_server", {"PIA_SERVER_DEVICE_TOKEN": token})
+    assert service.suno_known_secrets() == [token]
 
 
 # --------------------------------------------------------------------------
@@ -390,11 +345,15 @@ def _isolated_manager(tmp_path, monkeypatch):
     return mgr
 
 
+def _remote(monkeypatch, **status):
+    monkeypatch.setattr(service, "_remote_suno_status", lambda: dict(status))
+
+
 @pytest.mark.parametrize("explicit", [True, False])
-def test_unconfigured_suno_refused_before_job_suno_not_connected(
-    tmp_path, monkeypatch, isolated_profile, explicit
+def test_unconnected_suno_refused_before_job_suno_not_connected(
+    monkeypatch, isolated_profile, explicit
 ):
-    _isolated_manager(tmp_path, monkeypatch)
+    _remote(monkeypatch, available=False, reason="suno_not_connected")
     isolated_profile.save("Apps/music", {"MUSIC_PROVIDER": "suno_mcp"})
     called = []
     monkeypatch.setattr(service, "generate_suno_batch", lambda **k: called.append(k))
@@ -406,17 +365,13 @@ def test_unconfigured_suno_refused_before_job_suno_not_connected(
     with pytest.raises(service.SunoJobRefusedError) as err:
         web_api.handle("generate", data, context)
     assert isinstance(err.value, ValueError)  # HTTP 400 in src/pia/http.py
-    assert str(err.value) == "Conecte o Suno em Configurações → Música"
+    assert str(err.value) == "Conecte o Suno em Configurações → Música."
     assert err.value.code == "suno_not_connected"
     assert context.jobs == {} and web_api._latest is None and called == []
 
 
 def test_expired_suno_refused_before_job_suno_credential_expired(monkeypatch):
-    monkeypatch.setattr(
-        service,
-        "suno_status",
-        lambda: {"available": False, "credential_state": "expired"},
-    )
+    _remote(monkeypatch, available=False, reason="suno_credential_expired")
     called = []
     monkeypatch.setattr(service, "generate_suno_batch", lambda **k: called.append(k))
     context = Context()
@@ -429,12 +384,19 @@ def test_expired_suno_refused_before_job_suno_credential_expired(monkeypatch):
     assert context.jobs == {} and web_api._latest is None and called == []
 
 
+def test_suno_not_wired_to_server_is_refused_pia_server_unsupported(monkeypatch):
+    # T8: until T6 wires the PIA Server client, Suno is unavailable.
+    called = []
+    monkeypatch.setattr(service, "generate_suno_batch", lambda **k: called.append(k))
+    context = Context()
+    with pytest.raises(service.SunoJobRefusedError) as err:
+        web_api.handle("generate", {**SUNO, "count": 1}, context)
+    assert err.value.code == "pia_server_unsupported"
+    assert context.jobs == {} and called == []
+
+
 def test_available_suno_is_not_refused(monkeypatch):
-    monkeypatch.setattr(
-        service,
-        "suno_status",
-        lambda: {"available": True, "credential_state": "configured"},
-    )
+    _remote(monkeypatch, available=True, connected=True, credential_state="configured")
     assert service.suno_job_refusal() is None
 
 
@@ -605,77 +567,3 @@ def test_prepare_local_error_has_code_and_no_batch_fields(monkeypatch):
     }
     assert PLANTED not in json.dumps(job.events)
     assert context.notifications == []
-
-
-# --------------------------------------------------------------------------
-# integration with the local mock MCP (no real Suno)
-# --------------------------------------------------------------------------
-@pytest.fixture
-def mock_env(tmp_path, monkeypatch):
-    out = tmp_path / "music"
-    monkeypatch.setattr(service, "OUTPUT", out)
-    monkeypatch.setattr(service, "_AUDIO_TIMEOUT", (2, 2))
-    monkeypatch.setattr(service, "_SUNO_SLEEP_SLICE", 0.01)
-    monkeypatch.setattr(service, "_ALLOW_LOOPBACK_HTTP_AUDIO", True)
-    monkeypatch.setattr(music_tools, "DEFAULT_POLL_INTERVAL", 0.01)
-    monkeypatch.setattr(service, "settings", lambda: {"MUSIC_SUNO_TIMEOUT": 20})
-    from Plugins.Connectors.pia_server import media
-
-    monkeypatch.setattr(media, "enqueue", lambda path: None)
-    mgr = _isolated_manager(tmp_path, monkeypatch)
-    with FakeSunoMcpServer(scenarios=["success", "503"], leaky=True) as suno:
-        httpd = suno._httpd
-        original = httpd.handle_error
-
-        def handle_error(request, client_address):
-            if isinstance(sys.exc_info()[1], (ConnectionResetError, BrokenPipeError)):
-                return
-            original(request, client_address)
-
-        httpd.handle_error = handle_error
-        mgr.save_server(
-            {
-                "id": "suno_mcp",
-                "name": "Suno",
-                "transport": "http_streaming",
-                "url": suno.url,
-                "bearer_token": suno.token,
-            },
-            server_id="suno_mcp",
-        )
-        yield SimpleNamespace(suno=suno, out=out)
-
-
-def test_mock_suno_success_then_503_keeps_two_of_three(mock_env):
-    context = Context()
-    job = _run(context, {**SUNO, "count": 3})
-
-    assert job.status == "error"
-    assert len(mock_env.suno.generation_calls()) == 2
-    tracks = _events(job, "track")
-    assert [t["item"]["variant"] for t in tracks] == [1, 2]
-    audios = [p for p in mock_env.out.iterdir() if p.suffix == ".mp3"]
-    assert len(audios) == 2 and all(
-        p.with_name(p.name + ".json").is_file() for p in audios
-    )
-    error = _error(job)
-    assert (error["code"], error["completed"], error["total"]) == (
-        "suno_unavailable",
-        2,
-        3,
-    )
-    assert " de 3" not in error["error"]
-    assert context.notifications == [
-        (
-            "Apps/music",
-            "Músicas prontas",
-            "2 de 3 músicas prontas (geração interrompida)",
-        )
-    ]
-    corpus = json.dumps(job.events, ensure_ascii=False) + json.dumps(
-        context.notifications, ensure_ascii=False
-    )
-    for path in mock_env.out.glob("*.json"):
-        corpus += path.read_text(encoding="utf-8")
-    for needle in (mock_env.suno.token, "fake-suno-signature", "X-Amz-Signature"):
-        assert needle not in corpus, needle

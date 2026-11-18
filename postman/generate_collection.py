@@ -71,38 +71,12 @@ BODIES = {
         "provider": "local",
         "duration": 30,
     },
-    # Catálogo T1: available, credential_state, endpoint_configured, settings_route.
+    # Catálogo: o item suno_mcp traz o status vindo da PIA Server (T8/T6).
     # GET-like; o corpo fica vazio. A descrição do item documenta o shape.
     "/music/providers": {},
-    "/music/select": {
-        "provider": "suno_mcp",
-        "gemini_model": "lyria-3.5",
-        "suno_mcp_url": "https://api.suno.com/mcp",
-        "suno_mcp_command": "",
-        "suno_mcp_token": "",
-        "suno_mcp_auth_type": "oauth",
-        "suno_mcp_client_id": "",
-        "suno_mcp_client_secret": "",
-        "suno_mcp_auth_url": "",
-        "suno_mcp_token_url": "",
-        "suno_mcp_scopes": "",
-        "suno_mcp_redirect_uri": "",
-    },
-    "/music/suno/oauth/start": {
-        "client_id": "",
-        "client_secret": "",
-        "auth_url": "",
-        "token_url": "",
-        "scopes": "",
-        "account_id": "",
-    },
-    "/music/suno/oauth/callback": {
-        "state": "{{state}}",
-        "account_id": "",
-        "code": "",
-        "access_token": "",
-    },
-    "/music/suno/oauth/disconnect": {},
+    "/music/select": {"provider": "suno_mcp", "gemini_model": "lyria-3.5"},
+    "/music/suno/legacy-credentials/remove": {"confirm": True},
+    "/music/suno/legacy-credentials/dismiss": {},
     "/action/camera": {"device": 0, "width": 1280, "height": 720},
     "/action/text-at-cursor": {"text": "Texto de exemplo"},
     "/action/local-record": {"insert_at_cursor": False},
@@ -165,9 +139,6 @@ APP_BODIES = {
     "music/generate": BODIES["/v1/music/generations"] | {"count": 1},
     "music/cancel": {"job": "{{job_id}}"},
     "music/select": BODIES["/music/select"],
-    "music/suno-oauth-start": BODIES["/music/suno/oauth/start"],
-    "music/suno-oauth-callback": BODIES["/music/suno/oauth/callback"],
-    "music/suno-oauth-disconnect": {},
     "podcast_automation/start": {
         "task": "process",
         "monitor": False,
@@ -210,9 +181,10 @@ APP_BODIES = {
 
 MUSIC_GENERATE_400_DESCRIPTION = (
     "Gera um lote de músicas. Sucesso devolve `{job}` e o progresso segue no SSE. "
-    "A recusa antes do job (Suno não conectado ou credencial expirada) responde "
-    "HTTP 400 com `{error, code}`, onde `code` é `suno_not_connected` ou "
-    "`suno_credential_expired`."
+    "A recusa antes do job responde HTTP 400 com `{error, code}`, onde `code` é "
+    "o motivo da indisponibilidade do Suno: `suno_not_connected`, "
+    "`suno_credential_expired`, `pia_server_unpaired`, `pia_server_unreachable` "
+    "ou `pia_server_unsupported`."
 )
 
 
@@ -227,7 +199,7 @@ def music_generate_400_example(request):
         "header": [{"key": "Content-Type", "value": "application/json"}],
         "body": json.dumps(
             {
-                "error": "Conecte o Suno em Configurações → Música",
+                "error": "Conecte o Suno em Configurações → Música.",
                 "code": "suno_not_connected",
             },
             ensure_ascii=False,
@@ -497,6 +469,7 @@ def build():
         "/settings/documents",
         "/settings/credentials",
         "/settings/storage",
+        "/music/suno/legacy-credentials",
     }
     for fn in functions("src/pia/service.py", {"_dispatch"}):
         for path in sorted(compared(fn, "path")):
@@ -512,26 +485,36 @@ def build():
                 description = ""
                 if path == "/music/providers":
                     description = (
-                        "Catálogo dos geradores (T1). A entrada suno_mcp traz "
-                        "label, available, endpoint_configured, credential_state "
-                        "(missing|configured|expired), token_configured, "
-                        "auth_type, oauth_connected, campos OAuth mascarados, "
-                        "server_id e settings_route {view:settings, section:Apps/music}. "
-                        "selection traz o provedor salvo e os mesmos campos suno_mcp_* "
-                        "já mascarados. Sem segredos em claro."
+                        "Catálogo dos geradores. O item suno_mcp (RN20) traz "
+                        "available, reason (pia_server_unpaired|"
+                        "pia_server_unreachable|pia_server_unsupported|"
+                        "suno_not_connected|suno_credential_expired|null), "
+                        "hint {text, route}, connected, credential_state, "
+                        "expires_at, settings, active_job e legacy_credentials "
+                        "{present, prompt}. selection traz provider e "
+                        "gemini_model. Nenhum token do Suno existe no PC (RN16)."
                     )
                 elif path == "/music/select":
                     description = (
-                        "Salva o provedor (local, gemini ou suno_mcp) e a config "
-                        "do Suno. RN04: provider=suno_mcp pode ser gravado sem "
-                        "credencial; o app abre em Local até autorizar. Deixe "
-                        "token e segredos OAuth vazios se não for editá-los, "
-                        "para não reenviar valores mascarados."
+                        "Salva o provedor (local, gemini ou suno_mcp) e o modelo "
+                        "Gemini. O modo Suno local/manual saiu (RN18)."
                     )
-                elif path == "/music/suno/oauth/start":
+                elif path == "/music/suno/legacy-credentials":
                     description = (
-                        "Inicia OAuth do Suno (DCR + PKCE). Campos vazios usam "
-                        "os defaults oficiais. Não é geração paga."
+                        "Credenciais antigas do Suno neste PC (RN17/CA15): "
+                        "{present, prompt, items:[{kind, label}]}. Só rótulos, "
+                        "nunca valores."
+                    )
+                elif path == "/music/suno/legacy-credentials/remove":
+                    description = (
+                        "Remove as credenciais antigas do Suno deste PC. Exige "
+                        "{confirm: true}; sem isso responde 400 "
+                        "code=confirmation_required e não apaga nada."
+                    )
+                elif path == "/music/suno/legacy-credentials/dismiss":
+                    description = (
+                        '"Agora não": não apaga nada e desliga a pergunta do '
+                        "primeiro início."
                     )
                 item = add(
                     "07 · Workspace e serviços",

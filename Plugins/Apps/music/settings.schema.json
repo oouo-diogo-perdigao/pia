@@ -25,35 +25,5 @@
     "default": "lyria-3.5",
     "label": "Music Gemini Model",
     "link": "https://aistudio.google.com/apikey"
-  },
-  {
-    "name": "MUSIC_SUNO_MCP_URL",
-    "type": "string",
-    "default": "",
-    "label": "Suno MCP URL"
-  },
-  {
-    "name": "MUSIC_SUNO_MCP_COMMAND",
-    "type": "string",
-    "default": "",
-    "label": "Suno MCP Command"
-  },
-  {
-    "name": "MUSIC_SUNO_MCP_TOKEN",
-    "type": "secret",
-    "default": "",
-    "label": "Suno MCP Token"
-  },
-  {
-    "name": "MUSIC_SUNO_MCP_TOOL",
-    "type": "string",
-    "default": "",
-    "label": "Suno MCP Tool"
-  },
-  {
-    "name": "MUSIC_SUNO_TIMEOUT",
-    "type": "int",
-    "default": "600",
-    "label": "Suno Timeout Seconds"
   }
 ]
