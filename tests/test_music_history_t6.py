@@ -396,6 +396,24 @@ def test_redownload_on_another_pc_is_idempotent_and_saves_to_output(
     assert_no_secrets(job.events, meta, remote.logs)
 
 
+def test_item_deleted_on_another_pc_disappears_here_and_keeps_the_file(remote):
+    """QA F1 (CA24/RN25): a2 baixou a faixa; a1 excluiu o item no servidor."""
+    gen = remote.fake.add_generation(client_id="c-gone", device_id="device-b")
+    job_id = web_api.route(
+        "POST", "/music/history/c-gone/tracks/1/redownload", {}, {}, remote.context
+    )["job_id"]
+    assert wait_done(remote.context.jobs[job_id]).status == "done"
+    (meta,) = sidecars(remote.output)
+    assert any(i["id"] == "c-gone" for i in _history(remote)["items"])
+    with remote.fake.lock:  # o outro PC excluiu (hard delete no servidor)
+        remote.fake.generations[:] = [
+            g for g in remote.fake.generations if g["id"] != gen["id"]
+        ]
+    assert all(i["id"] != "c-gone" for i in _history(remote)["items"])
+    assert (remote.output / meta["file"]).is_file()
+    assert any(item["file"] == meta["file"] for item in service.library())
+
+
 def test_redownload_dead_track_reports_410_code(remote):
     gen = remote.fake.add_generation(client_id="c-dead")
     remote.fake.dead_tracks.add((gen["id"], 1))
