@@ -6,6 +6,8 @@
 import { partialBatchLabel } from "./music-helpers.js";
 import {
   PIA_SERVER_SETTINGS_ROUTE,
+  describeSunoError,
+  errorCode,
   resolveSunoAccountSelection,
 } from "./music-suno-helpers.js";
 import { resolveReuseProvider } from "./music-helpers.js";
@@ -31,6 +33,33 @@ export const HISTORY_DELETE_CONFIRM =
 const ACTIVE_STATES = new Set(["queued", "pending", "running"]);
 const DONE_STATES = new Set(["done", "completed", "complete", "succeeded"]);
 const CANCELLED_STATES = new Set(["cancelled", "canceled"]);
+
+// Erros do Excluir (Anexo A): textos próprios só nesta ação.
+export const HISTORY_DELETE_UNREACHABLE_TEXT =
+  "Não foi possível excluir agora porque a PIA Server está sem conexão. Tente de novo quando a conexão voltar.";
+export const HISTORY_DELETE_UNPAIRED_TEXT =
+  "Para excluir itens do histórico da conta, entre na PIA Server em Configurações → PIA Server.";
+
+/**
+ * {code, text, route} de uma falha do DELETE /music/history/<id>. Aceita o
+ * code ou o erro do `api()`. Sem conexão e sem pareamento têm texto próprio;
+ * os outros codes seguem o mapeamento geral (describeSunoError).
+ */
+export function historyDeleteErrorMessage(errorOrCode) {
+  const code =
+    typeof errorOrCode === "string" ? errorOrCode : errorCode(errorOrCode);
+  if (code === "pia_server_unreachable")
+    return { code, text: HISTORY_DELETE_UNREACHABLE_TEXT, route: null };
+  if (code === "pia_server_unpaired")
+    return {
+      code,
+      text: HISTORY_DELETE_UNPAIRED_TEXT,
+      route: { ...PIA_SERVER_SETTINGS_ROUTE },
+    };
+  return describeSunoError(
+    typeof errorOrCode === "string" ? { code } : errorOrCode,
+  );
+}
 
 /** URL da página: GET /music/history?cursor=&limit=100. */
 export function historyPath(cursor = null, limit = HISTORY_PAGE_SIZE) {
