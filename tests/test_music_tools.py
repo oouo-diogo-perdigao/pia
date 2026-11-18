@@ -124,32 +124,7 @@ def test_tool_loop_uses_results_and_allowlist(monkeypatch):
         tool_registry.complete_with_tools(Agent(), [], allowed=["pia_music"])
 
 
-# --- Helpers de clip e mensagens amigáveis (o SunoMcpAdapter saiu na T8, RN18) ---
-
-from Plugins.Apps.music import tools as music_tools  # noqa: E402
-
-
-def _clip(cid, audio=True, status="complete"):
-    clip = {"id": cid, "status": status}
-    clip["audio_url"] = f"https://cdn.suno.test/{cid}.mp3" if audio else None
-    return clip
-
-
-def test_clip_helpers():
-    assert music_tools.clip_state(_clip("a")) == "ready"
-    assert music_tools.clip_state({"id": "a", "audio_base64": "QUJD"}) == "ready"
-    assert music_tools.clip_state(_clip("a", audio=False, status="error")) == "failed"
-    assert music_tools.clip_state({"id": "a", "error": "x"}) == "failed"
-    assert music_tools.clip_state({"status": "queued"}) == "failed"  # sem id
-    assert music_tools.clip_state({"id": "a", "status": "queued"}) == "pending"
-    assert music_tools.extract_clips({"clips": [_clip("a"), _clip("b")]}) == [
-        _clip("a"),
-        _clip("b"),
-    ]
-    assert music_tools.extract_clips({"id": "x", "status": "queued"}) == [
-        {"id": "x", "status": "queued"}
-    ]
-    assert music_tools.extract_clips({"message": "ok"}) == []
+# --- Mensagens amigáveis (o SunoMcpAdapter saiu na T8 e os helpers de clip na T9) ---
 
 
 def test_friendly_messages_match_rn06():
