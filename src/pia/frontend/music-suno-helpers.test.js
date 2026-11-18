@@ -28,6 +28,7 @@ import {
   hasLegacyCredentials,
   legacyCredentialsState,
   normalizeSettingsRoute,
+  parseHint,
   pollSunoConnect,
   progressDisplay,
   progressReadyText,
@@ -319,15 +320,36 @@ describe("music-suno-helpers: job ativo (RN10/RN15)", () => {
     assert.equal(resolveResumeJob(cat), null);
   });
 
-  it("ignora job terminal ou sem job_id", () => {
+  it("ignora job terminal", () => {
     for (const active_job of [
       { job_id: "j", state: "completed" },
       { job_id: "j", state: "interrupted" },
-      { state: "running" },
       null,
     ])
       assert.equal(findActiveSunoJob(catalogWith({ active_job })), null);
     assert.equal(findActiveSunoJob(null), null);
+  });
+
+  it("job_id null (T6): bloqueia o Gerar, mas não retoma pelo watchJob", () => {
+    const cat = catalogWith({
+      accounts: [account("a")],
+      active_job: {
+        job_id: null,
+        state: "running",
+        this_device: true,
+        suno_account_id: "a",
+        completed: 0,
+        total: 2,
+        extra_ready: 0,
+      },
+    });
+    const job = findActiveSunoJob(cat);
+    assert.equal(job.jobId, null);
+    assert.equal(job.thisDevice, true);
+    assert.equal(resolveResumeJob(cat), null);
+    assert.equal(resolveResumeJob(cat, null), null);
+    assert.equal(activeJobBlockText(cat), SUNO_TEXT_JOB_ACTIVE);
+    assert.equal(activeJobBlockText(cat, null), SUNO_TEXT_JOB_ACTIVE);
   });
 
   it("job ativo bloqueia o Gerar do Suno para qualquer conta, salvo o acompanhado", () => {
@@ -423,7 +445,9 @@ describe("music-suno-helpers: codes e textos", () => {
     ]) {
       const text = sunoErrorText(code, { fallback: "backend" });
       assert.ok(
-        text && text !== "backend" && text !== "Falha na solicitação.",
+        text &&
+          text !== "backend" &&
+          text !== "Algo deu errado. Tente de novo.",
         code,
       );
     }
@@ -435,7 +459,7 @@ describe("music-suno-helpers: codes e textos", () => {
       sunoErrorText("xyz", { fallback: "texto do backend" }),
       "texto do backend",
     );
-    assert.equal(sunoErrorText(null), "Falha na solicitação.");
+    assert.equal(sunoErrorText(null), "Algo deu errado. Tente de novo.");
   });
 
   it("atalhos: não pareado → PIA Server; conta → Música", () => {
@@ -664,12 +688,12 @@ describe("music-suno-helpers: connect assíncrono (RN06/CA04/CA07)", () => {
 });
 
 describe("music-suno-helpers: apelido, credenciais antigas e progresso", () => {
-  it("apelido usa a rota única (PATCH /music/suno/accounts/<id>)", () => {
+  it("apelido usa a rota única (POST /music/suno/accounts/<id>/rename)", () => {
     assert.deepEqual(
       buildSunoRenameRequest({ id: "a b", label: "Velho" }, "  Novo "),
       {
-        path: "/music/suno/accounts/a%20b",
-        method: "PATCH",
+        path: "/music/suno/accounts/a%20b/rename",
+        method: "POST",
         data: { label: "Novo" },
       },
     );
@@ -731,6 +755,183 @@ describe("music-suno-helpers: apelido, credenciais antigas e progresso", () => {
     );
     assert.equal(connectionNotice({ connection: "ok" }), "");
     assert.equal(connectionNotice(null), "");
+  });
+});
+
+describe("music-suno-helpers: formatos finais da T6 (435c4cd)", () => {
+  it("parseHint aceita objeto e string", () => {
+    assert.deepEqual(
+      parseHint({
+        text: " t ",
+        route: { view: "settings", section: "Apps/music" },
+      }),
+      {
+        text: "t",
+        route: { view: "settings", section: "Apps/music" },
+        explicitRoute: true,
+      },
+    );
+    assert.deepEqual(parseHint({ text: "t", route: null }), {
+      text: "t",
+      route: null,
+      explicitRoute: true,
+    });
+    assert.deepEqual(parseHint("só texto"), {
+      text: "só texto",
+      route: null,
+      explicitRoute: false,
+    });
+    assert.deepEqual(parseHint(null), {
+      text: "",
+      route: null,
+      explicitRoute: false,
+    });
+  });
+
+  it("hint.route null do backend: dica sem atalho", () => {
+    const hint = sunoUnavailableHint(
+      catalogWith({
+        available: false,
+        reason: "suno_not_connected",
+        hint: {
+          text: "Conecte o Suno em Configurações → Música.",
+          route: null,
+        },
+      }),
+    );
+    assert.deepEqual(hint, { text: SUNO_TEXT_NOT_CONNECTED, route: null });
+  });
+
+  it("hint string (defesa): mantém o atalho padrão do motivo", () => {
+    const hint = sunoUnavailableHint(
+      catalogWith({
+        available: false,
+        reason: "pia_server_unpaired",
+        hint: "texto antigo",
+      }),
+    );
+    assert.deepEqual(hint, {
+      text: SUNO_TEXT_UNPAIRED,
+      route: PIA_SERVER_SETTINGS_ROUTE,
+    });
+  });
+
+  it("hint do item na T6 para não pareado traz o route da PIA Server", () => {
+    const hint = sunoUnavailableHint(
+      catalogWith({
+        available: false,
+        reason: "pia_server_unpaired",
+        hint: { text: "x", route: { ...PIA_SERVER_SETTINGS_ROUTE } },
+      }),
+    );
+    assert.deepEqual(hint.route, PIA_SERVER_SETTINGS_ROUTE);
+  });
+
+  it("conta indisponível traz reason e hint (texto em hintText)", () => {
+    const [acc] = sunoAccounts(
+      catalogWith({
+        accounts: [
+          account("x", {
+            credential_state: "unavailable",
+            available: false,
+            reason: "suno_credential_expired",
+            hint: {
+              text: "A conexão com o Suno expirou. Reconecte em Configurações → Música.",
+              route: { view: "settings", section: "Apps/music" },
+            },
+          }),
+        ],
+      }),
+    );
+    assert.equal(acc.usable, false);
+    assert.equal(acc.expired, true);
+    assert.equal(acc.reason, "suno_credential_expired");
+    assert.match(acc.hintText, /expirou/);
+    assert.equal(
+      sunoAccounts(catalogWith({ accounts: [account("y")] }))[0].hintText,
+      "",
+    );
+  });
+
+  it("invalid_label usa a mensagem do backend", () => {
+    const err = Object.assign(
+      new Error(
+        "O apelido da conta Suno deve ter de 1 a 80 caracteres, sem caracteres de controle.",
+      ),
+      { code: "invalid_label", details: {} },
+    );
+    assert.match(describeSunoError(err).text, /de 1 a 80 caracteres/);
+  });
+});
+
+describe("music-suno-helpers: textos do Anexo A do PO", () => {
+  it("codes do connect e da conta com o texto exato do PO", () => {
+    assert.equal(
+      sunoErrorText("suno_account_mismatch", { accountName: "Ana" }),
+      "A conta autorizada no Suno é diferente da conta Ana que você pediu para reconectar. Entre no Suno com a conta Ana e tente de novo.",
+    );
+    assert.equal(
+      sunoErrorText("suno_account_mismatch"),
+      "A conta autorizada no Suno é diferente da que você pediu para reconectar. Entre no Suno com a conta certa e tente de novo.",
+    );
+    assert.equal(
+      sunoErrorText("suno_identity_unavailable"),
+      "O Suno não informou qual conta foi autorizada, então nenhuma conta foi conectada. Tente de novo.",
+    );
+    // O texto do PO vale mais que o do backend.
+    assert.equal(
+      sunoErrorText("suno_connect_not_found", {
+        fallback:
+          "Tentativa de conexão não encontrada. Tente conectar de novo.",
+      }),
+      "Esta tentativa de conexão expirou. Clique em Conectar conta Suno para começar de novo.",
+    );
+    assert.equal(
+      sunoErrorText("suno_oauth_denied"),
+      "A autorização foi cancelada no Suno. Nenhuma conta foi conectada.",
+    );
+    assert.equal(
+      sunoErrorText("suno_oauth_invalid"),
+      "Não foi possível concluir a autorização com o Suno. Tente conectar de novo.",
+    );
+    assert.equal(
+      sunoErrorText("suno_account_not_found"),
+      "Esta conta Suno não está mais conectada. Escolha outra conta ou reconecte em Configurações → Música.",
+    );
+    assert.deepEqual(
+      sunoErrorRoute("suno_account_not_found"),
+      MUSIC_SETTINGS_ROUTE,
+    );
+    assert.equal(
+      sunoErrorText("not_origin_device"),
+      'Esta geração foi iniciada em outro computador. Use "Baixar novamente" no Histórico para trazer as músicas para cá.',
+    );
+    assert.equal(sunoErrorRoute("not_origin_device"), null);
+    assert.equal(
+      sunoErrorText("codigo_novo"),
+      "Algo deu errado. Tente de novo.",
+    );
+  });
+
+  it("mismatch no Reconectar cita a conta pedida", () => {
+    assert.equal(
+      connectResultMessage(
+        { state: "failed", code: "suno_account_mismatch" },
+        { accountName: "Bia" },
+      ).text,
+      "A conta autorizada no Suno é diferente da conta Bia que você pediu para reconectar. Entre no Suno com a conta Bia e tente de novo.",
+    );
+  });
+
+  it("confirmação do Desconectar com o nome da conta", () => {
+    assert.equal(
+      disconnectConfirmText({ id: "a", label: "Ana", name: "N" }),
+      "Desconectar a conta Suno Ana? Ela não poderá mais ser usada para gerar músicas em nenhum computador desta conta PIA. As músicas já baixadas e o histórico continuam como estão.",
+    );
+    assert.match(
+      disconnectConfirmText({ id: "x", email: "e@x" }),
+      /^Desconectar a conta Suno e@x\?/,
+    );
   });
 });
 

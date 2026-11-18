@@ -225,7 +225,9 @@ export default function MusicSettingsPanel() {
     });
     if (!alive.current || token !== connectToken.current) return;
     setConnecting(null);
-    const message = connectResultMessage(result);
+    const message = connectResultMessage(result, {
+      accountName: replaceAccount?.name || "",
+    });
     setConnectNotice(
       message.text ? { text: message.text, color: message.color } : null,
     );
@@ -611,6 +613,14 @@ export default function MusicSettingsPanel() {
                       </Badge>
                     </Group>
                   )}
+                  {renaming?.id !== account.id &&
+                    !account.usable &&
+                    !account.expired &&
+                    account.hintText && (
+                      <Text size="xs" c="dimmed">
+                        {account.hintText}
+                      </Text>
+                    )}
                 </div>
                 <div className="settings-row-control">
                   <Group gap="xs" wrap="wrap">

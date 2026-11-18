@@ -22,11 +22,11 @@ export const HISTORY_EXTRA_LABEL = "Suno · extra";
 export const HISTORY_STATE_DONE = "Concluída";
 export const HISTORY_STATE_INTERRUPTED = "Interrompida";
 export const HISTORY_STATE_CANCELLED = "Cancelada";
-// Sem redação do PO
+// Anexo A do requisitos-PO.md (aprovados pelo PO)
 export const HISTORY_STATE_RUNNING = "Em andamento";
 export const HISTORY_EMPTY_TEXT = "Nenhuma música gerada ainda.";
 export const HISTORY_DELETE_CONFIRM =
-  "Excluir esta geração do histórico da conta? O prompt, a letra e os links serão apagados da PIA Server e o item some em todos os computadores da conta. Os arquivos de música deste computador continuam na pasta Música/PIA.";
+  "Excluir esta geração do histórico? O prompt, a letra e os links serão apagados da PIA Server e o item some em todos os computadores da conta. Os arquivos de música deste computador continuam na pasta Música/PIA. Não dá para desfazer.";
 
 const ACTIVE_STATES = new Set(["queued", "pending", "running"]);
 const DONE_STATES = new Set(["done", "completed", "complete", "succeeded"]);
@@ -114,12 +114,13 @@ export function applyHistoryPage(state, response, { append = false } = {}) {
 }
 
 /**
- * Faixa atualizada vinda do evento `track` do job de redownload. Aceita
- * {track}, {item} no formato de faixa do histórico, ou {item} no formato da
- * biblioteca (/music: tem `file` string e `audio_url`).
+ * Faixa atualizada vinda do job de redownload. Aceita o evento `track`
+ * ({track}, {item} no formato de faixa do histórico, ou {item} no formato da
+ * biblioteca: `file` string e `audio_url`) e o `done` da T6
+ * ({result: {track, history_id}}).
  */
 export function trackFromRedownloadEvent(event) {
-  const raw = event?.track || event?.item || null;
+  const raw = event?.track || event?.item || event?.result?.track || null;
   if (!raw || typeof raw !== "object") return null;
   if (raw.availability || raw.file?.audio_url || raw.n != null) {
     const out = { ...raw };
