@@ -1,6 +1,28 @@
 # PIA Changelog
 
-## [Não publicado — Suno como gerador no app de Música] - 2026-11-17
+## [Não publicado — Suno pela PIA Server] - 2026-11-17
+
+### Changed
+- O Suno passou a rodar pela PIA Server: o token e o OAuth do Suno ficam só na pia-server e a PIA local é cliente dela (`Plugins/Apps/music/remote_suno.py`). Saíram o modo local/manual (URL, comando, bearer, `MUSIC_SUNO_MCP_TOKEN`, OAuth/PKCE/DCR no PC) e o cliente MCP direto (RN18). Substitui a entrada "Suno como gerador no app de Música" abaixo.
+- Várias contas Suno por conta PIA: conectar (`POST /api/pia/music/suno/connect` + `GET /api/pia/music/suno/connect/<id>`, que devolve `expired` com 200), renomear (`POST .../accounts/<id>/rename`, 1 a 80 caracteres), desconectar e status. Com 2 ou mais contas válidas, a geração exige `suno_account_id` (`suno_account_required`). A conta vai só no generate: `/music/select` não guarda mais conta e o setting `MUSIC_SUNO_ACCOUNT_ID` saiu.
+- Jobs criados na PIA Server, um por conta PIA (RN10), com polling até o estado terminal, `connection: lost|ok` e espera de 5 s a 60 s sem rede (RN09), faixas extras ("Suno · extra"), retomada do job deste PC e download pelo proxy do servidor.
+- Erros da API local sempre como 400 `{error, code}`: 401 do servidor vira `pia_server_unpaired`, 5xx/rede e respostas fora do contrato viram `pia_server_unreachable`. Tabela completa em `docs/PLATFORM_SERVICES.md`.
+
+### Added
+- Histórico de gerações (`GET /api/pia/music/history`, `DELETE /api/pia/music/history/<id>`, `POST .../tracks/<n>/redownload`), mesclando servidor e índice local, com `availability` por faixa e "Baixar novamente" como job (RN16/RN20).
+- Registro das gerações Local/Gemini na PIA Server sem o áudio, com fila offline de até 500 itens/30 dias (RN14).
+- Aviso e remoção, com confirmação, das credenciais antigas do Suno (`/api/pia/music/suno/legacy-credentials*`, RN17).
+- Coleção Postman com as rotas novas e exemplos fictícios; doc da arquitetura em `docs/PLATFORM_SERVICES.md` e roteiros manuais sem gasto em `docs/suno-music-roteiros.md`.
+
+### Removed
+- Sobras do Suno local: lote por chamada MCP, download direto de links de áudio do Suno e o mock `tests/fixtures/fake_suno_mcp.py` (os testes usam `tests/fixtures/fake_pia_server_suno.py`).
+
+### Notes
+- Riscos conhecidos aceitos: o token legado `MUSIC_SUNO_MCP_*` continua no export e no sync até o usuário remover; a retomada de jobs é lazy (catálogo e status); quando o áudio local some, a `availability` é `redownload` para item do Suno e `null` para item local.
+- Pendente de decisão de produto: `media.enqueue` ainda sobe o áudio gerado localmente, o que conflita com a RN14.
+- Gerar no Suno gasta créditos; testes reais só com o ok explícito do dono da conta.
+
+## [Não publicado — Suno como gerador no app de Música (substituído pela entrada acima)] - 2026-11-17
 
 ### Added
 - Provedor `suno_mcp` no app de Música: seletor dinâmico (Suno só aparece quando `available=true`), Configurações → Música com selo de conexão (URL, OAuth/bearer, expirado, pendente) e deep link `Apps/music`.
