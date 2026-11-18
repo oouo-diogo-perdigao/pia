@@ -23,6 +23,33 @@ Gemini/Lyria utiliza a chave Gemini existente da PIA e o modelo configurável `M
 
 Cancelar encerra a espera e evita salvar o resultado, mas não garante cancelamento do processamento já iniciado no provedor. A duração informada é solicitada, não duração medida.
 
+
+## Suno
+
+O Suno roda **pela PIA Server**: o token e o OAuth do Suno ficam só na
+pia-server, e este app é cliente dela (`remote_suno.py`). Nada do Suno é
+guardado neste computador. Pareie a PIA em Configurações → PIA Server e
+conecte uma ou mais contas Suno em **Configurações → Música**.
+
+O Suno só entra no seletor com `available=true` no catálogo. Com uma conta
+válida, ela é usada direto; com duas ou mais, escolha a conta antes de gerar
+(a conta vai só no generate, em `suno_account_id`). A duração pedida é
+indicativa e **cancelar a espera** não interrompe o que já foi enviado: a
+geração pode continuar e **consumir créditos**; as faixas já prontas são
+entregues. Faixas extras entram como "Suno · extra".
+
+O Histórico mostra as gerações do servidor e as locais, com "Baixar
+novamente" para faixas Suno sem arquivo neste PC. Excluir apaga no servidor e
+nunca apaga o arquivo local. As gerações Local/Gemini são registradas no
+servidor sem o áudio (RN14).
+
+Rotas, códigos de erro, histórico, fila RN14 e riscos conhecidos:
+[PLATFORM_SERVICES.md](../../../docs/PLATFORM_SERVICES.md#suno-pela-pia-server).
+Roteiros manuais (sem gasto, gerar só com o ok do Diogo):
+[suno-music-roteiros.md](../../../docs/suno-music-roteiros.md). Os testes usam
+o fake local `tests/fixtures/fake_pia_server_suno.py`, sem chamada ao Suno nem
+a uma pia-server real.
+
 ## Criar apps
 
 Inclua `pia.json`, `plugin.toml`, `lang/pt-BR.json`, página Principal e Sobre. Use `appApi`/`watchJob` e componentes compartilhados em `src/pia/frontend`, retornando jobs para operações longas. Configurações e segredos pertencem à tela de configurações; não devem ser embutidos no JavaScript. Ferramentas de agente são registradas em `src/tool_registry.py` com schema e despacho explícito.

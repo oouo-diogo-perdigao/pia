@@ -2,9 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Badge,
   Button,
-  Collapse,
   Group,
-  PasswordInput,
   Progress,
   Select,
   Stack,
@@ -17,19 +15,40 @@ import {
   ExternalLink,
   KeyRound,
   Link2,
-  Plug,
-  Settings2,
+  Pencil,
+  RefreshCw,
+  Trash2,
   Unlink,
 } from "lucide-react";
 import { api, appApi, safe, watchJob } from "./api";
 import {
   MUSIC_PROVIDER_LABELS,
   buildMusicSelectPayload,
-  buildSunoOAuthStartPayload,
+  findSunoProvider,
   musicDraftSnapshot,
-  resolveSunoConnectionStatus,
+  runWithMusicProvidersUpdate,
   selectionToMusicDraft,
+  shouldWarnSunoOpensInLocal,
 } from "./music-helpers";
+import {
+  PIA_SERVER_SETTINGS_ROUTE,
+  SUNO_CONNECT_ANOTHER_LABEL,
+  SUNO_CONNECT_LABEL,
+  SUNO_LEGACY_QUESTION,
+  SUNO_TEXT_SERVER_DOWN,
+  SUNO_TEXT_UNPAIRED,
+  SUNO_WAITING_TEXT,
+  buildConnectPayload,
+  buildSunoRenameRequest,
+  connectResultMessage,
+  describeSunoError,
+  disconnectConfirmText,
+  legacyCredentialsState,
+  pollSunoConnect,
+  safeAuthUrl,
+  sunoAccountStateLabel,
+  sunoAccounts,
+} from "./music-suno-helpers";
 import { usePia } from "./shared";
 import { notify } from "./toasts";
 
@@ -38,21 +57,24 @@ export default function MusicSettingsPanel() {
   const [catalog, setCatalog] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [oauthBusy, setOauthBusy] = useState(false);
-  const [oauthAdvancedOpen, setOauthAdvancedOpen] = useState(false);
-  const [pendingOAuth, setPendingOAuth] = useState(null);
-  const [oauthCallbackInput, setOauthCallbackInput] = useState({
-    code: "",
-    access_token: "",
-  });
   const [installing, setInstalling] = useState(false);
   const [installProgress, setInstallProgress] = useState(null);
   const [savedSnapshot, setSavedSnapshot] = useState("");
   const [draft, setDraft] = useState(() => selectionToMusicDraft());
+  // Connect assíncrono (RN06): {attemptId, authUrl, replaceId} enquanto
+  // espera a autorização no navegador.
+  const [connecting, setConnecting] = useState(null);
+  const [connectNotice, setConnectNotice] = useState(null);
+  const [accountBusy, setAccountBusy] = useState("");
+  const [renaming, setRenaming] = useState(null);
+  const [legacyBusy, setLegacyBusy] = useState(false);
   const jobSourceRef = useRef(null);
+  const connectToken = useRef(0);
+  const alive = useRef(true);
 
   const loadCatalog = useCallback(async () => {
     const data = await api("/music/providers");
+    if (!alive.current) return data;
     const nextDraft = selectionToMusicDraft(data?.selection || {});
     setCatalog(data);
     setDraft(nextDraft);
@@ -62,19 +84,52 @@ export default function MusicSettingsPanel() {
   }, []);
 
   useEffect(() => {
-    loadCatalog().catch(() => setLoading(false));
-    return () => jobSourceRef.current?.close();
+    alive.current = true;
+    loadCatalog().catch(() => alive.current && setLoading(false));
+    // RN05: status ao voltar o foco.
+    let timer;
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => loadCatalog().catch(() => {}), 500);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") schedule();
+    };
+    window.addEventListener("focus", schedule);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      alive.current = false;
+      connectToken.current += 1;
+      clearTimeout(timer);
+      window.removeEventListener("focus", schedule);
+      document.removeEventListener("visibilitychange", onVisibility);
+      jobSourceRef.current?.close();
+    };
   }, [loadCatalog]);
 
   const providers = Array.isArray(catalog?.providers) ? catalog.providers : [];
   const activeProvider =
     providers.find((item) => item?.id === draft.provider) || providers[0] || {};
-  const sunoProvider = providers.find((item) => item?.id === "suno_mcp") || {};
+  const sunoProvider = findSunoProvider(catalog) || {};
+  const accounts = sunoAccounts(sunoProvider);
+  const sunoReason = sunoProvider.reason || null;
+  const serverBlocked =
+    sunoReason === "pia_server_unpaired" ||
+    sunoReason === "pia_server_unreachable" ||
+    sunoReason === "pia_server_unsupported";
+  const legacy = legacyCredentialsState(catalog);
   const dirty = !loading && musicDraftSnapshot(draft) !== savedSnapshot;
-  const sunoStatus = resolveSunoConnectionStatus(
+  const warnOpensInLocal = shouldWarnSunoOpensInLocal(
     catalog?.selection,
     sunoProvider,
+    draft.provider,
   );
+
+  function showSunoError(error, accountName = "") {
+    const info = describeSunoError(error, { accountName });
+    notify(info.text, "error");
+    return info;
+  }
 
   async function installLocalEngine() {
     setInstalling(true);
@@ -111,94 +166,162 @@ export default function MusicSettingsPanel() {
     }
   }
 
-  async function save(overrideDraft = null) {
+  async function save() {
     setSaving(true);
     try {
-      const sourceDraft = overrideDraft || draft;
-      const payload = buildMusicSelectPayload(sourceDraft);
-      const updated = await api("/music/select", payload);
-      const nextDraft = selectionToMusicDraft(updated?.selection || {});
-      setCatalog(updated);
-      setDraft(nextDraft);
-      setSavedSnapshot(musicDraftSnapshot(nextDraft));
-      notify("Configurações de música salvas.");
-      return updated;
+      return await runWithMusicProvidersUpdate(async (markMutated) => {
+        const updated = await api(
+          "/music/select",
+          buildMusicSelectPayload(draft),
+        );
+        markMutated();
+        const nextDraft = selectionToMusicDraft(updated?.selection || {});
+        if (Array.isArray(updated?.providers)) setCatalog(updated);
+        setDraft(nextDraft);
+        setSavedSnapshot(musicDraftSnapshot(nextDraft));
+        notify("Configurações de música salvas.");
+        return updated;
+      });
     } finally {
       setSaving(false);
     }
   }
 
-  async function startSunoOAuth() {
-    setOauthBusy(true);
+  // RN06/CA04/CA07: POST /music/suno/connect abre a URL de autorização do
+  // servidor e faz polling em /music/suno/connect/<attempt_id> a cada 3 s.
+  async function connectSuno(replaceAccount = null) {
+    const token = ++connectToken.current;
+    setConnectNotice(null);
+    let response;
     try {
-      const nextDraft = {
-        ...draft,
-        provider: "suno_mcp",
-        suno_mcp_auth_type: "oauth",
-      };
-      setDraft(nextDraft);
-      if (musicDraftSnapshot(nextDraft) !== savedSnapshot) {
-        await api("/music/select", buildMusicSelectPayload(nextDraft));
-      }
-      const res = await api(
-        "/music/suno/oauth/start",
-        buildSunoOAuthStartPayload(nextDraft),
+      response = await api(
+        "/music/suno/connect",
+        buildConnectPayload(replaceAccount?.id),
       );
-      if (res?.auth_url && /^https?:\/\//i.test(res.auth_url)) {
-        window.open(res.auth_url, "_blank", "noopener,noreferrer");
-      }
-      if (res?.account?.oauth?.connected === true) {
-        setPendingOAuth(null);
-        notify("Conta Suno MCP conectada via OAuth.");
-      } else {
-        setPendingOAuth({
-          state: res?.state || "",
-          authUrl: res?.auth_url || "",
-          accountId: res?.account?.id || "",
-        });
-        notify("Autorização OAuth do Suno MCP iniciada.");
-      }
-      await loadCatalog();
-    } finally {
-      setOauthBusy(false);
+    } catch (error) {
+      showSunoError(error, replaceAccount?.name);
+      return;
     }
-  }
-
-  async function finishSunoOAuth() {
-    if (!pendingOAuth) return;
-    setOauthBusy(true);
-    try {
-      await api("/music/suno/oauth/callback", {
-        state: pendingOAuth.state,
-        account_id: pendingOAuth.accountId || undefined,
-        code: oauthCallbackInput.code.trim() || undefined,
-        access_token: oauthCallbackInput.access_token.trim() || undefined,
+    const authUrl = safeAuthUrl(response?.auth_url);
+    if (authUrl) window.open(authUrl, "_blank", "noopener,noreferrer");
+    if (!response?.attempt_id) {
+      setConnectNotice({
+        text: connectResultMessage({ state: "failed" }).text,
+        color: "red",
       });
-      setPendingOAuth(null);
-      setOauthCallbackInput({ code: "", access_token: "" });
-      await loadCatalog();
-      notify("Conta OAuth do Suno MCP conectada e salva no Cofre.");
-    } finally {
-      setOauthBusy(false);
+      return;
+    }
+    setConnecting({
+      attemptId: response.attempt_id,
+      authUrl,
+      replaceId: replaceAccount?.id || null,
+    });
+    const result = await pollSunoConnect({
+      attemptId: response.attempt_id,
+      expiresIn: response.expires_in,
+      fetchState: (attemptId) =>
+        api("/music/suno/connect/" + encodeURIComponent(attemptId)),
+      isCancelled: () => !alive.current || token !== connectToken.current,
+    });
+    if (!alive.current || token !== connectToken.current) return;
+    setConnecting(null);
+    const message = connectResultMessage(result, {
+      accountName: replaceAccount?.name || "",
+    });
+    setConnectNotice(
+      message.text ? { text: message.text, color: message.color } : null,
+    );
+    if (message.ok) {
+      notify(message.text);
+      await runWithMusicProvidersUpdate(async (markMutated) => {
+        markMutated();
+        await loadCatalog();
+      });
     }
   }
 
-  async function disconnectSunoOAuth() {
-    setOauthBusy(true);
+  function cancelConnect() {
+    connectToken.current += 1;
+    setConnecting(null);
+  }
+
+  // RN06/CA04: desconectar só a conta escolhida, com confirmação.
+  async function disconnectAccount(account) {
+    if (!window.confirm(disconnectConfirmText(account))) return;
+    setAccountBusy(account.id);
     try {
-      const updated = await api("/music/suno/oauth/disconnect", {});
-      setPendingOAuth(null);
-      if (updated?.selection) {
-        const nextDraft = selectionToMusicDraft(updated.selection);
-        setCatalog(updated);
-        setDraft(nextDraft);
-        setSavedSnapshot(musicDraftSnapshot(nextDraft));
-      } else {
-        await loadCatalog();
-      }
-      notify("Conexão OAuth do Suno MCP removida.");
+      await runWithMusicProvidersUpdate(async (markMutated) => {
+        let updated;
+        try {
+          updated = await api("/music/suno/disconnect", {
+            account_id: account.id,
+          });
+        } catch (error) {
+          showSunoError(error, account.name);
+          return;
+        }
+        markMutated();
+        if (Array.isArray(updated?.provider?.accounts)) {
+          setCatalog((old) =>
+            old && Array.isArray(old.providers)
+              ? {
+                  ...old,
+                  providers: old.providers.map((item) =>
+                    item?.id === "suno_mcp" ? updated.provider : item,
+                  ),
+                }
+              : old,
+          );
+        }
+        notify(`Conta Suno ${account.name} desconectada.`);
+        await loadCatalog().catch(() => {});
+      });
     } finally {
-      setOauthBusy(false);
+      setAccountBusy("");
+    }
+  }
+
+  // RN07: apelido da conta (rota única em buildSunoRenameRequest).
+  async function renameAccount(account, label) {
+    const request = buildSunoRenameRequest(account, label);
+    setRenaming(null);
+    if (!request) return;
+    setAccountBusy(account.id);
+    try {
+      await runWithMusicProvidersUpdate(async (markMutated) => {
+        try {
+          await api(request.path, request.data, { method: request.method });
+        } catch (error) {
+          showSunoError(error, account.name);
+          return;
+        }
+        markMutated();
+        await loadCatalog().catch(() => {});
+      });
+    } finally {
+      setAccountBusy("");
+    }
+  }
+
+  // RN21/CA20: botão em Configurações → Música, com confirmação.
+  async function removeLegacyCredentials() {
+    if (!window.confirm(SUNO_LEGACY_QUESTION)) return;
+    setLegacyBusy(true);
+    try {
+      const result = await api("/music/suno/legacy-credentials/remove", {
+        confirm: true,
+      });
+      const removed = Array.isArray(result?.removed) ? result.removed : [];
+      notify(
+        removed.length
+          ? "Credenciais antigas do Suno removidas: " + removed.join(", ") + "."
+          : "Credenciais antigas do Suno removidas.",
+      );
+      await loadCatalog().catch(() => {});
+    } catch (error) {
+      showSunoError(error);
+    } finally {
+      setLegacyBusy(false);
     }
   }
 
@@ -254,6 +377,12 @@ export default function MusicSettingsPanel() {
                   val && setDraft((old) => ({ ...old, provider: val }))
                 }
               />
+              {warnOpensInLocal && (
+                <Text size="xs" c="dimmed" maw={260} ta="right">
+                  O Suno pode ser salvo como padrão, mas o app de Música abre em
+                  Local até haver uma conta Suno conectada e válida.
+                </Text>
+              )}
             </div>
           </div>
 
@@ -342,316 +471,222 @@ export default function MusicSettingsPanel() {
               </div>
             </div>
           )}
+        </div>
+      </div>
 
-          {draft.provider === "suno_mcp" && (
-            <>
-              <div className="settings-row">
-                <div className="settings-row-info">
-                  <Group gap="xs">
-                    <Text size="sm" fw={600}>
-                      Conta OAuth · Suno MCP
-                    </Text>
-                    <Badge
-                      size="xs"
-                      variant="light"
-                      color={sunoStatus.color}
-                      leftSection={<Plug size={11} />}
-                    >
-                      {sunoStatus.label}
-                    </Badge>
-                  </Group>
-                  <Text size="xs" c="dimmed">
-                    {sunoStatus.connected
-                      ? "Conta OAuth conectada e salva no Cofre Único."
-                      : sunoStatus.mode === "oauth_pending"
-                        ? "Autorização OAuth pendente. Conclua no navegador e cole o código abaixo se necessário."
-                        : sunoStatus.mode === "token"
-                          ? "Token presente no Cofre Único (autenticação validada somente na chamada ao servidor)."
-                          : "Conecte via OAuth (DCR automático + PKCE) ou informe um token manual no Cofre Único."}
-                  </Text>
-                </div>
-                <div className="settings-row-control">
-                  <Group gap="xs" wrap="wrap">
-                    <Button
-                      size="xs"
-                      loading={oauthBusy}
-                      leftSection={<Link2 size={14} />}
-                      onClick={safe(startSunoOAuth)}
-                    >
-                      {sunoStatus.connected
-                        ? "Reconectar OAuth"
-                        : "Conectar via OAuth"}
-                    </Button>
-                    {sunoStatus.connected && (
-                      <Button
-                        size="xs"
-                        variant="light"
-                        color="red"
-                        loading={oauthBusy}
-                        leftSection={<Unlink size={14} />}
-                        onClick={safe(disconnectSunoOAuth)}
-                      >
-                        Desconectar
-                      </Button>
-                    )}
-                    <Button
-                      size="xs"
-                      variant="light"
-                      leftSection={<KeyRound size={14} />}
-                      onClick={() =>
-                        navigate({ view: "settings", section: "credentials" })
-                      }
-                    >
-                      Abrir Cofre Único
-                    </Button>
+      <div>
+        <div className="settings-section-title">Contas Suno</div>
+        <div className="settings-card">
+          <div className="settings-row">
+            <div className="settings-row-info">
+              <Text size="sm" fw={600}>
+                Suno pela PIA Server
+              </Text>
+              <Text size="xs" c="dimmed">
+                A conexão com o Suno fica na PIA Server; nenhum token do Suno é
+                guardado neste computador. Todos os computadores da sua conta
+                PIA veem as mesmas contas Suno.
+              </Text>
+              {sunoReason === "pia_server_unpaired" && (
+                <Text size="xs" c="yellow" mt={4}>
+                  {SUNO_TEXT_UNPAIRED}
+                </Text>
+              )}
+              {(sunoReason === "pia_server_unreachable" ||
+                sunoReason === "pia_server_unsupported") && (
+                <Text size="xs" c="yellow" mt={4}>
+                  {SUNO_TEXT_SERVER_DOWN}
+                </Text>
+              )}
+            </div>
+            <div className="settings-row-control">
+              {sunoReason === "pia_server_unpaired" ? (
+                <Button
+                  size="xs"
+                  variant="light"
+                  rightSection={<ExternalLink size={14} />}
+                  onClick={() => navigate({ ...PIA_SERVER_SETTINGS_ROUTE })}
+                >
+                  Abrir Configurações → PIA Server
+                </Button>
+              ) : (
+                <Button
+                  size="xs"
+                  leftSection={<Link2 size={14} />}
+                  disabled={serverBlocked || Boolean(connecting)}
+                  onClick={safe(() => connectSuno())}
+                >
+                  {accounts.length
+                    ? SUNO_CONNECT_ANOTHER_LABEL
+                    : SUNO_CONNECT_LABEL}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {connecting && (
+            <div className="settings-row">
+              <Group justify="space-between" style={{ width: "100%" }}>
+                <Text size="xs">{SUNO_WAITING_TEXT}</Text>
+                <Group gap="xs">
+                  {connecting.authUrl && (
                     <Button
                       size="xs"
                       variant="subtle"
+                      rightSection={<ExternalLink size={12} />}
                       onClick={() =>
-                        navigate({ view: "settings", section: "mcp" })
+                        window.open(
+                          connecting.authUrl,
+                          "_blank",
+                          "noopener,noreferrer",
+                        )
                       }
                     >
-                      Contas MCP
+                      Reabrir janela de autorização
                     </Button>
-                  </Group>
-                </div>
-              </div>
+                  )}
+                  <Button size="xs" variant="subtle" onClick={cancelConnect}>
+                    Cancelar
+                  </Button>
+                </Group>
+              </Group>
+            </div>
+          )}
 
-              {pendingOAuth && (
-                <div className="settings-row">
-                  <Stack gap="xs" style={{ width: "100%" }}>
-                    <Group justify="space-between" wrap="wrap" gap="xs">
-                      <Text size="xs" fw={600}>
-                        Concluir autorização OAuth do Suno MCP
-                      </Text>
-                      {pendingOAuth.authUrl && (
-                        <Button
-                          size="xs"
-                          variant="subtle"
-                          rightSection={<ExternalLink size={12} />}
-                          onClick={() =>
-                            window.open(
-                              pendingOAuth.authUrl,
-                              "_blank",
-                              "noopener,noreferrer",
-                            )
-                          }
-                        >
-                          Reabrir janela de autorização
-                        </Button>
-                      )}
-                    </Group>
-                    <Group gap="xs" align="flex-end" wrap="wrap">
+          {connectNotice?.text && (
+            <div className="settings-row">
+              <Text size="xs" c={connectNotice.color}>
+                {connectNotice.text}
+              </Text>
+            </div>
+          )}
+
+          {accounts.map((account) => {
+            const state = sunoAccountStateLabel(account);
+            const busy = accountBusy === account.id;
+            return (
+              <div className="settings-row" key={account.id}>
+                <div className="settings-row-info">
+                  {renaming?.id === account.id ? (
+                    <Group gap="xs">
                       <TextInput
                         size="xs"
-                        label="Código OAuth (opcional)"
-                        placeholder="Cole o code retornado"
-                        value={oauthCallbackInput.code}
-                        onChange={(e) => {
-                          const code = e.currentTarget.value;
-                          setOauthCallbackInput((old) => ({ ...old, code }));
+                        aria-label="Apelido da conta Suno"
+                        value={renaming.label}
+                        maxLength={80}
+                        autoFocus
+                        onChange={(event) => {
+                          const label = event.currentTarget.value;
+                          setRenaming((old) => ({ ...old, label }));
                         }}
-                        style={{ flex: 1, minWidth: 180 }}
-                      />
-                      <PasswordInput
-                        size="xs"
-                        label="Access token direto (opcional)"
-                        placeholder="Ou cole o access_token"
-                        value={oauthCallbackInput.access_token}
-                        onChange={(e) => {
-                          const access_token = e.currentTarget.value;
-                          setOauthCallbackInput((old) => ({
-                            ...old,
-                            access_token,
-                          }));
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter")
+                            safe(() =>
+                              renameAccount(account, renaming.label),
+                            )();
+                          if (event.key === "Escape") setRenaming(null);
                         }}
-                        style={{ flex: 1, minWidth: 180 }}
                       />
                       <Button
                         size="xs"
-                        loading={oauthBusy}
-                        onClick={safe(finishSunoOAuth)}
+                        onClick={safe(() =>
+                          renameAccount(account, renaming.label),
+                        )}
                       >
-                        Concluir OAuth
+                        Salvar
                       </Button>
                       <Button
                         size="xs"
                         variant="subtle"
-                        onClick={() => setPendingOAuth(null)}
+                        onClick={() => setRenaming(null)}
                       >
                         Cancelar
                       </Button>
                     </Group>
-                  </Stack>
-                </div>
-              )}
-
-              <div className="settings-row">
-                <div className="settings-row-info">
-                  <Text size="sm" fw={600}>
-                    Endereço do servidor MCP do Suno
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    Informe o endereço http(s) do servidor MCP do Suno.
-                  </Text>
-                </div>
-                <div className="settings-row-control">
-                  <TextInput
-                    w={280}
-                    aria-label="URL do servidor MCP do Suno"
-                    placeholder="https://seu-servidor-mcp/suno"
-                    value={draft.suno_mcp_url}
-                    onChange={(e) => {
-                      const next = e.currentTarget.value;
-                      setDraft((old) => ({ ...old, suno_mcp_url: next }));
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div className="settings-row">
-                <div className="settings-row-info">
-                  <Text size="sm" fw={600}>
-                    Comando MCP (opcional)
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    Preencha apenas se o servidor MCP iniciar por comando local.
-                  </Text>
+                  ) : (
+                    <Group gap="xs">
+                      <Text size="sm" fw={600}>
+                        {account.name}
+                      </Text>
+                      <Badge size="xs" variant="light" color={state.color}>
+                        {state.label}
+                      </Badge>
+                    </Group>
+                  )}
+                  {renaming?.id !== account.id &&
+                    !account.usable &&
+                    !account.expired &&
+                    account.hintText && (
+                      <Text size="xs" c="dimmed">
+                        {account.hintText}
+                      </Text>
+                    )}
                 </div>
                 <div className="settings-row-control">
-                  <TextInput
-                    w={280}
-                    aria-label="Comando do servidor MCP do Suno"
-                    placeholder="npx suno-mcp-server"
-                    value={draft.suno_mcp_command}
-                    onChange={(e) => {
-                      const next = e.currentTarget.value;
-                      setDraft((old) => ({ ...old, suno_mcp_command: next }));
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div className="settings-row">
-                <div className="settings-row-info">
-                  <Text size="sm" fw={600}>
-                    Token do Suno MCP (opcional)
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    {sunoStatus.connected
-                      ? "Sessão OAuth ativa no Cofre. Preencha apenas se quiser definir um token manual."
-                      : catalog?.selection?.suno_mcp_token_configured === true
-                        ? "Token manual configurado no Cofre (presença não valida autenticação). Preencha apenas para substituir."
-                        : "Chave Bearer manual caso não utilize OAuth."}
-                  </Text>
-                </div>
-                <div className="settings-row-control">
-                  <PasswordInput
-                    w={280}
-                    aria-label="Token do servidor MCP do Suno"
-                    placeholder={
-                      catalog?.selection?.suno_mcp_token_configured === true
-                        ? "Token configurado"
-                        : "Cole o token (opcional)"
-                    }
-                    value={draft.suno_mcp_token}
-                    onChange={(e) => {
-                      const next = e.currentTarget.value;
-                      setDraft((old) => ({ ...old, suno_mcp_token: next }));
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div className="settings-row">
-                <Stack gap="xs" style={{ width: "100%" }}>
-                  <Group justify="space-between">
-                    <Text size="xs" c="dimmed">
-                      Parâmetros avançados de OAuth (opcionais — usa DCR
-                      automático + PKCE por padrão)
-                    </Text>
+                  <Group gap="xs" wrap="wrap">
+                    {account.expired && (
+                      <Button
+                        size="xs"
+                        variant="light"
+                        leftSection={<RefreshCw size={14} />}
+                        disabled={serverBlocked || Boolean(connecting) || busy}
+                        onClick={safe(() => connectSuno(account))}
+                      >
+                        Reconectar
+                      </Button>
+                    )}
                     <Button
                       size="xs"
                       variant="subtle"
-                      leftSection={<Settings2 size={13} />}
-                      onClick={() => setOauthAdvancedOpen((v) => !v)}
+                      leftSection={<Pencil size={13} />}
+                      disabled={serverBlocked || busy}
+                      onClick={() =>
+                        setRenaming({ id: account.id, label: account.name })
+                      }
                     >
-                      {oauthAdvancedOpen ? "Ocultar OAuth" : "Configurar OAuth"}
+                      Apelido
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="light"
+                      color="red"
+                      loading={busy}
+                      leftSection={<Unlink size={14} />}
+                      disabled={serverBlocked}
+                      onClick={safe(() => disconnectAccount(account))}
+                    >
+                      Desconectar
                     </Button>
                   </Group>
-                  <Collapse in={oauthAdvancedOpen}>
-                    <Stack gap="xs" pt="xs">
-                      <Group grow align="flex-start">
-                        <TextInput
-                          size="xs"
-                          label="Client ID (opcional)"
-                          placeholder="Automático via DCR se vazio"
-                          value={draft.suno_mcp_client_id}
-                          onChange={(e) => {
-                            const val = e.currentTarget.value;
-                            setDraft((old) => ({
-                              ...old,
-                              suno_mcp_client_id: val,
-                            }));
-                          }}
-                        />
-                        <PasswordInput
-                          size="xs"
-                          label="Client Secret (opcional)"
-                          placeholder="Opcional"
-                          value={draft.suno_mcp_client_secret}
-                          onChange={(e) => {
-                            const val = e.currentTarget.value;
-                            setDraft((old) => ({
-                              ...old,
-                              suno_mcp_client_secret: val,
-                            }));
-                          }}
-                        />
-                      </Group>
-                      <Group grow align="flex-start">
-                        <TextInput
-                          size="xs"
-                          label="Authorization URL (opcional)"
-                          placeholder="Usa padrão Suno se vazio"
-                          value={draft.suno_mcp_auth_url}
-                          onChange={(e) => {
-                            const val = e.currentTarget.value;
-                            setDraft((old) => ({
-                              ...old,
-                              suno_mcp_auth_url: val,
-                            }));
-                          }}
-                        />
-                        <TextInput
-                          size="xs"
-                          label="Token URL (opcional)"
-                          placeholder="Usa padrão Suno se vazio"
-                          value={draft.suno_mcp_token_url}
-                          onChange={(e) => {
-                            const val = e.currentTarget.value;
-                            setDraft((old) => ({
-                              ...old,
-                              suno_mcp_token_url: val,
-                            }));
-                          }}
-                        />
-                      </Group>
-                      <TextInput
-                        size="xs"
-                        label="Escopos OAuth (opcional)"
-                        placeholder="music.generate profile"
-                        value={draft.suno_mcp_scopes}
-                        onChange={(e) => {
-                          const val = e.currentTarget.value;
-                          setDraft((old) => ({ ...old, suno_mcp_scopes: val }));
-                        }}
-                      />
-                    </Stack>
-                  </Collapse>
-                </Stack>
+                </div>
               </div>
-            </>
+            );
+          })}
+
+          {legacy.present && (
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <Text size="sm" fw={600}>
+                  Credenciais antigas do Suno
+                </Text>
+                <Text size="xs" c="dimmed">
+                  Este computador ainda guarda credenciais do Suno da versão
+                  anterior. A PIA não as usa mais.
+                </Text>
+              </div>
+              <div className="settings-row-control">
+                <Button
+                  size="xs"
+                  variant="light"
+                  color="red"
+                  loading={legacyBusy}
+                  leftSection={<Trash2 size={14} />}
+                  onClick={safe(removeLegacyCredentials)}
+                >
+                  Remover credenciais antigas
+                </Button>
+              </div>
+            </div>
           )}
         </div>
       </div>

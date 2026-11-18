@@ -78,24 +78,3 @@ def rpg_sessions(
         storage_factory=_get_storage,
         user_path_fn=user_path,
     )
-
-
-def call_suno_mcp(
-    prompt: str,
-    *,
-    lyrics: str = "",
-    duration: int = 30,
-    suno_url: str = "",
-    suno_cmd: str = "",
-    suno_token: str = "",
-) -> dict[str, Any]:
-    return get_plugin_host().call_tool(
-        "music",
-        "pia_music_suno_mcp",
-        prompt,
-        lyrics=lyrics,
-        duration=duration,
-        suno_url=suno_url,
-        suno_cmd=suno_cmd,
-        suno_token=suno_token,
-    )

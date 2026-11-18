@@ -95,7 +95,8 @@ def test_plugin_context_and_host_load_plugin_tools():
         mod = host.load_tools_module(pid)
         assert mod is not None
 
-    assert host.get_context("music").tools.get("pia_music_suno_mcp") is not None
+    # The direct Suno MCP chat tool left in T8 (RN18).
+    assert host.get_context("music").tools.get("pia_music_suno_mcp") is None
     assert (
         host.get_context("podcast_automation").tools.get("pia_rpg_sessions") is not None
     )

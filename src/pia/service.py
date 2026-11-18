@@ -824,38 +824,26 @@ class WorkspaceService:
 
             return get_tts_service().selection()
         if path == "/music/providers":
-            from Plugins.Apps.music import service as music_service
-
-            return music_service.providers_catalog()
+            # T6: through the music app API (resumes this PC's Suno job).
+            return self.apps.load("music").route("GET", path, data, query, self)
         if path == "/music/select" and method == "POST":
-            from Plugins.Apps.music import service as music_service
+            return self.apps.load("music").route(method, path, data, query, self)
+        if path == "/music/suno/legacy-credentials" and method == "GET":
+            from Plugins.Apps.music import suno_legacy
 
-            return music_service.select_provider(
-                provider=data.get("provider"),
-                gemini_model=data.get("gemini_model"),
-                suno_mcp_url=data.get("suno_mcp_url"),
-                suno_mcp_command=data.get("suno_mcp_command"),
-                suno_mcp_token=data.get("suno_mcp_token"),
-                suno_mcp_auth_type=data.get("suno_mcp_auth_type"),
-                suno_mcp_client_id=data.get("suno_mcp_client_id"),
-                suno_mcp_client_secret=data.get("suno_mcp_client_secret"),
-                suno_mcp_auth_url=data.get("suno_mcp_auth_url"),
-                suno_mcp_token_url=data.get("suno_mcp_token_url"),
-                suno_mcp_scopes=data.get("suno_mcp_scopes"),
-                suno_mcp_redirect_uri=data.get("suno_mcp_redirect_uri"),
-            )
-        if path == "/music/suno/oauth/start" and method == "POST":
-            from Plugins.Apps.music import service as music_service
+            return suno_legacy.legacy_state()
+        if path == "/music/suno/legacy-credentials/remove" and method == "POST":
+            from Plugins.Apps.music import suno_legacy
 
-            return music_service.suno_oauth_start(data)
-        if path == "/music/suno/oauth/callback" and method == "POST":
-            from Plugins.Apps.music import service as music_service
+            return suno_legacy.remove_legacy(data)
+        if path == "/music/suno/legacy-credentials/dismiss" and method == "POST":
+            from Plugins.Apps.music import suno_legacy
 
-            return music_service.suno_oauth_callback(data)
-        if path == "/music/suno/oauth/disconnect" and method == "POST":
-            from Plugins.Apps.music import service as music_service
-
-            return music_service.suno_oauth_disconnect()
+            return suno_legacy.dismiss_legacy()
+        if path.startswith("/music/"):
+            # T6: catalog, select, Suno via PIA Server and history live in the
+            # music app API (shared job registry with /apps/music/*).
+            return self.apps.load("music").route(method, path, data, query, self)
         if path == "/mcp/servers":
             from src.mcp_connectors import ACCOUNT_MODES, get_mcp_manager
 
