@@ -58,7 +58,7 @@ def test_suno_job_refused_error_carries_code(monkeypatch):
     handler = _route_raising(monkeypatch, exc)
     assert handler.status == 400
     assert handler.json() == {
-        "error": "Conecte o Suno em Configurações → Música",
+        "error": "Conecte o Suno em Configurações → Música.",
         "code": "suno_not_connected",
     }
 

@@ -41,23 +41,7 @@ def handle(action, data, context):
         return service.select_provider(
             provider=data.get("provider"),
             gemini_model=data.get("gemini_model"),
-            suno_mcp_url=data.get("suno_mcp_url"),
-            suno_mcp_command=data.get("suno_mcp_command"),
-            suno_mcp_token=data.get("suno_mcp_token"),
-            suno_mcp_auth_type=data.get("suno_mcp_auth_type"),
-            suno_mcp_client_id=data.get("suno_mcp_client_id"),
-            suno_mcp_client_secret=data.get("suno_mcp_client_secret"),
-            suno_mcp_auth_url=data.get("suno_mcp_auth_url"),
-            suno_mcp_token_url=data.get("suno_mcp_token_url"),
-            suno_mcp_scopes=data.get("suno_mcp_scopes"),
-            suno_mcp_redirect_uri=data.get("suno_mcp_redirect_uri"),
         )
-    if action == "suno-oauth-start":
-        return service.suno_oauth_start(data)
-    if action == "suno-oauth-callback":
-        return service.suno_oauth_callback(data)
-    if action == "suno-oauth-disconnect":
-        return service.suno_oauth_disconnect()
     if action == "library":
         return {
             "items": service.library(),

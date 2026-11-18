@@ -2,7 +2,6 @@
 
 import base64
 import io
-import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -241,46 +240,6 @@ class ChatToolTests(unittest.TestCase):
             self.assertIn("Modelos de IA indisponíveis", res2)
             self.assertIn("Configurações", res2)
             self.assertEqual(deltas2, [res2])
-
-    def test_suno_mcp_does_not_duplicate_on_invalid_response(self):
-        from Plugins.Apps.music.tools import call_suno_mcp
-
-        for outcome in (ValueError("invalid JSON"), {}, []):
-            with (
-                self.subTest(outcome=outcome),
-                patch("Plugins.Apps.music.tools._mcp_http_rpc") as rpc,
-                patch("requests.post") as post,
-            ):
-                if isinstance(outcome, Exception):
-                    rpc.side_effect = outcome
-                else:
-                    rpc.return_value = outcome
-                with self.assertRaisesRegex(RuntimeError, "não foi repetida"):
-                    call_suno_mcp(
-                        "um dia alegre",
-                        suno_url="https://suno.example.com/mcp",
-                        suno_token="tok",
-                    )
-                post.assert_not_called()
-
-    def test_suno_mcp_does_not_duplicate_on_timeout(self):
-        import requests as req_mod
-        from Plugins.Apps.music.tools import call_suno_mcp
-
-        with (
-            patch(
-                "Plugins.Apps.music.tools._mcp_http_rpc",
-                side_effect=req_mod.ReadTimeout("timed out"),
-            ),
-            patch("requests.post") as post_mock,
-        ):
-            with self.assertRaisesRegex(RuntimeError, "Tempo esgotado"):
-                call_suno_mcp(
-                    "um dia alegre",
-                    suno_url="https://suno.example.com/mcp",
-                    suno_token="tok",
-                )
-            post_mock.assert_not_called()
 
 
 if __name__ == "__main__":

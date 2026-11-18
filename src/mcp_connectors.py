@@ -33,29 +33,6 @@ DEFAULT_TOOL_TIMEOUT = 30
 # handshake" (legacy/stateless endpoints). The call proceeds without a session.
 _HANDSHAKE_UNSUPPORTED_STATUS = (400, 404, 405, 501)
 
-SUNO_OAUTH_DEFAULTS = {
-    "mcp_url": "https://api.suno.com/mcp",
-    "register_url": "https://studio-api-prod.suno.com/api/v2/external/oauth/register/",
-    "auth_url": "https://studio-api-prod.suno.com/api/v2/external/oauth/authorize/",
-    "token_url": "https://studio-api-prod.suno.com/api/v2/external/oauth/token/",
-    "scopes": "api:v0 credits:spend download library:read library:search library:write offline_access profile:read",
-    "redirect_uri": "https://pia.travelrpg.com/oauth/callback",
-    "client_name": "pia.travelrpg.com",
-}
-
-
-def _is_suno_server(server_id: str, server: dict[str, Any] | None = None) -> bool:
-    if (server_id or "").strip() == "suno_mcp":
-        return True
-    raw_url = str((server or {}).get("url") or "").strip()
-    if not raw_url:
-        return False
-    try:
-        return (urlsplit(raw_url).hostname or "").lower() == "api.suno.com"
-    except ValueError:
-        return False
-
-
 _ERROR_URL_RE = re.compile(r"https?://[^\s'\"<>]+")
 _ERROR_SECRET_RE = re.compile(
     r"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=-]+"
@@ -390,7 +367,7 @@ def _infer_known_tools(server: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 OAUTH_ACCOUNT_REMOVED_MESSAGE = (
-    "A conta foi removida durante a conexão OAuth; conecte o Suno de novo."
+    "A conta foi removida durante a conexão OAuth; conecte de novo."
 )
 
 
@@ -461,16 +438,6 @@ class MCPConnectorManager:
             if s.get("id") == server_id:
                 return s
         raise KeyError(f"Servidor MCP '{server_id}' não encontrado.")
-
-    def find_suno_servers(self) -> list[dict[str, Any]]:
-        """Registered servers recognized as Suno (id ``suno_mcp`` or host ``api.suno.com``).
-
-        Returns the raw entries (secrets live in the vault, never here), in the
-        stored order. Enabled/disabled filtering is left to the caller.
-        """
-        return [
-            s for s in self._raw_servers() if _is_suno_server(str(s.get("id") or ""), s)
-        ]
 
     def _normalize_account(
         self,
@@ -1502,44 +1469,12 @@ class MCPConnectorManager:
         account_id: str | None = None,
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Prepare/persist OAuth config and return the authorization URL.
-
-        The Suno dynamic client registration (HTTP) runs OUTSIDE
-        ``_store_lock``: read/prepare under the lock, release it, POST, then
-        re-acquire and merge (client_id only if still empty).
-        """
+        """Prepare/persist OAuth config and return the authorization URL."""
         payload = payload or {}
         with self._store_lock:
             servers, server, acc, account_id = self._oauth_prepare_account(
                 server_id, account_id, payload
             )
-            oauth = acc.setdefault("oauth", {})
-            need_dcr = (
-                _is_suno_server(server_id, server)
-                and not str(oauth.get("client_id") or "").strip()
-                and not payload.get("access_token")
-            )
-            if not need_dcr:
-                return self._oauth_finish_start(
-                    servers, server, acc, account_id, payload
-                )
-            redirect_uri = str(oauth.get("redirect_uri") or "")
-            self._save_raw_servers(servers)
-
-        cid = self._register_suno_client(redirect_uri)  # no lock held
-
-        with self._store_lock:
-            servers = self._raw_servers()
-            try:
-                server, acc = self._find_server_account(servers, server_id, account_id)
-            except KeyError:
-                raise ValueError(OAUTH_ACCOUNT_REMOVED_MESSAGE) from None
-            oauth = acc.setdefault("oauth", {})
-            # If another writer filled client_id during the DCR, it wins. The
-            # client registered here then stays unused at the Suno: it is a
-            # public client (PKCE, no secret) and there is no API to delete it.
-            if not str(oauth.get("client_id") or "").strip():
-                oauth["client_id"] = cid
             return self._oauth_finish_start(servers, server, acc, account_id, payload)
 
     @staticmethod
@@ -1559,32 +1494,10 @@ class MCPConnectorManager:
             )
         return server, acc
 
-    @staticmethod
-    def _register_suno_client(redirect_uri: str) -> str:
-        """Suno dynamic client registration (DCR). Never call under the lock."""
-        reg_resp = requests.post(
-            SUNO_OAUTH_DEFAULTS["register_url"],
-            json={
-                "client_name": SUNO_OAUTH_DEFAULTS["client_name"],
-                "redirect_uris": [redirect_uri],
-            },
-            headers={
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-            },
-            timeout=15,
-        )
-        reg_resp.raise_for_status()
-        reg_data = reg_resp.json() if reg_resp.content else {}
-        cid = str((reg_data or {}).get("client_id") or "").strip()
-        if not cid:
-            raise ValueError("Registro dinâmico (DCR) do Suno não retornou client_id.")
-        return cid
-
     def _oauth_prepare_account(
         self, server_id: str, account_id: str | None, payload: dict[str, Any]
     ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any], str]:
-        """Resolve/create the account and apply payload + Suno defaults.
+        """Resolve/create the account and apply the payload.
 
         Caller must hold ``_store_lock``. No network I/O.
         """
@@ -1634,10 +1547,6 @@ class MCPConnectorManager:
             )
             oauth["has_client_secret"] = True
 
-        if _is_suno_server(server_id, server):
-            for field in ("auth_url", "token_url", "scopes", "redirect_uri"):
-                if not str(oauth.get(field) or "").strip():
-                    oauth[field] = SUNO_OAUTH_DEFAULTS[field]
         return servers, server, acc, account_id
 
     def _oauth_finish_start(

@@ -211,11 +211,6 @@
       "type": "string"
     },
     {
-      "key": "state",
-      "value": "",
-      "type": "string"
-    },
-    {
       "key": "target",
       "value": "",
       "type": "string"
@@ -1989,7 +1984,7 @@
               }
             ],
             "url": "{{base_url}}/v1/music/generations",
-            "description": "Gera um lote de músicas. Sucesso devolve `{job}` e o progresso segue no SSE. A recusa antes do job (Suno não conectado ou credencial expirada) responde HTTP 400 com `{error, code}`, onde `code` é `suno_not_connected` ou `suno_credential_expired`.",
+            "description": "Gera um lote de músicas. Sucesso devolve `{job}` e o progresso segue no SSE. A recusa antes do job responde HTTP 400 com `{error, code}`, onde `code` é o motivo da indisponibilidade do Suno: `suno_not_connected`, `suno_credential_expired`, `pia_server_unpaired`, `pia_server_unreachable` ou `pia_server_unsupported`.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"prompt\": \"Piano instrumental tranquilo\",\n  \"lyrics\": \"\",\n  \"provider\": \"local\",\n  \"duration\": 30\n}",
@@ -2012,7 +2007,7 @@
                   }
                 ],
                 "url": "{{base_url}}/v1/music/generations",
-                "description": "Gera um lote de músicas. Sucesso devolve `{job}` e o progresso segue no SSE. A recusa antes do job (Suno não conectado ou credencial expirada) responde HTTP 400 com `{error, code}`, onde `code` é `suno_not_connected` ou `suno_credential_expired`.",
+                "description": "Gera um lote de músicas. Sucesso devolve `{job}` e o progresso segue no SSE. A recusa antes do job responde HTTP 400 com `{error, code}`, onde `code` é o motivo da indisponibilidade do Suno: `suno_not_connected`, `suno_credential_expired`, `pia_server_unpaired`, `pia_server_unreachable` ou `pia_server_unsupported`.",
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"prompt\": \"Piano instrumental tranquilo\",\n  \"lyrics\": \"\",\n  \"provider\": \"local\",\n  \"duration\": 30\n}",
@@ -2032,7 +2027,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"error\": \"Conecte o Suno em Configurações → Música\",\n  \"code\": \"suno_not_connected\"\n}"
+              "body": "{\n  \"error\": \"Conecte o Suno em Configurações → Música.\",\n  \"code\": \"suno_not_connected\"\n}"
             }
           ]
         }
@@ -2926,7 +2921,7 @@
               }
             ],
             "url": "{{base_url}}/api/pia/music/providers",
-            "description": "Catálogo dos geradores (T1). A entrada suno_mcp traz label, available, endpoint_configured, credential_state (missing|configured|expired), token_configured, auth_type, oauth_connected, campos OAuth mascarados, server_id e settings_route {view:settings, section:Apps/music}. selection traz o provedor salvo e os mesmos campos suno_mcp_* já mascarados. Sem segredos em claro.",
+            "description": "Catálogo dos geradores. O item suno_mcp (RN20) traz available, reason (pia_server_unpaired|pia_server_unreachable|pia_server_unsupported|suno_not_connected|suno_credential_expired|null), hint {text, route}, connected, credential_state, expires_at, settings, active_job e legacy_credentials {present, prompt}. selection traz provider e gemini_model. Nenhum token do Suno existe no PC (RN16).",
             "auth": {
               "type": "noauth"
             },
@@ -2957,13 +2952,13 @@
               }
             ],
             "url": "{{base_url}}/api/pia/music/select",
-            "description": "Salva o provedor (local, gemini ou suno_mcp) e a config do Suno. RN04: provider=suno_mcp pode ser gravado sem credencial; o app abre em Local até autorizar. Deixe token e segredos OAuth vazios se não for editá-los, para não reenviar valores mascarados.",
+            "description": "Salva o provedor (local, gemini ou suno_mcp) e o modelo Gemini. O modo Suno local/manual saiu (RN18).",
             "auth": {
               "type": "noauth"
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"suno_mcp\",\n  \"gemini_model\": \"lyria-3.5\",\n  \"suno_mcp_url\": \"https://api.suno.com/mcp\",\n  \"suno_mcp_command\": \"\",\n  \"suno_mcp_token\": \"\",\n  \"suno_mcp_auth_type\": \"oauth\",\n  \"suno_mcp_client_id\": \"\",\n  \"suno_mcp_client_secret\": \"\",\n  \"suno_mcp_auth_url\": \"\",\n  \"suno_mcp_token_url\": \"\",\n  \"suno_mcp_scopes\": \"\",\n  \"suno_mcp_redirect_uri\": \"\"\n}",
+              "raw": "{\n  \"provider\": \"suno_mcp\",\n  \"gemini_model\": \"lyria-3.5\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2974,7 +2969,25 @@
           "response": []
         },
         {
-          "name": "POST /api/pia/music/suno/oauth/callback",
+          "name": "GET /api/pia/music/suno/legacy-credentials",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/music/suno/legacy-credentials",
+            "description": "Credenciais antigas do Suno neste PC (RN17/CA15): {present, prompt, items:[{kind, label}]}. Só rótulos, nunca valores.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/music/suno/legacy-credentials/dismiss",
           "request": {
             "method": "POST",
             "header": [
@@ -2987,39 +3000,8 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{base_url}}/api/pia/music/suno/oauth/callback",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
-            "auth": {
-              "type": "noauth"
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"state\": \"{{state}}\",\n  \"account_id\": \"\",\n  \"code\": \"\",\n  \"access_token\": \"\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /api/pia/music/suno/oauth/disconnect",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{base_url}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/pia/music/suno/oauth/disconnect",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "url": "{{base_url}}/api/pia/music/suno/legacy-credentials/dismiss",
+            "description": "\"Agora não\": não apaga nada e desliga a pergunta do primeiro início.",
             "auth": {
               "type": "noauth"
             },
@@ -3036,7 +3018,7 @@
           "response": []
         },
         {
-          "name": "POST /api/pia/music/suno/oauth/start",
+          "name": "POST /api/pia/music/suno/legacy-credentials/remove",
           "request": {
             "method": "POST",
             "header": [
@@ -3049,14 +3031,14 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{base_url}}/api/pia/music/suno/oauth/start",
-            "description": "Inicia OAuth do Suno (DCR + PKCE). Campos vazios usam os defaults oficiais. Não é geração paga.",
+            "url": "{{base_url}}/api/pia/music/suno/legacy-credentials/remove",
+            "description": "Remove as credenciais antigas do Suno deste PC. Exige {confirm: true}; sem isso responde 400 code=confirmation_required e não apaga nada.",
             "auth": {
               "type": "noauth"
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"client_id\": \"\",\n  \"client_secret\": \"\",\n  \"auth_url\": \"\",\n  \"token_url\": \"\",\n  \"scopes\": \"\",\n  \"account_id\": \"\"\n}",
+              "raw": "{\n  \"confirm\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4524,7 +4506,7 @@
               }
             ],
             "url": "{{base_url}}/api/pia/apps/music/generate",
-            "description": "Gera um lote de músicas. Sucesso devolve `{job}` e o progresso segue no SSE. A recusa antes do job (Suno não conectado ou credencial expirada) responde HTTP 400 com `{error, code}`, onde `code` é `suno_not_connected` ou `suno_credential_expired`.",
+            "description": "Gera um lote de músicas. Sucesso devolve `{job}` e o progresso segue no SSE. A recusa antes do job responde HTTP 400 com `{error, code}`, onde `code` é o motivo da indisponibilidade do Suno: `suno_not_connected`, `suno_credential_expired`, `pia_server_unpaired`, `pia_server_unreachable` ou `pia_server_unsupported`.",
             "auth": {
               "type": "noauth"
             },
@@ -4554,7 +4536,7 @@
                   }
                 ],
                 "url": "{{base_url}}/api/pia/apps/music/generate",
-                "description": "Gera um lote de músicas. Sucesso devolve `{job}` e o progresso segue no SSE. A recusa antes do job (Suno não conectado ou credencial expirada) responde HTTP 400 com `{error, code}`, onde `code` é `suno_not_connected` ou `suno_credential_expired`.",
+                "description": "Gera um lote de músicas. Sucesso devolve `{job}` e o progresso segue no SSE. A recusa antes do job responde HTTP 400 com `{error, code}`, onde `code` é o motivo da indisponibilidade do Suno: `suno_not_connected`, `suno_credential_expired`, `pia_server_unpaired`, `pia_server_unreachable` ou `pia_server_unsupported`.",
                 "auth": {
                   "type": "noauth"
                 },
@@ -4577,7 +4559,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"error\": \"Conecte o Suno em Configurações → Música\",\n  \"code\": \"suno_not_connected\"\n}"
+              "body": "{\n  \"error\": \"Conecte o Suno em Configurações → Música.\",\n  \"code\": \"suno_not_connected\"\n}"
             }
           ]
         },
@@ -4695,100 +4677,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"suno_mcp\",\n  \"gemini_model\": \"lyria-3.5\",\n  \"suno_mcp_url\": \"https://api.suno.com/mcp\",\n  \"suno_mcp_command\": \"\",\n  \"suno_mcp_token\": \"\",\n  \"suno_mcp_auth_type\": \"oauth\",\n  \"suno_mcp_client_id\": \"\",\n  \"suno_mcp_client_secret\": \"\",\n  \"suno_mcp_auth_url\": \"\",\n  \"suno_mcp_token_url\": \"\",\n  \"suno_mcp_scopes\": \"\",\n  \"suno_mcp_redirect_uri\": \"\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /api/pia/apps/music/suno-oauth-callback",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{base_url}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/pia/apps/music/suno-oauth-callback",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
-            "auth": {
-              "type": "noauth"
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"state\": \"{{state}}\",\n  \"account_id\": \"\",\n  \"code\": \"\",\n  \"access_token\": \"\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /api/pia/apps/music/suno-oauth-disconnect",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{base_url}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/pia/apps/music/suno-oauth-disconnect",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
-            "auth": {
-              "type": "noauth"
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /api/pia/apps/music/suno-oauth-start",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{base_url}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/pia/apps/music/suno-oauth-start",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
-            "auth": {
-              "type": "noauth"
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"client_id\": \"\",\n  \"client_secret\": \"\",\n  \"auth_url\": \"\",\n  \"token_url\": \"\",\n  \"scopes\": \"\",\n  \"account_id\": \"\"\n}",
+              "raw": "{\n  \"provider\": \"suno_mcp\",\n  \"gemini_model\": \"lyria-3.5\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
