@@ -205,6 +205,26 @@ describe("music-suno-helpers: contas e seletor (RN07/RN09)", () => {
     assert.equal(resolveSunoAccountSelection(cat, null).value, null);
   });
 
+  it("dica 'Escolha a conta Suno' aparece antes do prompt; Gerar exige prompt", () => {
+    const cat = catalogWith({ accounts: [account("a"), account("b")] });
+    assert.deepEqual(
+      generateButtonState({
+        provider: "suno_mcp",
+        prompt: "",
+        selection: resolveSunoAccountSelection(cat, null),
+      }),
+      { enabled: false, hint: "Escolha a conta Suno" },
+    );
+    assert.deepEqual(
+      generateButtonState({
+        provider: "suno_mcp",
+        prompt: " ",
+        selection: resolveSunoAccountSelection(cat, "a"),
+      }),
+      { enabled: false, hint: "" },
+    );
+  });
+
   it("Gerar: prompt vazio, ocupado e outros provedores", () => {
     assert.equal(
       generateButtonState({ provider: "local", prompt: " " }).enabled,

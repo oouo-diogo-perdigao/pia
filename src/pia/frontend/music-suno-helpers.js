@@ -397,8 +397,9 @@ export function generateButtonState({
   blockText = "",
 }) {
   if (busy) return { enabled: false, hint: "" };
-  if (!String(prompt || "").trim()) return { enabled: false, hint: "" };
-  if (provider !== "suno_mcp") return { enabled: true, hint: "" };
+  const hasPrompt = Boolean(String(prompt || "").trim());
+  if (provider !== "suno_mcp") return { enabled: hasPrompt, hint: "" };
+  // As dicas do Suno aparecem mesmo antes de digitar o prompt (RN09/RN10).
   if (blockText) return { enabled: false, hint: blockText };
   if (!selection || selection.mode === "none")
     return { enabled: false, hint: "" };
@@ -407,7 +408,7 @@ export function generateButtonState({
       enabled: false,
       hint: selection.hint || SUNO_ACCOUNT_REQUIRED_HINT,
     };
-  return { enabled: true, hint: "" };
+  return { enabled: hasPrompt, hint: "" };
 }
 
 /**
