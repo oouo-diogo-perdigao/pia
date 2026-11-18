@@ -1,8 +1,10 @@
-"""T3: download seguro do áudio e robustez do MCP genérico.
+"""T3: download seguro do áudio e robustez do MCP genérico, mais (T6) o
+cliente tipado da API de dispositivo da PIA Server e o download pelo proxy.
 
 Os testes de generate()/generate_suno_batch via SunoMcpAdapter e do OAuth/DCR
-local do Suno saíram na T8 (RN18); a T6 reescreve o fluxo contra o fake da
-pia-server.
+local do Suno saíram na T8 (RN18). O fluxo Suno agora é remoto: os e2e estão
+em test_music_suno_e2e.py e o histórico em test_music_history_t6.py; aqui
+ficam o mapeamento de códigos do servidor e a segurança do download.
 """
 
 import json
@@ -898,3 +900,169 @@ def test_delete_server_takes_the_store_lock(tmp_path, monkeypatch):
     assert not delete_t.is_alive() and done.is_set()
     assert "error" not in delete_box
     assert all(s.get("id") != "srv" for s in mgr._raw_servers())
+
+
+# ==========================================================================
+# T6: device API (pia-server) -> exceções tipadas; download pelo proxy
+# ==========================================================================
+from Plugins.Apps.music import remote_suno  # noqa: E402
+from Plugins.Connectors.pia_server import remote as pia_device  # noqa: E402
+from tests._suno_remote_support import remote_env  # noqa: E402,F401  (fixture)
+
+
+class _Response:
+    def __init__(self, status, body=None, headers=None, chunks=()):
+        self.status_code = status
+        self._body = body
+        self.headers = headers or {}
+        self._chunks = chunks
+        self.content = b"x" if body is not None else b""
+
+    def json(self):
+        if isinstance(self._body, Exception):
+            raise self._body
+        return self._body
+
+    def iter_content(self, _size):
+        yield from self._chunks
+
+    def close(self):
+        pass
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "code"),
+    [
+        (401, {"error": "Pareamento inválido."}, "pia_server_unpaired"),
+        (401, {"error": "x", "code": "suno_credential_expired"}, "pia_server_unpaired"),
+        (500, {"error": "x", "code": "internal_error"}, "pia_server_unreachable"),
+        (503, ValueError("html"), "pia_server_unreachable"),
+        (409, {"error": "x", "code": "suno_job_active"}, "suno_job_active"),
+        (400, {"error": "x", "code": "suno_account_mismatch"}, "suno_account_mismatch"),
+        (
+            410,
+            {"error": "x", "code": "suno_track_unavailable"},
+            "suno_track_unavailable",
+        ),
+        (400, {"error": "x", "code": "Bad Code!"}, "pia_server_error"),
+        (404, ValueError("no json"), "pia_server_error"),
+    ],
+)
+def test_device_error_mapping(remote, monkeypatch, status, body, code):
+    monkeypatch.setattr(requests, "request", lambda *a, **k: _Response(status, body))
+    with pytest.raises(pia_device.DeviceApiError) as err:
+        pia_device.device_call("GET", "suno/status")
+    assert err.value.code == code and isinstance(err.value, ValueError)
+
+
+def test_device_connection_error_is_unreachable(remote, monkeypatch):
+    def boom(*_a, **_k):
+        raise requests.ConnectionError("down")
+
+    monkeypatch.setattr(requests, "request", boom)
+    with pytest.raises(pia_device.DeviceApiError) as err:
+        pia_device.device_call("GET", "account")
+    assert err.value.code == "pia_server_unreachable"
+
+
+def test_device_call_sends_protocol_header_and_no_redirects(remote, monkeypatch):
+    seen = {}
+
+    def fake(method, url, **kwargs):
+        seen.update(kwargs, method=method, url=url)
+        return _Response(200, {"ok": True})
+
+    monkeypatch.setattr(requests, "request", fake)
+    assert pia_device.device_call("GET", "account") == {"ok": True}
+    assert seen["headers"]["X-PIA-Protocol"] == "1"
+    assert seen["headers"]["Authorization"].startswith("Bearer ")
+    assert seen["allow_redirects"] is False and seen["url"].endswith("/device/account")
+
+
+def test_external_http_server_url_is_unpaired_even_with_loopback_flag(remote):
+    remote.profile.save(
+        "Connectors/pia_server", {"PIA_SERVER_URL": "http://example.com"}
+    )
+    assert pia_device.device_paired() is False
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Content-Type": "text/html"},
+        {"Content-Type": "audio/mpeg", "Content-Length": str(100 * 1024**2 + 1)},
+        {"Content-Type": "audio/mpeg", "Content-Length": "999"},
+        {"Content-Type": "audio/mpeg", "X-Content-SHA256": "0" * 64},
+    ],
+)
+def test_proxy_download_rejections_leave_no_file(remote, monkeypatch, headers):
+    monkeypatch.setattr(
+        requests, "request", lambda *a, **k: _Response(200, None, headers, [b"ID3abc"])
+    )
+    with pytest.raises(service.SunoDownloadError):
+        remote_suno.download_track("gen-1", 1)
+    assert not remote.output.exists() or not list(remote.output.iterdir())
+
+
+def test_proxy_download_streaming_above_limit_without_length(remote, monkeypatch):
+    monkeypatch.setattr(service, "MAX_AUDIO_BYTES", 10)
+    monkeypatch.setattr(
+        requests,
+        "request",
+        lambda *a, **k: _Response(
+            200, None, {"Content-Type": "audio/mpeg"}, [b"x" * 6] * 3
+        ),
+    )
+    with pytest.raises(service.SunoDownloadError):
+        remote_suno.download_track("gen-1", 1)
+    assert not list(remote.output.glob("*"))
+
+
+def test_proxy_download_ok_checks_sha256(remote):
+    gen = remote.fake.add_generation()
+    path = remote_suno.download_track(gen["id"], 1)
+    from tests.fixtures.fake_pia_server_suno import audio_bytes
+
+    assert path.parent == remote.output and path.read_bytes() == audio_bytes(
+        gen["id"], 1
+    )
+    assert not list(remote.output.glob("*.part"))
+
+
+@pytest.mark.parametrize(
+    ("code", "cls", "text"),
+    [
+        (
+            "suno_credential_expired",
+            service.SunoAuthError,
+            "A autorização da conta Suno Pessoal expirou. Reconecte em Configurações → Música",
+        ),
+        (
+            "suno_no_credits",
+            service.SunoNoCreditsError,
+            "A conta Suno Pessoal está sem créditos.",
+        ),
+        ("suno_unavailable", service.SunoUnavailableError, None),
+        ("suno_timeout", service.SunoTimeoutError, None),
+        (
+            "download_failed",
+            service.SunoDownloadError,
+            remote_suno.DOWNLOAD_FAILED_MESSAGE,
+        ),
+        (
+            "suno_track_unavailable",
+            remote_suno.SunoTrackUnavailableError,
+            "Esta música não está mais disponível no Suno.",
+        ),
+        ("incomplete_batch", service.SunoIncompleteBatchError, None),
+    ],
+)
+def test_job_error_codes_are_typed(code, cls, text):
+    exc = remote_suno.job_error(code, "Pessoal", 1, 3)
+    assert isinstance(exc, cls) and exc.code == code
+    if text:
+        assert str(exc) == text
+
+
+def test_job_error_rejects_weird_codes():
+    assert remote_suno.job_error("<script>").code == "error"

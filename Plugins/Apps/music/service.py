@@ -178,15 +178,15 @@ SUNO_REMOTE_SETTINGS = {"max_count": 10, "duration": [10, 180], "instrumental": 
 SUNO_HINTS = {
     "pia_server_unpaired": (
         "Para usar o Suno, entre na PIA Server em Configurações → PIA Server.",
-        "settings/pia_server",
+        {"view": "settings", "section": "Connectors/pia_server"},
     ),
     "suno_not_connected": (
         "Conecte o Suno em Configurações → Música.",
-        "settings/music",
+        dict(SUNO_SETTINGS_ROUTE),
     ),
     "suno_credential_expired": (
         "A conexão com o Suno expirou. Reconecte em Configurações → Música.",
-        "settings/music",
+        dict(SUNO_SETTINGS_ROUTE),
     ),
     "pia_server_unreachable": (
         "Não foi possível falar com a PIA Server agora. O Suno volta a aparecer "
@@ -206,25 +206,21 @@ def suno_hint(reason: str | None) -> dict[str, Any] | None:
     if not reason:
         return None
     text, route = SUNO_HINTS.get(reason, SUNO_HINTS["pia_server_unreachable"])
-    return {"text": text, "route": route}
+    # route is the object navigate() takes (VERSÃO FINAL item 5), not a string.
+    return {"text": text, "route": dict(route) if route else None}
 
 
 def _remote_suno_status() -> dict[str, Any]:
-    """Suno status as reported by the PIA Server (``GET /device/suno/status``).
+    """Suno status as reported by the PIA Server (T6).
 
-    T6 seam. Until the PIA Server client is wired, the provider is unavailable
-    with ``pia_server_unsupported`` (no local fallback, RN01/RN18).
-    Expected keys: available, reason, connected, credential_state, expires_at,
+    ``GET /device/account`` (capability ``suno:3``) + ``GET /device/suno/status``
+    through ``remote_suno`` (short cache). Keys: available, reason, connected,
+    credential_state, expires_at, accounts, selected_account_id, settings,
     active_job. Never returns a token.
     """
-    return {
-        "available": False,
-        "reason": "pia_server_unsupported",
-        "connected": False,
-        "credential_state": "missing",
-        "expires_at": None,
-        "active_job": None,
-    }
+    from Plugins.Apps.music import remote_suno
+
+    return remote_suno.suno_item()
 
 
 def suno_status() -> dict[str, Any]:
@@ -250,7 +246,11 @@ def suno_status() -> dict[str, Any]:
         "connected": remote.get("connected") is True,
         "credential_state": str(remote.get("credential_state") or "missing"),
         "expires_at": remote.get("expires_at"),
-        "settings": json.loads(json.dumps(SUNO_REMOTE_SETTINGS)),
+        "settings": json.loads(
+            json.dumps(remote.get("settings") or SUNO_REMOTE_SETTINGS)
+        ),
+        "accounts": list(remote.get("accounts") or []),
+        "selected_account_id": remote.get("selected_account_id"),
         "active_job": remote.get("active_job"),
         "settings_route": dict(SUNO_SETTINGS_ROUTE),
     }
@@ -287,17 +287,23 @@ def suno_job_refusal() -> SunoJobRefusedError | None:
     return SunoJobRefusedError(suno_hint(reason)["text"], reason)
 
 
+def suno_job_account(suno_account_id: Any = None) -> dict[str, Any]:
+    """Suno account of a new job (RN09/RN10), or a 400 ``RemoteMusicError``:
+    ``suno_account_required`` with 2+ valid accounts and no explicit id (no
+    fallback to default_account_id or the saved choice), ``suno_job_active``
+    while the PIA account has a job, ``suno_account_not_found``..."""
+    from Plugins.Apps.music import remote_suno
+
+    return remote_suno.resolve_account(suno_account_id)
+
+
 def suno_backend() -> Any:
-    """Client that runs one Suno call (``generate(prompt, lyrics=, duration=,
-    cancelled=)``). T6 seam: returns the PIA Server client. Raises a typed
-    error when the provider is unavailable; never talks to the Suno directly.
-    """
-    refusal = suno_job_refusal()
-    if refusal is not None and refusal.code == "suno_credential_expired":
-        raise SunoAuthError()
-    raise SunoUnavailableError(
-        str(refusal) if refusal is not None else SunoUnavailableError.default_message
-    )
+    """PIA Server client of the batch worker (T6): ``create(data, account)``
+    starts the job on the server and ``run(runner, ...)`` follows it and
+    downloads every ready track. Never talks to the Suno directly."""
+    from Plugins.Apps.music import remote_suno
+
+    return remote_suno.BACKEND
 
 
 def suno_known_secrets() -> list[str]:
@@ -391,7 +397,12 @@ def providers_catalog():
     }
 
 
-def select_provider(*, provider: str | None = None, gemini_model: str | None = None):
+def select_provider(
+    *,
+    provider: str | None = None,
+    gemini_model: str | None = None,
+    suno_account_id: str | None = None,
+):
     from src.settings_store import get_store
 
     updates = {}
@@ -404,6 +415,13 @@ def select_provider(*, provider: str | None = None, gemini_model: str | None = N
         updates["MUSIC_PROVIDER"] = norm
     if gemini_model is not None and str(gemini_model).strip():
         updates["MUSIC_GEMINI_MODEL"] = str(gemini_model).strip()
+    if suno_account_id is not None:
+        # Persisted like the provider; never a fallback with 2+ valid accounts
+        # (RN09): such a generation must carry suno_account_id.
+        account = str(suno_account_id).strip()
+        if account and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", account):
+            raise ValueError("Conta Suno inválida.")
+        updates["MUSIC_SUNO_ACCOUNT_ID"] = account
     if updates:
         get_store().save("Apps/music", updates)
     return providers_catalog()
@@ -901,13 +919,43 @@ def generate_suno_batch(
     cancel_event: Any = None,
     on_track: Any = None,
     adapter: Any = None,
+    on_progress: Any = None,
+    runner: Any = None,
+    suno_account_id: Any = None,
 ) -> list[dict[str, Any]]:
-    """Generate ``count`` Suno tracks with ceil(count/2) calls (2 clips each).
+    """Generate ``count`` Suno tracks.
 
-    Stops at the first failed clip (no extra call) and keeps the ones already
-    saved. Every raised exception carries ``completed``, ``total`` and
-    ``items`` (tracks saved before the failure).
+    T6: without ``adapter`` the job runs on the PIA Server (``runner`` from
+    ``suno_backend().create`` or created here) and every ready track, extras
+    included, is downloaded into OUTPUT (RN12). ``adapter`` keeps the per-call
+    batch below for injected test clients. Every raised exception carries
+    ``completed``, ``total`` and ``items``.
     """
+    if adapter is None:
+        backend = suno_backend()
+        if runner is None:
+            try:
+                refusal = suno_job_refusal()
+                if refusal is not None:
+                    raise refusal
+                data = {
+                    "prompt": prompt,
+                    "lyrics": lyrics,
+                    "duration": duration,
+                    "count": count,
+                }
+                runner = backend.create(data, suno_job_account(suno_account_id))
+            except BaseException as exc:
+                exc.completed, exc.total, exc.items = 0, count, []
+                raise
+        return backend.run(
+            runner,
+            progress=progress,
+            cancelled=cancelled,
+            cancel_event=cancel_event,
+            on_track=on_track,
+            on_progress=on_progress,
+        )
     _validate_generation_input(prompt, lyrics, duration)
     if type(count) is not int or not 1 <= count <= 10:
         raise ValueError("Quantidade deve estar entre 1 e 10.")
@@ -1032,10 +1080,12 @@ def generate(
             "Escolha local, gemini ou suno_mcp. Flow Music é usado na interface oficial."
         )
     if provider == "suno_mcp":
-        # One track = one Suno call; the 2nd clip is discarded (select_suno_clips).
-        return generate_suno_batch(
+        # One requested track; an extra clip is saved too (RN12) but the
+        # caller gets the requested one.
+        items = generate_suno_batch(
             prompt, lyrics, duration, 1, progress=progress, cancelled=cancelled
-        )[0]
+        )
+        return next((i for i in items if not i.get("extra")), items[0])
     if not _generation_lock.acquire(blocking=False):
         raise RuntimeError("Já existe uma geração musical em andamento.")
     try:
