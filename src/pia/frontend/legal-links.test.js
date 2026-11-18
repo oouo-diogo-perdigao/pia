@@ -28,18 +28,18 @@ test("monta as URLs a partir de um servidor customizado", () => {
   });
   assert.equal(
     legalUrl("https://exemplo.com:8443/pia", "termos"),
-    "https://exemplo.com:8443/pia/termos",
+    "https://exemplo.com:8443/termos",
   );
 });
 
-test("remove barra final, query, fragmento e credenciais", () => {
+test("usa só a origem: descarta caminho, barra final, query, fragmento e credenciais", () => {
   assert.equal(
     legalUrl("https://pia.exemplo.com/", "termos"),
     "https://pia.exemplo.com/termos",
   );
   assert.equal(
     legalUrl("  https://pia.exemplo.com/base///  ", "privacidade"),
-    "https://pia.exemplo.com/base/privacidade",
+    "https://pia.exemplo.com/privacidade",
   );
   assert.equal(
     legalUrl("https://user:senha@pia.exemplo.com/?x=1#connectors", "termos"),

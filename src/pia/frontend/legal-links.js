@@ -10,12 +10,7 @@ function httpsBase(server) {
     return null;
   }
   if (url.protocol !== "https:" || !url.hostname) return null;
-  url.username = "";
-  url.password = "";
-  url.search = "";
-  url.hash = "";
-  url.pathname = url.pathname.replace(/\/+$/, "");
-  return url.href.replace(/\/+$/, "");
+  return url.origin;
 }
 
 export function legalServer(...candidates) {
