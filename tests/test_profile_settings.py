@@ -236,3 +236,75 @@ def test_migration_relocates_managed_file_references(tmp_path):
     assert saved == store.path.parent / "files/config/example.txt"
     assert saved.read_text() == "fixture"
     assert not asset.exists()
+
+
+MCP_ACCESS = "mcp:connector:suno_mcp:default:oauth_access_token"
+MCP_REFRESH = "mcp:connector:suno_mcp:default:oauth_refresh_token"
+
+
+def test_export_skips_device_local_mcp_connector_secrets(tmp_path):
+    source = SettingsStore(tmp_path / "source.db", Vault())
+    source.save("general", {"GEMINI_API_KEY": "shared-fixture"})
+    for name, value in (
+        (MCP_ACCESS, "fixture-mcp-access-value"),
+        (MCP_REFRESH, "fixture-mcp-refresh-value"),
+    ):
+        source.vault.set(name, value)
+        source.register_secret(name)
+
+    plain = export_config("", source)
+    raw = base64.b64decode(plain["data"])
+    assert b"mcp:" not in raw
+    assert b"fixture-mcp-" not in raw
+    assert set(json.loads(raw[len(b"PIA-BACKUP-PLAIN-1\n") :])["secrets"]) == {
+        "setting:general:GEMINI_API_KEY"
+    }
+    encrypted = export_config("uma senha longa e privada", source)
+    assert (
+        preview_config(encrypted["data"], "uma senha longa e privada")["credentials"]
+        == 1
+    )
+    # Exporting never touches the local MCP credentials.
+    assert source.vault.get(MCP_ACCESS) == "fixture-mcp-access-value"
+
+
+def test_import_discards_mcp_secrets_from_older_backups_without_error(tmp_path):
+    from src.config_transfer import PLAIN_MAGIC
+
+    target = SettingsStore(tmp_path / "target.db", Vault())
+    target.vault.set(MCP_ACCESS, "local-mcp-value")
+    target.register_secret(MCP_ACCESS)
+    payload = {
+        "version": 1,
+        "settings": [
+            [
+                "general",
+                "GEMINI_API_KEY",
+                None,
+                "secret",
+                "setting:general:GEMINI_API_KEY",
+            ]
+        ],
+        "documents": [],
+        "secrets": {
+            "setting:general:GEMINI_API_KEY": "shared-fixture",
+            MCP_ACCESS: "fixture-mcp-access-value",
+            MCP_REFRESH: "fixture-mcp-refresh-value",
+        },
+        "files": {},
+    }
+    data = base64.b64encode(PLAIN_MAGIC + json.dumps(payload).encode()).decode()
+
+    assert preview_config(data, "")["credentials"] == 1
+    import_config(data, "", target)
+    assert target.values("general")["GEMINI_API_KEY"] == "shared-fixture"
+    assert target.vault.get(MCP_REFRESH) is None
+    # The local MCP credential is neither overwritten nor removed.
+    assert target.vault.get(MCP_ACCESS) == "local-mcp-value"
+    assert MCP_REFRESH not in {row[0] for row in target.rows("vault_entries")}
+
+    # Only mcp: is dropped; other unknown vault names are still rejected.
+    payload["secrets"]["other:name"] = "x"
+    bad = base64.b64encode(PLAIN_MAGIC + json.dumps(payload).encode()).decode()
+    with pytest.raises(ValueError, match="Entrada de cofre inválida"):
+        preview_config(bad, "")

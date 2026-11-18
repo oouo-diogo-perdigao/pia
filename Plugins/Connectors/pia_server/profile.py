@@ -3,7 +3,7 @@
 import base64
 import json
 
-from src.config_transfer import PLAIN_MAGIC, decode, export_config
+from src.config_transfer import PLAIN_MAGIC, decode, export_config, local_only_secret
 
 from .service import SECTION
 from .remote import SECTIONS, managed_secret
@@ -57,7 +57,9 @@ def snapshot(store):
     payload["secrets"] = {
         key: secret
         for key, secret in payload["secrets"].items()
-        if not managed_secret(key) and not key.startswith("setting:" + SECTION + ":")
+        if not managed_secret(key)
+        and not key.startswith("setting:" + SECTION + ":")
+        and not local_only_secret(key)
     }
     payload["preferences"] = [
         row
