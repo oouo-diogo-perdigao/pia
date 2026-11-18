@@ -49,7 +49,8 @@ def test_catalogue_matches_generated_artifact_and_real_dispatch():
     assert (
         next(v for v in collection["variable"] if v["key"] == "api_key")["value"] == ""
     )
-    # /music/select e /music/providers sem o modo Suno local/manual (T8, RN18).
+    # /music/select e /music/providers sem o modo Suno local/manual (T8, RN18)
+    # e sem a conta Suno, que vai só no generate (T9).
     select = next(r for r in requests if r["url"].endswith("/api/pia/music/select"))
     assert json.loads(select["body"]["raw"]) == {
         "provider": "suno_mcp",
@@ -93,6 +94,79 @@ def test_catalogue_matches_generated_artifact_and_real_dispatch():
         "error": "Conecte o Suno em Configurações → Música.",
         "code": "suno_not_connected",
     }
+    # T6/T9: rotas locais do Suno pela PIA Server e do histórico.
+    for route in (
+        ("GET", "/api/pia/music/suno/status"),
+        ("POST", "/api/pia/music/suno/connect"),
+        ("GET", "/api/pia/music/suno/connect/{{suno_attempt_id}}"),
+        ("POST", "/api/pia/music/suno/accounts/{{suno_account_id}}/rename"),
+        ("POST", "/api/pia/music/suno/disconnect"),
+        ("GET", "/api/pia/music/history"),
+        ("DELETE", "/api/pia/music/history/{{history_id}}"),
+        (
+            "POST",
+            "/api/pia/music/history/{{history_id}}/tracks/{{track_n}}/redownload",
+        ),
+    ):
+        assert route in routes, route
+    by_url = {
+        (item["request"]["method"], item["request"]["url"]): item
+        for folder in collection["item"]
+        for item in folder["item"]
+    }
+    music_items = [
+        item
+        for (method, url), item in by_url.items()
+        if "/api/pia/music/suno/" in url or "/api/pia/music/history" in url
+    ]
+    for item in music_items:
+        assert item["response"], item["name"]
+        for example in item["response"]:
+            assert example["code"] in (200, 400)
+            body = json.loads(example["body"])
+            if example["code"] == 400:
+                assert set(body) == {"error", "code"}
+                assert body["code"] != "pia_server_error"
+    connect = by_url[("POST", "{{base_url}}/api/pia/music/suno/connect")]
+    assert json.loads(connect["request"]["body"]["raw"]) == {
+        "replace_account_id": "{{suno_account_id}}"
+    }
+    assert set(json.loads(connect["response"][0]["body"])) == {
+        "auth_url",
+        "attempt_id",
+        "expires_in",
+    }
+    attempt = by_url[
+        ("GET", "{{base_url}}/api/pia/music/suno/connect/{{suno_attempt_id}}")
+    ]
+    attempt_bodies = [json.loads(e["body"]) for e in attempt["response"]]
+    assert {"state": "expired"} in attempt_bodies
+    rename = by_url[
+        (
+            "POST",
+            "{{base_url}}/api/pia/music/suno/accounts/{{suno_account_id}}/rename",
+        )
+    ]
+    assert json.loads(rename["request"]["body"]["raw"]) == {"label": "Conta principal"}
+    assert "invalid_label" in rename["request"]["description"]
+    history = by_url[("GET", "{{base_url}}/api/pia/music/history?cursor=&limit=100")]
+    assert "availability" in history["request"]["description"]
+    suno_generate = next(
+        item
+        for folder in collection["item"]
+        for item in folder["item"]
+        if item["name"].endswith("Suno (gasta créditos)")
+    )
+    body = json.loads(suno_generate["request"]["body"]["raw"])
+    assert body["provider"] == "suno_mcp" and "suno_account_id" in body
+    assert "GASTA CRÉDITOS" in suno_generate["request"]["description"]
+    for url in (
+        "{{base_url}}/api/pia/music/suno/legacy-credentials",
+        "{{base_url}}/api/pia/music/suno/legacy-credentials/remove",
+    ):
+        method = "GET" if url.endswith("legacy-credentials") else "POST"
+        assert by_url[(method, url)]["response"], url
+
     v1_generate = next(
         item
         for folder in collection["item"]
