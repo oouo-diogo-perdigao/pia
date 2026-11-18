@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Badge,
   Button,
@@ -9,9 +9,10 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-import { Check, KeyRound, Plug } from "lucide-react";
+import { Check, ExternalLink, KeyRound, Plug } from "lucide-react";
 import { api, safe } from "./api";
 import { usePia } from "./shared";
+import { legalLinks } from "./legal-links";
 import {
   ICE_SIZE_OPTIONS,
   LLM_MODEL_OPTIONS,
@@ -61,6 +62,64 @@ function VaultLinkRow({ title, description, configured, onOpenVault }) {
         >
           Configurar no Cofre
         </Button>
+      </div>
+    </div>
+  );
+}
+
+function LegalLinksCard() {
+  const { t } = usePia();
+  const [links, setLinks] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    api("/integrations/pia_server/account")
+      .then((account) => {
+        if (active) setLinks(legalLinks(account?.server));
+      })
+      .catch(() => {
+        if (active) setLinks(legalLinks());
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const rows = [
+    { key: "privacidade", title: "Política de Privacidade" },
+    { key: "termos", title: "Termos de Serviço" },
+  ];
+
+  return (
+    <div>
+      <div className="settings-section-title">{t("Sobre e legal")}</div>
+      <div className="settings-card">
+        {rows.map(({ key, title }) => (
+          <div className="settings-row" key={key}>
+            <div className="settings-row-info">
+              <Text size="sm" fw={600}>
+                {t(title)}
+              </Text>
+              <Text size="xs" c="dimmed">
+                {t("Abre no navegador a página do servidor PIA configurado.")}
+              </Text>
+            </div>
+            <div className="settings-row-control">
+              <Button
+                component="a"
+                size="xs"
+                variant="light"
+                href={links?.[key]}
+                target="_blank"
+                rel="noreferrer"
+                disabled={!links}
+                rightSection={<ExternalLink size={14} />}
+              >
+                {t("Abrir")}
+              </Button>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -128,6 +187,8 @@ export default function GeneralSettingsTabs({
             />
           </div>
         </div>
+
+        <LegalLinksCard />
       </Stack>
     );
   }
