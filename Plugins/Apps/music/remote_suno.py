@@ -372,7 +372,7 @@ def connect_attempt(attempt_id: Any) -> dict[str, Any]:
 
 
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
-LABEL_MAX = 60
+LABEL_MAX = 80  # RN07, as agreed with the DevFrontend (T7)
 
 
 def rename(account_id: Any, payload: dict[str, Any] | None = None) -> dict[str, Any]:

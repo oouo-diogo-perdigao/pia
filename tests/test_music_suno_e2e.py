@@ -165,7 +165,7 @@ def test_connect_attempt_states_and_codes(remote):
 
 
 @pytest.mark.parametrize(
-    "label", ["", "   ", "x" * 61, "com\x07controle", "linha\nnova", 5]
+    "label", ["", "   ", "x" * 81, "com\x07controle", "linha\nnova", 5]
 )
 def test_rename_validates_label_without_calling_the_server(remote, label):
     identity = remote.fake.accounts[0]["id"]
@@ -179,6 +179,18 @@ def test_rename_validates_label_without_calling_the_server(remote, label):
         )
     assert err.value.code == "invalid_label"
     assert remote.fake.calls("PATCH") == []
+
+
+def test_rename_accepts_an_80_character_label(remote):
+    identity = remote.fake.accounts[0]["id"]
+    web_api.route(
+        "POST",
+        f"/music/suno/accounts/{identity}/rename",
+        {"label": "x" * 80},
+        {},
+        remote.context,
+    )
+    assert len(remote.fake.calls("PATCH")) == 1
 
 
 def test_rename_and_disconnect_use_the_account_routes(remote):
