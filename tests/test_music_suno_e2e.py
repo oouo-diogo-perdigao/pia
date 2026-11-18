@@ -160,10 +160,9 @@ def test_connect_attempt_states_and_codes(remote):
     with pytest.raises(ValueError) as err:
         web_api.route("GET", "/music/suno/connect/sumiu", {}, {}, remote.context)
     assert err.value.code == "suno_connect_not_found"
+    # T9 (TechLead): expired is a normal 200 state; 400 only for a missing one.
     remote.fake.attempt_outcome = {"state": "expired"}  # pia-server 0a1fee6 state
-    with pytest.raises(ValueError) as err:
-        web_api.route("GET", path, {}, {}, remote.context)
-    assert err.value.code == "suno_connect_not_found"
+    assert web_api.route("GET", path, {}, {}, remote.context) == {"state": "expired"}
     with pytest.raises(ValueError) as err:
         web_api.route(
             "POST",

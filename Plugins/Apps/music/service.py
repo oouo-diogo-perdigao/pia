@@ -398,7 +398,6 @@ def select_provider(
     *,
     provider: str | None = None,
     gemini_model: str | None = None,
-    suno_account_id: str | None = None,
 ):
     from src.settings_store import get_store
 
@@ -412,13 +411,6 @@ def select_provider(
         updates["MUSIC_PROVIDER"] = norm
     if gemini_model is not None and str(gemini_model).strip():
         updates["MUSIC_GEMINI_MODEL"] = str(gemini_model).strip()
-    if suno_account_id is not None:
-        # Persisted like the provider; never a fallback with 2+ valid accounts
-        # (RN09): such a generation must carry suno_account_id.
-        account = str(suno_account_id).strip()
-        if account and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", account):
-            raise ValueError("Conta Suno inválida.")
-        updates["MUSIC_SUNO_ACCOUNT_ID"] = account
     if updates:
         get_store().save("Apps/music", updates)
     return providers_catalog()
