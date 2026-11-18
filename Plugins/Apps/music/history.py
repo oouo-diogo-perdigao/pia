@@ -696,7 +696,13 @@ def server_id_for(identity: str) -> str | None:
 
 
 class HistoryError(ValueError):
+    """400 {error, code} of the history routes. Codes outside the server
+    contract (documented in docs/PLATFORM_SERVICES.md): history_item_not_found,
+    track_not_found, local_audio_missing."""
+
     def __init__(self, code: str, message: str):
+        if code == "pia_server_error":  # internal fallback, not a contract code
+            code, message = "pia_server_unreachable", device.UNREACHABLE_MESSAGE
         super().__init__(message)
         self.code = code
 

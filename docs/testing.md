@@ -41,7 +41,7 @@ No Linux, substitua o executável por `.venv/bin/python`; disponibilidade depend
 
 ## Música / Suno
 
-Os testes do Suno usam o mock HTTP local `tests/fixtures/fake_suno_mcp.py` (fixture `fake_suno_mcp` no `conftest`). Não faça geração real nem chamada paga ao `api.suno.com` na suíte comum. O e2e `tests/test_music_suno_e2e.py` percorre `web_api.handle("generate", …)` com um `context` fake e cobre sucesso, 401, 503, timeout, falha parcial (parada no primeiro clip), lote incompleto, recusa antes do job (com `code` no JSON 400), `download_failed`, `suno_no_credits` e vazamento de token. O smoke manual do seletor (CA11) e das Configurações está em `docs/suno-music-roteiros.md`.
+Os testes do Suno usam o fake local da pia-server `tests/fixtures/fake_pia_server_suno.py` (helpers e fixture `remote` em `tests/_suno_remote_support.py`), só em loopback. Não faça geração real nem chamada ao Suno ou a uma pia-server real na suíte comum. Os e2e (`tests/test_music_suno_e2e.py`) percorrem `web_api` com um `context` fake e cobrem status e contas, connect, geração (sucesso, extra, parcial, cancelamento, offline e volta, 409, 410), retomada e varredura de segredos; o histórico, a fila RN14 e o redownload estão em `tests/test_music_history_t6.py`, a migração das credenciais antigas em `tests/test_music_suno_t8_legacy.py` e os ajustes de contrato da T9 em `tests/test_music_t9_contract.py`. Roteiros manuais: `docs/suno-music-roteiros.md`.
 
 ## Áreas críticas
 

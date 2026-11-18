@@ -257,10 +257,12 @@ def route(method, path, data, query, context):
     if path == "/music/providers" and method == "GET":
         return providers(context)
     if path == "/music/select" and method == "POST":
+        # T9: the Suno account goes only in generate. Other keys (an old body
+        # with suno_account_id, the removed suno_mcp_token...) are ignored,
+        # as before: nothing is saved for them.
         return service.select_provider(
             provider=data.get("provider"),
             gemini_model=data.get("gemini_model"),
-            suno_account_id=data.get("suno_account_id"),
         )
     if path == "/music/suno/status" and method == "GET":
         return suno_status(context)

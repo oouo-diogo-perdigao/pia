@@ -76,10 +76,22 @@ HINT_ROUTES = {
 }
 
 
+# Internal fallback of the device client (a refusal without a valid code or
+# an invalid answer). It is not a contract code: the local API answers
+# pia_server_unreachable instead (T9, approved by the TechLead).
+INTERNAL_SERVER_ERROR = "pia_server_error"
+
+
+def public_code(code: str) -> str:
+    return "pia_server_unreachable" if code == INTERNAL_SERVER_ERROR else code
+
+
 class RemoteMusicError(ValueError):
     """Request-time refusal: the local API answers 400 {error, code}."""
 
     def __init__(self, code: str, message: str | None = None):
+        if code == INTERNAL_SERVER_ERROR:
+            code, message = public_code(code), None
         super().__init__(
             message or MESSAGES.get(code) or "Falha ao falar com a PIA Server."
         )
@@ -92,13 +104,18 @@ class SunoTrackUnavailableError(service.MusicProviderError):
 
 
 def remote_error(exc: device.DeviceApiError) -> RemoteMusicError:
+    if exc.code == INTERNAL_SERVER_ERROR:
+        return RemoteMusicError(public_code(exc.code))
     return RemoteMusicError(exc.code, MESSAGES.get(exc.code) or str(exc))
 
 
-def safe_id(value: Any) -> str:
+def safe_id(value: Any, code: str = "pia_server_unreachable") -> str:
+    """A server id, or RemoteMusicError(code). ``code`` is
+    pia_server_unreachable for ids read from a server answer and
+    suno_account_not_found for an account id sent by the caller."""
     text = str(value or "")
     if not SERVER_ID.fullmatch(text):
-        raise RemoteMusicError("pia_server_error", "Resposta inválida da PIA Server.")
+        raise RemoteMusicError(code)
     return text
 
 
@@ -329,14 +346,16 @@ def connect(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         raise ValueError("Parâmetros inválidos.")
     body: dict[str, Any] = {}
     if data.get("replace_account_id") not in (None, ""):
-        body["replace_account_id"] = safe_id(data["replace_account_id"])
+        body["replace_account_id"] = safe_id(
+            data["replace_account_id"], "suno_account_not_found"
+        )
     try:
         result = device.device_call("POST", "suno/connect", body)
     except device.DeviceApiError as exc:
         raise remote_error(exc) from None
     url = str(result.get("url") or "")
     if not url.startswith("https://"):
-        raise RemoteMusicError("pia_server_error", "Resposta inválida da PIA Server.")
+        raise RemoteMusicError("pia_server_unreachable")
     expires = result.get("expires_in")
     return {
         "auth_url": url,
@@ -354,12 +373,10 @@ def connect_attempt(attempt_id: Any) -> dict[str, Any]:
             raise RemoteMusicError("suno_connect_not_found") from None
         raise remote_error(exc) from None
     state = str(result.get("state") or "")
-    if state == "expired":
-        # Agreed with the frontend: expired or missing attempt -> 400.
-        invalidate_status()
-        raise RemoteMusicError("suno_connect_not_found")
-    if state not in ("pending", "connected", "failed"):
-        raise RemoteMusicError("pia_server_error", "Resposta inválida da PIA Server.")
+    # T9 (TechLead): an expired attempt is a normal 200 {state: "expired"};
+    # 400 suno_connect_not_found is only for a missing attempt (404/not_found).
+    if state not in ("pending", "connected", "failed", "expired"):
+        raise RemoteMusicError("pia_server_unreachable")
     out: dict[str, Any] = {"state": state}
     if result.get("account_id") and SERVER_ID.fullmatch(str(result["account_id"])):
         out["account_id"] = str(result["account_id"])
@@ -389,7 +406,7 @@ def rename(account_id: Any, payload: dict[str, Any] | None = None) -> dict[str, 
             "invalid_label",
             f"O apelido da conta Suno deve ter de 1 a {LABEL_MAX} caracteres, sem caracteres de controle.",
         )
-    identity = safe_id(account_id)
+    identity = safe_id(account_id, "suno_account_not_found")
     try:
         device.device_call("PATCH", f"suno/accounts/{identity}", {"label": label})
     except device.DeviceApiError as exc:
@@ -400,7 +417,7 @@ def rename(account_id: Any, payload: dict[str, Any] | None = None) -> dict[str, 
 
 def disconnect(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     data = dict(payload or {})
-    identity = safe_id(data.get("account_id"))
+    identity = safe_id(data.get("account_id"), "suno_account_not_found")
     try:
         device.device_call("DELETE", f"suno/accounts/{identity}")
     except device.DeviceApiError as exc:

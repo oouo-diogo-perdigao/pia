@@ -1,10 +1,12 @@
-"""T3: download seguro do áudio e robustez do MCP genérico, mais (T6) o
+"""T3: robustez do MCP genérico, mais (T6) o
 cliente tipado da API de dispositivo da PIA Server e o download pelo proxy.
 
 Os testes de generate()/generate_suno_batch via SunoMcpAdapter e do OAuth/DCR
 local do Suno saíram na T8 (RN18). O fluxo Suno agora é remoto: os e2e estão
 em test_music_suno_e2e.py e o histórico em test_music_history_t6.py; aqui
-ficam o mapeamento de códigos do servidor e a segurança do download.
+ficam o mapeamento de códigos do servidor e a segurança do download pelo proxy.
+O download direto de links de áudio do Suno (``service._download_audio``) e
+seus testes saíram na T9: o áudio só chega pelo proxy da PIA Server.
 """
 
 import json
@@ -32,170 +34,8 @@ def _manager(tmp_path, monkeypatch):
     return mgr
 
 
-def _register(mgr, server):
-    mgr.save_server(
-        {
-            "id": "suno_mcp",
-            "name": "Suno",
-            "transport": "http_streaming",
-            "url": server.url,
-            "bearer_token": server.token,
-        },
-        server_id="suno_mcp",
-    )
-
-
-_ENQUEUED: list = []
-
-
-@pytest.fixture
-def music_out(tmp_path, monkeypatch):
-    out = tmp_path / "music"
-    monkeypatch.setattr(service, "OUTPUT", out)
-    # Short timeouts/polling: no test waits on a real 60 s read or 5 s poll.
-    monkeypatch.setattr(service, "_AUDIO_TIMEOUT", (2, 0.5))
-    monkeypatch.setattr(service, "_SUNO_SLEEP_SLICE", 0.01)
-    _ENQUEUED.clear()
-    from Plugins.Connectors.pia_server import media
-
-    monkeypatch.setattr(media, "enqueue", _ENQUEUED.append)
-    return out
-
-
-@pytest.fixture
-def suno(tmp_path, monkeypatch, fake_suno_mcp, music_out):
-    monkeypatch.setattr(service, "settings", lambda: {"MUSIC_SUNO_TIMEOUT": 20})
-    mgr = _manager(tmp_path, monkeypatch)
-    _register(mgr, fake_suno_mcp)
-    fake_suno_mcp.mgr = mgr
-    fake_suno_mcp.out = music_out
-    return fake_suno_mcp
-
-
-@pytest.fixture
-def loopback(monkeypatch):
-    monkeypatch.setattr(service, "_ALLOW_LOOPBACK_HTTP_AUDIO", True)
-
-
-class _Resp:
-    def __init__(self, status=200, headers=None, chunks=(), on_chunk=None):
-        self.status_code = status
-        self.headers = headers or {}
-        self._chunks = list(chunks)
-        self._on_chunk = on_chunk
-        self.closed = False
-
-    def iter_content(self, size):
-        for chunk in self._chunks:
-            if self._on_chunk:
-                self._on_chunk()
-            yield chunk
-
-    def close(self):
-        self.closed = True
-
-
-class _Session:
-    def __init__(self, responses):
-        self.responses = dict(responses)
-        self.calls = []
-
-    def get(self, url, **kwargs):
-        self.calls.append((url, kwargs))
-        return self.responses[url]
-
-
 # --------------------------------------------------------------------------
-# 4 mandatory tests
-# --------------------------------------------------------------------------
-
-
-def test_http_external_rejected_even_with_flag(loopback, monkeypatch):
-    monkeypatch.setenv("_ALLOW_LOOPBACK_HTTP_AUDIO", "1")  # env is never read
-    for url in (
-        "http://exemplo.com/a.mp3",
-        "http://example.com/a.mp3",
-        "http://127.0.0.2/a.mp3",
-        "ftp://127.0.0.1/a.mp3",
-        "file:///etc/passwd",
-        "",
-    ):
-        with pytest.raises(service.SunoDownloadError):
-            service._validate_audio_url(url)
-    for url in (
-        "http://127.0.0.1:8/a.mp3",
-        "http://localhost/a.mp3",
-        "http://[::1]:8/a.mp3",
-        "https://cdn.suno.test/a.mp3",
-    ):
-        assert service._validate_audio_url(url) == url
-    session = _Session({})
-    with pytest.raises(service.SunoDownloadError):
-        service._download_audio(
-            "http://exemplo.com/a.mp3", service.OUTPUT, session=session
-        )
-    assert session.calls == []
-
-
-def test_redirect_to_http_rejected_with_flag_off(tmp_path):
-    session = _Session(
-        {
-            "https://cdn.suno.test/a.mp3": _Resp(
-                302, {"Location": "http://cdn.suno.test/a.mp3"}
-            )
-        }
-    )
-    with pytest.raises(service.SunoDownloadError):
-        service._download_audio(
-            "https://cdn.suno.test/a.mp3", tmp_path, session=session
-        )
-    assert [c[0] for c in session.calls] == ["https://cdn.suno.test/a.mp3"]
-    assert all(c[1]["allow_redirects"] is False for c in session.calls)
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_https_redirect_is_followed_and_revalidated(tmp_path):
-    session = _Session(
-        {
-            "https://cdn.suno.test/a": _Resp(302, {"Location": "/b.mp3"}),
-            "https://cdn.suno.test/b.mp3": _Resp(
-                200, {"Content-Type": "audio/mpeg"}, [b"ID3abc"]
-            ),
-        }
-    )
-    path = service._download_audio("https://cdn.suno.test/a", tmp_path, session=session)
-    assert path.read_bytes() == b"ID3abc" and path.suffix == ".mp3"
-    assert "Authorization" not in str(session.calls)
-
-
-def test_streamed_audio_above_limit_without_content_length_leaves_no_part(
-    tmp_path, monkeypatch
-):
-    monkeypatch.setattr(service, "MAX_AUDIO_BYTES", 1000)
-    seen_part = []
-    resp = _Resp(
-        200,
-        {"Content-Type": "audio/mpeg"},
-        [b"x" * 400] * 5,
-        on_chunk=lambda: seen_part.extend(p.name for p in tmp_path.glob("*.part")),
-    )
-    session = _Session({"https://cdn.suno.test/a.mp3": resp})
-    with pytest.raises(service.SunoDownloadError):
-        service._download_audio(
-            "https://cdn.suno.test/a.mp3", tmp_path, session=session
-        )
-    assert seen_part  # the stream really went through a .part file
-    assert list(tmp_path.iterdir()) == []
-    assert resp.closed
-
-
-# --------------------------------------------------------------------------
-# generate() / batch with the mock
-# --------------------------------------------------------------------------
-
-
-# --------------------------------------------------------------------------
-# Q1 / Q7 / partial clips (stub adapter)
+# HTTP error helper
 # --------------------------------------------------------------------------
 
 
@@ -399,68 +239,6 @@ def test_tool_auth_detection_positive_cases(text):
     assert not mcp_connectors.is_tool_auth_error({"content": [{"text": text}]})
 
 
-# --------------------------------------------------------------------------
-# polling waits on an Event (no real sleep), honours cancel quickly
-# --------------------------------------------------------------------------
-
-
-# ==========================================================================
-# T3 follow-up (review 18:35)
-# ==========================================================================
-def _ok_resp(chunks=(b"ID3abc",), on_chunk=None):
-    return _Resp(200, {"Content-Type": "audio/mpeg"}, list(chunks), on_chunk=on_chunk)
-
-
-# --- DEVE 1: OSError of mkdir/os.replace becomes download_failed ----------
-def test_f1_os_replace_failure_is_download_failed_without_part(tmp_path, monkeypatch):
-    def boom(*_a, **_k):
-        raise OSError("disk full")
-
-    monkeypatch.setattr(service.os, "replace", boom)
-    session = _Session({"https://cdn.suno.test/a.mp3": _ok_resp()})
-    with pytest.raises(service.SunoDownloadError) as err:
-        service._download_audio(
-            "https://cdn.suno.test/a.mp3", tmp_path, session=session
-        )
-    assert err.value.code == "download_failed"
-    with pytest.raises(service.SunoDownloadError):
-        service._write_audio_bytes(b"ID3abc", tmp_path, "mp3")
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_f1_mkdir_failure_is_download_failed(tmp_path):
-    blocker = tmp_path / "not-a-dir"
-    blocker.write_text("x")
-    session = _Session({"https://cdn.suno.test/a.mp3": _ok_resp()})
-    with pytest.raises(service.SunoDownloadError):
-        service._download_audio("https://cdn.suno.test/a.mp3", blocker, session=session)
-    with pytest.raises(service.SunoDownloadError):
-        service._write_audio_bytes(b"ID3abc", blocker / "sub", "mp3")
-    assert [p.name for p in tmp_path.iterdir()] == ["not-a-dir"]
-
-
-# --- DEVE 2: after cancel keep only what was saved; no new download -------
-
-
-def test_f2_cancel_mid_download_leaves_no_part(tmp_path):
-    state = {"n": 0}
-
-    def on_chunk():
-        state["n"] += 1
-
-    resp = _ok_resp([b"x" * 100] * 5, on_chunk=on_chunk)
-    session = _Session({"https://cdn.suno.test/a.mp3": resp})
-    with pytest.raises(InterruptedError) as err:
-        service._download_audio(
-            "https://cdn.suno.test/a.mp3",
-            tmp_path,
-            session=session,
-            cancelled=lambda: state["n"] >= 2,
-        )
-    assert str(err.value) == service.SUNO_CANCEL_MESSAGE
-    assert list(tmp_path.iterdir()) == [] and resp.closed
-
-
 # --- DEVE 3: a policy "forbidden" never becomes 401 -----------------------
 def test_f3_policy_forbidden_is_not_401(tmp_path, monkeypatch):
     policy = MCPRpcError("Forbidden: lyrics violate content policy", -32000)
@@ -478,78 +256,6 @@ def test_f3_policy_forbidden_is_not_401(tmp_path, monkeypatch):
     with pytest.raises(MCPRpcError):
         mgr.call_tool("suno_mcp", "generate_music", {}, retry_other_accounts=False)
     assert mgr._find_raw("suno_mcp")["last_error_code"] != "401"
-
-
-# --- S1: block non-public IP literals (URL and redirects) -----------------
-@pytest.mark.parametrize(
-    "url",
-    [
-        "https://10.0.0.1/a.mp3",
-        "https://192.168.1.2/a.mp3",
-        "https://172.16.0.9/a.mp3",
-        "https://169.254.169.254/latest/meta-data",
-        "https://127.0.0.1/a.mp3",
-        "https://[::1]/a.mp3",
-        "https://[fe80::1]/a.mp3",
-        "https://[fd00::1]/a.mp3",
-        "https://0.0.0.0/a.mp3",
-        "https://localhost/a.mp3",
-    ],
-)
-def test_s1_non_public_ip_literals_rejected(url):
-    with pytest.raises(service.SunoDownloadError):
-        service._validate_audio_url(url)
-
-
-def test_s1_public_hosts_allowed_and_flag_only_opens_loopback(monkeypatch):
-    assert service._validate_audio_url("https://8.8.8.8/a.mp3")
-    assert service._validate_audio_url("https://cdn1.suno.ai/a.mp3")
-    monkeypatch.setattr(service, "_ALLOW_LOOPBACK_HTTP_AUDIO", True)
-    assert service._validate_audio_url("https://127.0.0.1:9/a.mp3")
-    for url in ("https://10.0.0.1/a.mp3", "http://192.168.0.1/a.mp3"):
-        with pytest.raises(service.SunoDownloadError):
-            service._validate_audio_url(url)
-
-
-def test_s1_redirect_to_private_ip_rejected(tmp_path):
-    session = _Session(
-        {
-            "https://cdn.suno.test/a.mp3": _Resp(
-                302, {"Location": "https://169.254.169.254/latest/meta-data"}
-            )
-        }
-    )
-    with pytest.raises(service.SunoDownloadError):
-        service._download_audio(
-            "https://cdn.suno.test/a.mp3", tmp_path, session=session
-        )
-    assert len(session.calls) == 1 and list(tmp_path.iterdir()) == []
-
-
-# --- S2: RN08 cancel texts ------------------------------------------------
-
-
-# --- S3: base64 size checked before decoding ------------------------------
-
-
-# --- S4: no orphan audio when save_json fails -----------------------------
-
-
-# --- S5: AUTH_ERROR_CODES imported, not duplicated ------------------------
-
-
-# --- S6: redirect loop above the limit ------------------------------------
-def test_s6_redirect_loop_above_limit_is_rejected(tmp_path):
-    responses = {
-        f"https://cdn.suno.test/{i}": _Resp(302, {"Location": f"/{i + 1}"})
-        for i in range(10)
-    }
-    session = _Session(responses)
-    with pytest.raises(service.SunoDownloadError):
-        service._download_audio("https://cdn.suno.test/0", tmp_path, session=session)
-    assert len(session.calls) == service._AUDIO_MAX_REDIRECTS + 1 == 4
-    assert all(r.closed for r in list(responses.values())[:4])
-    assert list(tmp_path.iterdir()) == []
 
 
 # --- S7: save_server/start_oauth/complete_oauth share _store_lock ---------
@@ -584,14 +290,6 @@ def test_s7_store_writers_take_the_store_lock(tmp_path, monkeypatch, method):
         mgr._store_lock.release()
     worker.join(5)
     assert done.is_set() and not worker.is_alive()
-
-
-# --- S8: download read timeout 30 s ---------------------------------------
-def test_s8_download_read_timeout_is_30s(tmp_path):
-    assert service._AUDIO_TIMEOUT == (10, 30)
-    session = _Session({"https://cdn.suno.test/a.mp3": _ok_resp()})
-    service._download_audio("https://cdn.suno.test/a.mp3", tmp_path, session=session)
-    assert session.calls[0][1]["timeout"] == (10, 30)
 
 
 # ==========================================================================
@@ -757,42 +455,6 @@ def test_g1_complete_oauth_account_removed_drops_tokens(tmp_path, monkeypatch):
     assert not mgr._get_secret("srv", "a1", "oauth_access_token")
     assert not mgr._get_secret("srv", "a1", "oauth_refresh_token")
     assert mgr._find_raw("srv")["accounts"] == []
-
-
-# --- 2: short / numeric / hex IPv4 hosts ------------------------------------
-@pytest.mark.parametrize(
-    "host",
-    [
-        "127.1",
-        "127.0.1",
-        "2130706433",
-        "0x7f000001",
-        "0x7f.0.0.1",
-        "0177.0.0.1",
-        "017700000001",
-        "10.1",
-        "127.0.0.1.",
-        "1.2.3",
-        "[::ffff:127.0.0.1]",
-        "[::ffff:a00:1]",
-    ],
-)
-def test_g2_non_canonical_ipv4_hosts_rejected(host):
-    with pytest.raises(service.SunoDownloadError):
-        service._validate_audio_url(f"https://{host}/a.mp3")
-
-
-def test_g2_regular_hostnames_still_allowed():
-    for url in (
-        "https://cdn1.suno.ai/a.mp3",
-        "https://a1.b2.example/a.mp3",
-        "https://8.8.8.8/a.mp3",
-        "https://0x.example.com/a.mp3",
-    ):
-        assert service._validate_audio_url(url) == url
-
-
-# --- 3: cancel before the 1st call uses the before-send message -------------
 
 
 # ==========================================================================

@@ -62,7 +62,80 @@ O app cria de 1 a 10 faixas por pedido, agrupadas em um card. Progresso percentu
 
 Destino fixo: `Documentos/pia/music`, dentro do perfil do usuário. As configurações e credenciais são gerenciadas pela interface e armazenadas no SQLite/cofre; consulte [perfil e migração](PROFILE_MIGRATION.md).
 
-O app oferece os geradores Local (ACE-Step), Gemini/Lyria e **Suno** (MCP). O Suno só entra no seletor quando o catálogo (`GET /api/pia/music/providers`) traz `available=true` (endpoint + credencial válida, inclusive um servidor com host `api.suno.com`). A configuração (URL, OAuth ou bearer, estados do selo) fica em Configurações → Música. Salvar o provedor Suno sem credencial é permitido, mas o app abre em Local até autorizar. Cancelar a espera não interrompe a geração já enviada ao Suno e pode consumir créditos. Detalhes e o roteiro manual: [README do app de Música](../Plugins/Apps/music/README.md) e [suno-music-roteiros.md](suno-music-roteiros.md).
+O app oferece os geradores Local (ACE-Step), Gemini/Lyria e **Suno**. O Suno roda pela PIA Server (abaixo). Roteiro manual: [suno-music-roteiros.md](suno-music-roteiros.md); detalhes do app: [README do app de Música](../Plugins/Apps/music/README.md).
+
+### Suno pela PIA Server
+
+**Arquitetura.** O token e o OAuth do Suno existem **só na pia-server**. A PIA local é cliente dela: conversa com `/device/*` usando o token do dispositivo (pareamento em Configurações → PIA Server, cabeçalho `X-PIA-Protocol: 1`) e nunca fala com o Suno. Nenhum token, link de áudio ou prompt vai para log. O código está em `Plugins/Apps/music/remote_suno.py` (status, contas, connect, jobs e download), `history.py` (histórico e fila RN14), `suno_legacy.py` (credenciais antigas) e `web_api.py` (rotas e jobs). O cliente HTTP do dispositivo é `Plugins/Connectors/pia_server/remote.py`.
+
+- O servidor precisa anunciar a capability `suno:3` em `GET /device/account`; sem ela o motivo é `pia_server_unsupported`.
+- Status em `GET /device/suno/status`, com cache curto de 15 s no catálogo. Conectar: `POST /device/suno/connect` e `GET /device/suno/connect/:id`. Apelido: `PATCH /device/suno/accounts/:id`. Desconectar: `DELETE /device/suno/accounts/:id`.
+- Geração: `POST /device/suno/jobs`, acompanhamento com `GET /device/suno/jobs/:id` e cancelamento com `POST /device/suno/jobs/:id/cancel`. Um job ativo por conta PIA (RN10).
+- O áudio é baixado pelo proxy `GET /device/music/generations/:id/tracks/:n/audio` (limite de 100 MiB, `.part` + troca atômica, `X-Content-SHA256` conferido quando vier). O link do Suno nunca chega ao PC.
+- Polling até o estado terminal (`completed`, `failed`, `interrupted`, `cancelled`). Sem conexão, `progress.connection` vira `lost` e a espera cresce de 5 s até 60 s, sem prazo (RN09). As faixas extras são salvas com o rótulo "Suno · extra" e o `ready_text` é calculado localmente (ex.: "3 de 3 músicas prontas (+1 extra)"). Cancelar entrega as faixas já prontas.
+- Um único item `suno_mcp` no catálogo. Com exatamente uma conta válida, ela é usada sem escolha. Com duas ou mais, `selected_account_id` vem `null` e a geração exige `suno_account_id` (senão `suno_account_required`). A conta vai só no generate; `/music/select` não guarda conta.
+
+**Rotas locais** (todas sob `/api/pia`, sessão local; exemplos na coleção Postman, pasta "07 · Workspace e serviços"):
+
+| Rota | Corpo | Resposta |
+| --- | --- | --- |
+| `GET /music/providers` | — | catálogo; o item `suno_mcp` traz `available`, `reason`, `hint {text, route}`, `connected`, `credential_state` (`configured`/`expired`/`missing`), `expires_at`, `settings`, `accounts[]`, `selected_account_id`, `active_job`, `legacy_credentials {present, prompt}` |
+| `POST /music/select` | `{provider?, gemini_model?}` | catálogo. Um `suno_account_id` vindo de um body antigo é ignorado (nada é salvo), como as outras chaves desconhecidas |
+| `GET /music/suno/status` | — | o item `suno_mcp`, lido agora da PIA Server |
+| `POST /music/suno/connect` | `{replace_account_id?}` | `{auth_url, attempt_id, expires_in}` |
+| `GET /music/suno/connect/<id>` | — | `{state: pending\|connected\|failed\|expired, account_id?, code?}`; tentativa inexistente: 400 `suno_connect_not_found` |
+| `POST /music/suno/accounts/<id>/rename` | `{label}` (1 a 80 caracteres, sem controle) | `{ok, provider}`; fora do limite: 400 `invalid_label` |
+| `POST /music/suno/disconnect` | `{account_id}` | `{ok, provider}` |
+| `POST /apps/music/generate` | `{prompt, lyrics?, provider, duration, count, suno_account_id?, instrumental?}` | `{job}`; o progresso segue no SSE `/api/pia/events/<job>` |
+| `GET /music/history?cursor=&limit=100` | — | `{items, next_cursor, server_unavailable, server_reason}` |
+| `DELETE /music/history/<id>` | — | `{ok, id}` |
+| `POST /music/history/<id>/tracks/<n>/redownload` | — | `{job_id}` |
+| `GET /music/suno/legacy-credentials` | — | `{present, prompt, items:[{kind, label}]}` (só rótulos) |
+| `POST /music/suno/legacy-credentials/remove` | `{confirm: true}` | `{ok, removed, present, prompt}`; sem `confirm`: 400 `confirmation_required` |
+| `POST /music/suno/legacy-credentials/dismiss` | `{}` | `{ok, present, prompt: false, items}` |
+
+`accounts[]` traz `{id, label, email, name, credential_state, available, expires_at, reason, hint}`. O `credential_state` da conta é o do servidor (`configured`, `unavailable` ou `refresh_failed`); fora de `configured`, a conta tem `reason = suno_credential_expired`. O `label` local nunca vem vazio: usa o apelido, depois o nome, o e-mail e por fim o id (até 80 caracteres). `email` e `name` podem ser `null`. `active_job` fica no nível do item: `{job_id, state, this_device, suno_account_id, completed, total, extra_ready}`, e `job_id` é o id local aceito pelo `watchJob`, só no PC de origem.
+
+**Erros e mapeamento.** A API local responde todo erro como **HTTP 400 `{error, code}`** (o `http.py` aceita `code` em `[a-z0-9_]{1,64}`); o status do servidor não é repassado.
+
+| Resposta da PIA Server | `code` local |
+| --- | --- |
+| 401 (com ou sem `code`), token do dispositivo ausente ou URL inválida | `pia_server_unpaired` |
+| 5xx, falha de rede, timeout ou 2xx que não é JSON | `pia_server_unreachable` |
+| Sem a capability `suno:3` | `pia_server_unsupported` |
+| 4xx com `code` válido | o mesmo `code` (ex.: `suno_job_active` do 409, `suno_track_unavailable` do 410, `suno_account_taken`, `suno_account_mismatch`) |
+| 4xx sem `code` válido ou resposta fora do formato | `pia_server_unreachable` (o fallback interno `pia_server_error` do cliente nunca sai da API local) |
+| 404 ou `code` `not_found` em `GET /device/suno/connect/:id` | `suno_connect_not_found` |
+
+Codes do contrato: `pia_server_unpaired`, `pia_server_unreachable`, `pia_server_unsupported`, `suno_not_connected`, `suno_credential_expired`, `suno_account_required`, `suno_account_taken`, `suno_account_not_found`, `suno_account_mismatch`, `suno_identity_unavailable`, `suno_oauth_denied`, `suno_oauth_invalid`, `suno_connect_not_found`, `suno_job_active`, `suno_track_unavailable`, `confirmation_required`, `not_origin_device` e `invalid_label`. Id de conta inválido enviado pelo cliente (`account_id` do disconnect, `replace_account_id` do connect) responde `suno_account_not_found`. Durante o job, o evento `error` usa também `cancelled`, `incomplete_batch`, `download_failed`, `suno_no_credits`, `suno_unavailable`, `suno_timeout` e `interrupted`.
+
+Codes locais sem equivalente no contrato do servidor (todos HTTP 400):
+
+| `code` | Mensagem | Quando |
+| --- | --- | --- |
+| `history_item_not_found` | "Item do histórico não encontrado." | `DELETE` ou redownload de um id que não está no índice local nem na PIA Server |
+| `track_not_found` | "Faixa não encontrada." | redownload de um `n` que o item não tem |
+| `local_audio_missing` | "O áudio desta geração local não está mais neste computador." | redownload de uma faixa **local** (Local/Gemini) deste PC cujo arquivo sumiu: o áudio local nunca sobe, então não há de onde baixar |
+
+**Histórico (RN20).** `GET /music/history` mescla as gerações da PIA Server com o índice local `pia-generations-index.json` (na pasta de música), com os jobs ativos primeiro e depois do mais novo para o mais antigo. Cada item traz `id` (o `client_id`), `job_id`, `provider`, `source` (`suno`/`local`), `suno_account {id, name}`, `prompt`, `lyrics`, `params`, `created_at`, `state`, `code`, `count`, `this_device` e `tracks[]`. Cada faixa traz `{n, title, duration, extra, label, file, availability}`:
+
+- `local_file`: o arquivo está neste PC e `file` traz o item da biblioteca (mesmo formato de `/apps/music/library`);
+- `redownload`: faixa Suno sem arquivo neste PC, em qualquer PC da conta;
+- `other_device_local`: áudio local gerado em outro PC;
+- `null`: áudio local deste PC que sumiu (sem ação).
+
+Offline ou sem pareamento, a rota devolve só os itens locais, com `server_unavailable: true` e `server_reason` (`pia_server_unpaired` ou `pia_server_unreachable`). O `DELETE` é definitivo na PIA Server, mas **nunca apaga o arquivo local**: grava uma marca (tombstone) para o item não voltar pela varredura da pasta. O redownload vira job (`{job_id}`); um segundo pedido da mesma faixa ainda baixando devolve o mesmo `job_id`, e o evento `track` traz `{item, track, history_id}`.
+
+**Fila de registros locais (RN14).** Cada geração Local/Gemini é registrada em `POST /device/music/generations` com `source: "local"` e um `client_id` uuid (prompt, letra, quantidade, duração, estado). Sem pareamento, nada é enviado nem guardado. Pareado e offline, o registro entra na fila `pia_music_generation_queue` do SQLite, com no máximo 500 itens e 30 dias, e é reenviado do mais antigo para o mais novo na próxima geração ou listagem do histórico. Uma recusa que não é falta de conexão descarta o registro. O registro não leva o áudio.
+
+**Credenciais antigas (RN17).** As entradas `mcp:connector:suno_mcp:*` do cofre, as settings `MUSIC_SUNO_MCP_*`/`MUSIC_SUNO_TIMEOUT` e o servidor MCP local `suno_mcp` não são mais lidos. A PIA só lê os nomes para mostrar o aviso e apaga somente com `{confirm: true}`; "Agora não" (`dismiss`) não apaga nada.
+
+**Riscos conhecidos aceitos pelo TechLead:**
+
+- O token legado `MUSIC_SUNO_MCP_*` continua no export e no sync de perfil até o usuário remover pela tela de credenciais antigas.
+- A retomada dos jobs é lazy: acontece nas chamadas de catálogo (`/music/providers`) e status (`/music/suno/status`), que a interface faz ao abrir. Sem essas chamadas, um job deste PC não é retomado em segundo plano.
+- **Fila de mídia e RN14 (decidido pelo Diogo):** o `media.enqueue` do conector PIA Server continua subindo o áudio gerado (Local/Gemini e as faixas Suno salvas) como backup. A RN14 ("o áudio local nunca sai do computador") vale só para o histórico de gerações, que envia apenas metadados.
+- Quando o áudio local deste PC some, a `availability` é `redownload` para item do Suno e `null` para item local.
 
 A PIA solicita o encerramento do processo ACE-Step iniciado por ela após cada geração, inclusive em erro/cancelamento. No Windows, o interpretador pode criar processos filhos que sobrevivem ao processo principal; o encerramento de toda a árvore e a liberação completa de VRAM ainda precisam de correção e validação com hardware. A próxima geração pode recarregar o motor. A PIA não encerra um servidor ACE-Step externo que já estava rodando; para ele, liberação de recursos depende de sua configuração. Não foi executado download de modelos ou geração paga para validar essas mudanças.
 

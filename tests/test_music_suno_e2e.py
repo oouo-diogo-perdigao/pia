@@ -11,7 +11,6 @@ from __future__ import annotations
 import pytest
 
 from Plugins.Apps.music import history, remote_suno, service, web_api
-from tests._suno_e2e_support import assert_t3_t4_surface
 from tests._suno_remote_support import (  # noqa: F401  (fixture)
     PROMPT,
     SUNO,
@@ -32,7 +31,19 @@ from tests.fixtures.fake_pia_server_suno import (
 
 
 def test_t3_t4_behavior_probes():
-    assert_t3_t4_surface()
+    """Probes de comportamento (hasattr), não leitura de fonte."""
+    for name in (
+        "suno_job_refusal",
+        "redact_secrets",
+        "generate_suno_batch",
+        "SunoIncompleteBatchError",
+        "SunoJobRefusedError",
+        "SunoDownloadError",
+        "SunoNoCreditsError",
+        "SunoClipFailedError",
+        "tracks_ready_text",
+    ):
+        assert hasattr(service, name), name
 
 
 def _suno(catalog):
@@ -149,10 +160,9 @@ def test_connect_attempt_states_and_codes(remote):
     with pytest.raises(ValueError) as err:
         web_api.route("GET", "/music/suno/connect/sumiu", {}, {}, remote.context)
     assert err.value.code == "suno_connect_not_found"
+    # T9 (TechLead): expired is a normal 200 state; 400 only for a missing one.
     remote.fake.attempt_outcome = {"state": "expired"}  # pia-server 0a1fee6 state
-    with pytest.raises(ValueError) as err:
-        web_api.route("GET", path, {}, {}, remote.context)
-    assert err.value.code == "suno_connect_not_found"
+    assert web_api.route("GET", path, {}, {}, remote.context) == {"state": "expired"}
     with pytest.raises(ValueError) as err:
         web_api.route(
             "POST",
