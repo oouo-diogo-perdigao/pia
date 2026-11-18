@@ -134,7 +134,7 @@ Offline ou sem pareamento, a rota devolve só os itens locais, com `server_unava
 
 - O token legado `MUSIC_SUNO_MCP_*` continua no export e no sync de perfil até o usuário remover pela tela de credenciais antigas.
 - A retomada dos jobs é lazy: acontece nas chamadas de catálogo (`/music/providers`) e status (`/music/suno/status`), que a interface faz ao abrir. Sem essas chamadas, um job deste PC não é retomado em segundo plano.
-- **Pendente de decisão de produto:** o `media.enqueue` do conector PIA Server ainda sobe o áudio gerado localmente (Local/Gemini e as faixas Suno salvas), o que conflita com a RN14 ("o áudio local nunca sai do computador"). O comportamento não foi alterado.
+- **Fila de mídia e RN14 (decidido pelo Diogo):** o `media.enqueue` do conector PIA Server continua subindo o áudio gerado (Local/Gemini e as faixas Suno salvas) como backup. A RN14 ("o áudio local nunca sai do computador") vale só para o histórico de gerações, que envia apenas metadados.
 - Quando o áudio local deste PC some, a `availability` é `redownload` para item do Suno e `null` para item local.
 
 A PIA solicita o encerramento do processo ACE-Step iniciado por ela após cada geração, inclusive em erro/cancelamento. No Windows, o interpretador pode criar processos filhos que sobrevivem ao processo principal; o encerramento de toda a árvore e a liberação completa de VRAM ainda precisam de correção e validação com hardware. A próxima geração pode recarregar o motor. A PIA não encerra um servidor ACE-Step externo que já estava rodando; para ele, liberação de recursos depende de sua configuração. Não foi executado download de modelos ou geração paga para validar essas mudanças.

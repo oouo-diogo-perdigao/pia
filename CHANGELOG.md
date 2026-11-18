@@ -19,7 +19,7 @@
 
 ### Notes
 - Riscos conhecidos aceitos: o token legado `MUSIC_SUNO_MCP_*` continua no export e no sync até o usuário remover; a retomada de jobs é lazy (catálogo e status); quando o áudio local some, a `availability` é `redownload` para item do Suno e `null` para item local.
-- Pendente de decisão de produto: `media.enqueue` ainda sobe o áudio gerado localmente, o que conflita com a RN14.
+- Decisão de produto: `media.enqueue` continua subindo as músicas como backup; a RN14 vale só para o histórico de gerações.
 - Gerar no Suno gasta créditos; testes reais só com o ok explícito do dono da conta.
 
 ## [Não publicado — Suno como gerador no app de Música (substituído pela entrada acima)] - 2026-11-17

@@ -140,3 +140,11 @@ Baixar novamente não gera nada no Suno e não gasta créditos.
    API responde `confirmation_required`. Depois, o aviso some.
 5. Até remover, o token antigo continua no export e no sync do perfil (risco
    conhecido aceito).
+
+## Nota: fila de mídia e RN14
+
+O Diogo decidiu manter a fila de mídia (`media.enqueue` do conector PIA Server)
+subindo as músicas geradas como backup, inclusive as faixas Suno salvas. A RN14
+("o áudio local nunca sobe") vale só para o histórico de gerações: o histórico
+envia apenas os metadados das gerações locais, nunca o áudio. Ao conferir os
+roteiros 4, 5 e 7, o upload feito pela fila de mídia é esperado e não é um bug.
