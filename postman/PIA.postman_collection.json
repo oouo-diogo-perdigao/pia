@@ -56,6 +56,26 @@
       "type": "string"
     },
     {
+      "key": "suno_account_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "suno_attempt_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "history_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "track_n",
+      "value": "1",
+      "type": "string"
+    },
+    {
       "key": "music_file",
       "value": "",
       "type": "string"
@@ -1984,7 +2004,7 @@
               }
             ],
             "url": "{{base_url}}/v1/music/generations",
-            "description": "Rota extraída do código atual. Consulte os contratos e limites no repositório.",
+            "description": "Gera um lote de músicas. Sucesso devolve `{job}` e o progresso segue no SSE. A recusa antes do job responde HTTP 400 com `{error, code}`, onde `code` é o motivo da indisponibilidade do Suno: `suno_not_connected`, `suno_credential_expired`, `pia_server_unpaired`, `pia_server_unreachable` ou `pia_server_unsupported`.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"prompt\": \"Piano instrumental tranquilo\",\n  \"lyrics\": \"\",\n  \"provider\": \"local\",\n  \"duration\": 30\n}",
@@ -1995,7 +2015,41 @@
               }
             }
           },
-          "response": []
+          "response": [
+            {
+              "name": "400 — Suno não conectado",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/v1/music/generations",
+                "description": "Gera um lote de músicas. Sucesso devolve `{job}` e o progresso segue no SSE. A recusa antes do job responde HTTP 400 com `{error, code}`, onde `code` é o motivo da indisponibilidade do Suno: `suno_not_connected`, `suno_credential_expired`, `pia_server_unpaired`, `pia_server_unreachable` ou `pia_server_unsupported`.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"prompt\": \"Piano instrumental tranquilo\",\n  \"lyrics\": \"\",\n  \"provider\": \"local\",\n  \"duration\": 30\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"Conecte o Suno em Configurações → Música.\",\n  \"code\": \"suno_not_connected\"\n}"
+            }
+          ]
         }
       ]
     },
@@ -2887,7 +2941,7 @@
               }
             ],
             "url": "{{base_url}}/api/pia/music/providers",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "description": "Catálogo dos geradores. O item suno_mcp (RN20) traz available, reason (pia_server_unpaired|pia_server_unreachable|pia_server_unsupported|suno_not_connected|suno_credential_expired|null), hint {text, route}, connected, credential_state, expires_at, settings, accounts, selected_account_id, active_job e legacy_credentials {present, prompt}. selection traz provider e gemini_model. Nenhum token do Suno existe no PC (RN16).",
             "auth": {
               "type": "noauth"
             },
@@ -2918,13 +2972,13 @@
               }
             ],
             "url": "{{base_url}}/api/pia/music/select",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "description": "Salva o provedor (local, gemini ou suno_mcp) e o modelo Gemini e devolve o catálogo. A conta Suno não é salva aqui: ela vai só no generate (suno_account_id). Um body antigo com suno_account_id é aceito e o campo é ignorado. O modo Suno local/manual saiu (RN18).",
             "auth": {
               "type": "noauth"
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"provider\": \"suno_mcp\",\n  \"gemini_model\": \"lyria-3.5\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2935,7 +2989,80 @@
           "response": []
         },
         {
-          "name": "POST /api/pia/music/suno/oauth/callback",
+          "name": "GET /api/pia/music/suno/legacy-credentials",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/music/suno/legacy-credentials",
+            "description": "Credenciais antigas do Suno neste PC (RN17/CA15): {present, prompt, items:[{kind, label}]}. Só rótulos, nunca valores.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200 — credenciais antigas encontradas",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/suno/legacy-credentials",
+                "description": "Credenciais antigas do Suno neste PC (RN17/CA15): {present, prompt, items:[{kind, label}]}. Só rótulos, nunca valores.",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"present\": true,\n  \"prompt\": true,\n  \"items\": [\n    {\n      \"kind\": \"vault\",\n      \"label\": \"Token de acesso OAuth do Suno (servidor)\"\n    },\n    {\n      \"kind\": \"setting\",\n      \"label\": \"Token do Suno nas configurações de Música\"\n    },\n    {\n      \"kind\": \"mcp_server\",\n      \"label\": \"Servidor MCP local do Suno (suno_mcp)\"\n    }\n  ]\n}"
+            },
+            {
+              "name": "200 — nada encontrado",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/suno/legacy-credentials",
+                "description": "Credenciais antigas do Suno neste PC (RN17/CA15): {present, prompt, items:[{kind, label}]}. Só rótulos, nunca valores.",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"present\": false,\n  \"prompt\": false,\n  \"items\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /api/pia/music/suno/legacy-credentials/dismiss",
           "request": {
             "method": "POST",
             "header": [
@@ -2948,8 +3075,8 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{base_url}}/api/pia/music/suno/oauth/callback",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "url": "{{base_url}}/api/pia/music/suno/legacy-credentials/dismiss",
+            "description": "\"Agora não\": não apaga nada e desliga a pergunta do primeiro início.",
             "auth": {
               "type": "noauth"
             },
@@ -2963,10 +3090,51 @@
               }
             }
           },
-          "response": []
+          "response": [
+            {
+              "name": "200 — pergunta desligada",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/suno/legacy-credentials/dismiss",
+                "description": "\"Agora não\": não apaga nada e desliga a pergunta do primeiro início.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"ok\": true,\n  \"present\": true,\n  \"prompt\": false,\n  \"items\": [\n    {\n      \"kind\": \"setting\",\n      \"label\": \"Token do Suno nas configurações de Música\"\n    }\n  ]\n}"
+            }
+          ]
         },
         {
-          "name": "POST /api/pia/music/suno/oauth/disconnect",
+          "name": "POST /api/pia/music/suno/legacy-credentials/remove",
           "request": {
             "method": "POST",
             "header": [
@@ -2979,14 +3147,14 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{base_url}}/api/pia/music/suno/oauth/disconnect",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "url": "{{base_url}}/api/pia/music/suno/legacy-credentials/remove",
+            "description": "Remove as credenciais antigas do Suno deste PC. Exige {confirm: true}; sem isso responde 400 code=confirmation_required e não apaga nada.",
             "auth": {
               "type": "noauth"
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"confirm\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2994,38 +3162,88 @@
               }
             }
           },
-          "response": []
-        },
-        {
-          "name": "POST /api/pia/music/suno/oauth/start",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{base_url}}"
+          "response": [
+            {
+              "name": "200 — removidas",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/suno/legacy-credentials/remove",
+                "description": "Remove as credenciais antigas do Suno deste PC. Exige {confirm: true}; sem isso responde 400 code=confirmation_required e não apaga nada.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"confirm\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
               },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/pia/music/suno/oauth/start",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
-            "auth": {
-              "type": "noauth"
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{}",
-              "options": {
-                "raw": {
-                  "language": "json"
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
                 }
-              }
+              ],
+              "body": "{\n  \"ok\": true,\n  \"removed\": [\n    \"Token do Suno nas configurações de Música\"\n  ],\n  \"present\": false,\n  \"prompt\": false\n}"
+            },
+            {
+              "name": "400 — falta confirmar",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/suno/legacy-credentials/remove",
+                "description": "Remove as credenciais antigas do Suno deste PC. Exige {confirm: true}; sem isso responde 400 code=confirmation_required e não apaga nada.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"confirm\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"Confirme a remoção das credenciais antigas do Suno deste computador.\",\n  \"code\": \"confirmation_required\"\n}"
             }
-          },
-          "response": []
+          ]
         },
         {
           "name": "POST /api/pia/native",
@@ -3759,6 +3977,799 @@
             }
           },
           "response": []
+        },
+        {
+          "name": "GET /api/pia/music/suno/status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/music/suno/status",
+            "description": "Status do Suno lido agora da PIA Server (sem o cache curto do catálogo): o mesmo item suno_mcp do /music/providers. accounts[] traz {id, label, email, name, credential_state (configured|unavailable|refresh_failed), available, expires_at, reason, hint}. selected_account_id só vem preenchido com exatamente uma conta válida. active_job fica no nível do item, com suno_account_id e job_id (id local aceito pelo watchJob, só neste PC). Também retoma, de forma lazy, o job deste PC. Nunca traz token.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200 — uma conta conectada",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/suno/status",
+                "description": "Status do Suno lido agora da PIA Server (sem o cache curto do catálogo): o mesmo item suno_mcp do /music/providers. accounts[] traz {id, label, email, name, credential_state (configured|unavailable|refresh_failed), available, expires_at, reason, hint}. selected_account_id só vem preenchido com exatamente uma conta válida. active_job fica no nível do item, com suno_account_id e job_id (id local aceito pelo watchJob, só neste PC). Também retoma, de forma lazy, o job deste PC. Nunca traz token.",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"suno_mcp\",\n  \"label\": \"Suno\",\n  \"name\": \"Suno\",\n  \"kind\": \"remote\",\n  \"description\": \"Suno pela PIA Server\",\n  \"available\": true,\n  \"reason\": null,\n  \"hint\": null,\n  \"connected\": true,\n  \"credential_state\": \"configured\",\n  \"expires_at\": \"2026-12-01T12:00:00Z\",\n  \"settings\": {\n    \"max_count\": 10,\n    \"duration\": [\n      10,\n      180\n    ],\n    \"instrumental\": true\n  },\n  \"accounts\": [\n    {\n      \"id\": \"acc_exemplo_1\",\n      \"label\": \"Conta principal\",\n      \"email\": \"pessoa@example.com\",\n      \"name\": \"Pessoa Exemplo\",\n      \"credential_state\": \"configured\",\n      \"available\": true,\n      \"expires_at\": \"2026-12-01T12:00:00Z\",\n      \"reason\": null,\n      \"hint\": null\n    }\n  ],\n  \"selected_account_id\": \"acc_exemplo_1\",\n  \"active_job\": null,\n  \"settings_route\": {\n    \"view\": \"settings\",\n    \"section\": \"Apps/music\"\n  }\n}"
+            },
+            {
+              "name": "200 — PIA não pareada",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/suno/status",
+                "description": "Status do Suno lido agora da PIA Server (sem o cache curto do catálogo): o mesmo item suno_mcp do /music/providers. accounts[] traz {id, label, email, name, credential_state (configured|unavailable|refresh_failed), available, expires_at, reason, hint}. selected_account_id só vem preenchido com exatamente uma conta válida. active_job fica no nível do item, com suno_account_id e job_id (id local aceito pelo watchJob, só neste PC). Também retoma, de forma lazy, o job deste PC. Nunca traz token.",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"id\": \"suno_mcp\",\n  \"label\": \"Suno\",\n  \"name\": \"Suno\",\n  \"kind\": \"remote\",\n  \"description\": \"Suno pela PIA Server\",\n  \"available\": false,\n  \"reason\": \"pia_server_unpaired\",\n  \"hint\": {\n    \"text\": \"Para usar o Suno, entre na PIA Server em Configurações → PIA Server.\",\n    \"route\": {\n      \"view\": \"settings\",\n      \"section\": \"Connectors/pia_server\"\n    }\n  },\n  \"connected\": false,\n  \"credential_state\": \"missing\",\n  \"expires_at\": null,\n  \"settings\": {\n    \"max_count\": 10,\n    \"duration\": [\n      10,\n      180\n    ],\n    \"instrumental\": true\n  },\n  \"accounts\": [],\n  \"selected_account_id\": null,\n  \"active_job\": null,\n  \"settings_route\": {\n    \"view\": \"settings\",\n    \"section\": \"Apps/music\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /api/pia/music/suno/connect",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/music/suno/connect",
+            "description": "Inicia a conexão de uma conta Suno na PIA Server (o OAuth acontece lá, nunca neste PC). Corpo vazio {} conecta uma conta nova; replace_account_id reconecta uma conta existente. Abra auth_url no navegador e consulte GET /music/suno/connect/<attempt_id> a cada 3 s. Erros: HTTP 400 {error, code}. Códigos possíveis: pia_server_unpaired, pia_server_unreachable, pia_server_unsupported, suno_not_connected, suno_credential_expired, suno_account_not_found, suno_account_taken, suno_account_mismatch, suno_identity_unavailable, suno_oauth_denied, suno_oauth_invalid ou o code repassado pela PIA Server.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"replace_account_id\": \"{{suno_account_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 — tentativa criada",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/suno/connect",
+                "description": "Inicia a conexão de uma conta Suno na PIA Server (o OAuth acontece lá, nunca neste PC). Corpo vazio {} conecta uma conta nova; replace_account_id reconecta uma conta existente. Abra auth_url no navegador e consulte GET /music/suno/connect/<attempt_id> a cada 3 s. Erros: HTTP 400 {error, code}. Códigos possíveis: pia_server_unpaired, pia_server_unreachable, pia_server_unsupported, suno_not_connected, suno_credential_expired, suno_account_not_found, suno_account_taken, suno_account_mismatch, suno_identity_unavailable, suno_oauth_denied, suno_oauth_invalid ou o code repassado pela PIA Server.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"replace_account_id\": \"{{suno_account_id}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"auth_url\": \"https://pia.example.com/suno/authorize?attempt=att_exemplo_1\",\n  \"attempt_id\": \"att_exemplo_1\",\n  \"expires_in\": 600\n}"
+            },
+            {
+              "name": "400 — PIA não pareada",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/suno/connect",
+                "description": "Inicia a conexão de uma conta Suno na PIA Server (o OAuth acontece lá, nunca neste PC). Corpo vazio {} conecta uma conta nova; replace_account_id reconecta uma conta existente. Abra auth_url no navegador e consulte GET /music/suno/connect/<attempt_id> a cada 3 s. Erros: HTTP 400 {error, code}. Códigos possíveis: pia_server_unpaired, pia_server_unreachable, pia_server_unsupported, suno_not_connected, suno_credential_expired, suno_account_not_found, suno_account_taken, suno_account_mismatch, suno_identity_unavailable, suno_oauth_denied, suno_oauth_invalid ou o code repassado pela PIA Server.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"replace_account_id\": \"{{suno_account_id}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"Para usar o Suno, entre na PIA Server em Configurações → PIA Server.\",\n  \"code\": \"pia_server_unpaired\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /api/pia/music/suno/connect/{{suno_attempt_id}}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/music/suno/connect/{{suno_attempt_id}}",
+            "description": "Estado da tentativa: {state: pending|connected|failed|expired, account_id?, code?}. Tentativa expirada responde 200 {state: expired}; só a tentativa inexistente responde 400 code=suno_connect_not_found. Em failed, code traz o motivo (ex.: suno_oauth_denied, suno_account_taken, suno_account_mismatch). Depois de connected, recarregue o /music/providers.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200 — pendente",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/suno/connect/{{suno_attempt_id}}",
+                "description": "Estado da tentativa: {state: pending|connected|failed|expired, account_id?, code?}. Tentativa expirada responde 200 {state: expired}; só a tentativa inexistente responde 400 code=suno_connect_not_found. Em failed, code traz o motivo (ex.: suno_oauth_denied, suno_account_taken, suno_account_mismatch). Depois de connected, recarregue o /music/providers.",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"state\": \"pending\"\n}"
+            },
+            {
+              "name": "200 — conectada",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/suno/connect/{{suno_attempt_id}}",
+                "description": "Estado da tentativa: {state: pending|connected|failed|expired, account_id?, code?}. Tentativa expirada responde 200 {state: expired}; só a tentativa inexistente responde 400 code=suno_connect_not_found. Em failed, code traz o motivo (ex.: suno_oauth_denied, suno_account_taken, suno_account_mismatch). Depois de connected, recarregue o /music/providers.",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"state\": \"connected\",\n  \"account_id\": \"acc_exemplo_1\"\n}"
+            },
+            {
+              "name": "200 — falhou",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/suno/connect/{{suno_attempt_id}}",
+                "description": "Estado da tentativa: {state: pending|connected|failed|expired, account_id?, code?}. Tentativa expirada responde 200 {state: expired}; só a tentativa inexistente responde 400 code=suno_connect_not_found. Em failed, code traz o motivo (ex.: suno_oauth_denied, suno_account_taken, suno_account_mismatch). Depois de connected, recarregue o /music/providers.",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"state\": \"failed\",\n  \"code\": \"suno_account_taken\"\n}"
+            },
+            {
+              "name": "200 — expirada",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/suno/connect/{{suno_attempt_id}}",
+                "description": "Estado da tentativa: {state: pending|connected|failed|expired, account_id?, code?}. Tentativa expirada responde 200 {state: expired}; só a tentativa inexistente responde 400 code=suno_connect_not_found. Em failed, code traz o motivo (ex.: suno_oauth_denied, suno_account_taken, suno_account_mismatch). Depois de connected, recarregue o /music/providers.",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"state\": \"expired\"\n}"
+            },
+            {
+              "name": "400 — tentativa inexistente",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/suno/connect/{{suno_attempt_id}}",
+                "description": "Estado da tentativa: {state: pending|connected|failed|expired, account_id?, code?}. Tentativa expirada responde 200 {state: expired}; só a tentativa inexistente responde 400 code=suno_connect_not_found. Em failed, code traz o motivo (ex.: suno_oauth_denied, suno_account_taken, suno_account_mismatch). Depois de connected, recarregue o /music/providers.",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"Tentativa de conexão não encontrada. Tente conectar de novo.\",\n  \"code\": \"suno_connect_not_found\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /api/pia/music/suno/accounts/{{suno_account_id}}/rename",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/music/suno/accounts/{{suno_account_id}}/rename",
+            "description": "Apelido da conta Suno (RN07). Chama PATCH /device/suno/accounts/<id> na PIA Server e devolve {ok, provider} com o item suno_mcp atualizado. label: 1 a 80 caracteres, sem caracteres de controle; fora disso responde 400 code=invalid_label. Chaves além de label são recusadas. Erros: HTTP 400 {error, code}. Códigos possíveis: pia_server_unpaired, pia_server_unreachable, pia_server_unsupported, suno_not_connected, suno_credential_expired, suno_account_not_found, suno_account_taken, suno_account_mismatch, suno_identity_unavailable, suno_oauth_denied, suno_oauth_invalid ou o code repassado pela PIA Server.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"Conta principal\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 — renomeada",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/suno/accounts/{{suno_account_id}}/rename",
+                "description": "Apelido da conta Suno (RN07). Chama PATCH /device/suno/accounts/<id> na PIA Server e devolve {ok, provider} com o item suno_mcp atualizado. label: 1 a 80 caracteres, sem caracteres de controle; fora disso responde 400 code=invalid_label. Chaves além de label são recusadas. Erros: HTTP 400 {error, code}. Códigos possíveis: pia_server_unpaired, pia_server_unreachable, pia_server_unsupported, suno_not_connected, suno_credential_expired, suno_account_not_found, suno_account_taken, suno_account_mismatch, suno_identity_unavailable, suno_oauth_denied, suno_oauth_invalid ou o code repassado pela PIA Server.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"label\": \"Conta principal\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"ok\": true,\n  \"provider\": {\n    \"id\": \"suno_mcp\",\n    \"label\": \"Suno\",\n    \"name\": \"Suno\",\n    \"kind\": \"remote\",\n    \"description\": \"Suno pela PIA Server\",\n    \"available\": true,\n    \"reason\": null,\n    \"hint\": null,\n    \"connected\": true,\n    \"credential_state\": \"configured\",\n    \"expires_at\": \"2026-12-01T12:00:00Z\",\n    \"settings\": {\n      \"max_count\": 10,\n      \"duration\": [\n        10,\n        180\n      ],\n      \"instrumental\": true\n    },\n    \"accounts\": [\n      {\n        \"id\": \"acc_exemplo_1\",\n        \"label\": \"Conta principal\",\n        \"email\": \"pessoa@example.com\",\n        \"name\": \"Pessoa Exemplo\",\n        \"credential_state\": \"configured\",\n        \"available\": true,\n        \"expires_at\": \"2026-12-01T12:00:00Z\",\n        \"reason\": null,\n        \"hint\": null\n      }\n    ],\n    \"selected_account_id\": \"acc_exemplo_1\",\n    \"active_job\": null,\n    \"settings_route\": {\n      \"view\": \"settings\",\n      \"section\": \"Apps/music\"\n    }\n  }\n}"
+            },
+            {
+              "name": "400 — apelido inválido",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/suno/accounts/{{suno_account_id}}/rename",
+                "description": "Apelido da conta Suno (RN07). Chama PATCH /device/suno/accounts/<id> na PIA Server e devolve {ok, provider} com o item suno_mcp atualizado. label: 1 a 80 caracteres, sem caracteres de controle; fora disso responde 400 code=invalid_label. Chaves além de label são recusadas. Erros: HTTP 400 {error, code}. Códigos possíveis: pia_server_unpaired, pia_server_unreachable, pia_server_unsupported, suno_not_connected, suno_credential_expired, suno_account_not_found, suno_account_taken, suno_account_mismatch, suno_identity_unavailable, suno_oauth_denied, suno_oauth_invalid ou o code repassado pela PIA Server.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"label\": \"Conta principal\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"O apelido da conta Suno deve ter de 1 a 80 caracteres, sem caracteres de controle.\",\n  \"code\": \"invalid_label\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /api/pia/music/suno/disconnect",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/music/suno/disconnect",
+            "description": "Desconecta a conta Suno na PIA Server (DELETE /device/suno/accounts/<id>) e devolve {ok, provider} com o item suno_mcp atualizado. Nada do Suno fica neste PC. Erros: HTTP 400 {error, code}. Códigos possíveis: pia_server_unpaired, pia_server_unreachable, pia_server_unsupported, suno_not_connected, suno_credential_expired, suno_account_not_found, suno_account_taken, suno_account_mismatch, suno_identity_unavailable, suno_oauth_denied, suno_oauth_invalid ou o code repassado pela PIA Server.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"account_id\": \"{{suno_account_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 — desconectada",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/suno/disconnect",
+                "description": "Desconecta a conta Suno na PIA Server (DELETE /device/suno/accounts/<id>) e devolve {ok, provider} com o item suno_mcp atualizado. Nada do Suno fica neste PC. Erros: HTTP 400 {error, code}. Códigos possíveis: pia_server_unpaired, pia_server_unreachable, pia_server_unsupported, suno_not_connected, suno_credential_expired, suno_account_not_found, suno_account_taken, suno_account_mismatch, suno_identity_unavailable, suno_oauth_denied, suno_oauth_invalid ou o code repassado pela PIA Server.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"account_id\": \"{{suno_account_id}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"ok\": true,\n  \"provider\": {\n    \"id\": \"suno_mcp\",\n    \"label\": \"Suno\",\n    \"name\": \"Suno\",\n    \"kind\": \"remote\",\n    \"description\": \"Suno pela PIA Server\",\n    \"available\": false,\n    \"reason\": \"suno_not_connected\",\n    \"hint\": {\n      \"text\": \"Conecte o Suno em Configurações → Música.\",\n      \"route\": {\n        \"view\": \"settings\",\n        \"section\": \"Apps/music\"\n      }\n    },\n    \"connected\": false,\n    \"credential_state\": \"missing\",\n    \"expires_at\": null,\n    \"settings\": {\n      \"max_count\": 10,\n      \"duration\": [\n        10,\n        180\n      ],\n      \"instrumental\": true\n    },\n    \"accounts\": [],\n    \"selected_account_id\": null,\n    \"active_job\": null,\n    \"settings_route\": {\n      \"view\": \"settings\",\n      \"section\": \"Apps/music\"\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /api/pia/music/history",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/music/history?cursor=&limit=100",
+            "description": "Histórico de gerações (RN20): itens da PIA Server mesclados com o índice local, jobs ativos primeiro e depois do mais novo para o mais antigo. cursor é opaco (next_cursor da página anterior); limit vai de 1 a 100. tracks[].availability: local_file (file traz o item da biblioteca), redownload (faixa Suno sem arquivo neste PC), other_device_local (áudio local de outro PC) ou null (áudio local deste PC que sumiu). Offline ou não pareado: só os itens locais, com server_unavailable=true e server_reason pia_server_unpaired|pia_server_unreachable.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200 — página do histórico",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/history?cursor=&limit=100",
+                "description": "Histórico de gerações (RN20): itens da PIA Server mesclados com o índice local, jobs ativos primeiro e depois do mais novo para o mais antigo. cursor é opaco (next_cursor da página anterior); limit vai de 1 a 100. tracks[].availability: local_file (file traz o item da biblioteca), redownload (faixa Suno sem arquivo neste PC), other_device_local (áudio local de outro PC) ou null (áudio local deste PC que sumiu). Offline ou não pareado: só os itens locais, com server_unavailable=true e server_reason pia_server_unpaired|pia_server_unreachable.",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"items\": [\n    {\n      \"id\": \"7d3f0c1e-2b4a-4c8e-9f00-1122aabbccdd\",\n      \"job_id\": null,\n      \"provider\": \"suno_mcp\",\n      \"source\": \"suno\",\n      \"suno_account\": {\n        \"id\": \"acc_exemplo_1\",\n        \"name\": \"Pessoa Exemplo\"\n      },\n      \"prompt\": \"Piano instrumental tranquilo\",\n      \"lyrics\": \"\",\n      \"params\": {\n        \"provider\": \"suno_mcp\",\n        \"duration\": 30,\n        \"count\": 2,\n        \"suno_account_id\": \"acc_exemplo_1\"\n      },\n      \"created_at\": \"2026-11-17T22:00:00.000000Z\",\n      \"state\": \"completed\",\n      \"code\": null,\n      \"count\": 2,\n      \"this_device\": true,\n      \"tracks\": [\n        {\n          \"n\": 1,\n          \"title\": \"Manhã calma\",\n          \"duration\": 31.5,\n          \"extra\": false,\n          \"label\": \"Suno\",\n          \"file\": {\n            \"file\": \"0123456789abcdef0123456789abcdef.mp3\",\n            \"provider\": \"suno_mcp\",\n            \"prompt\": \"Piano instrumental tranquilo\",\n            \"lyrics\": \"\",\n            \"requested_duration\": 30,\n            \"audio_url\": \"/api/pia/music/files/0123456789abcdef0123456789abcdef.mp3\",\n            \"batch\": \"7d3f0c1e2b4a4c8e9f001122aabbccdd\",\n            \"variant\": 1,\n            \"client_id\": \"7d3f0c1e-2b4a-4c8e-9f00-1122aabbccdd\",\n            \"generation_id\": \"gen_exemplo_1\",\n            \"track_n\": 1,\n            \"extra\": false,\n            \"label\": \"Suno\",\n            \"title\": \"Manhã calma\",\n            \"modified\": 1795000000.0\n          },\n          \"availability\": \"local_file\"\n        },\n        {\n          \"n\": 2,\n          \"title\": \"Manhã calma (2)\",\n          \"duration\": 29.8,\n          \"extra\": false,\n          \"label\": \"Suno\",\n          \"file\": null,\n          \"availability\": \"redownload\"\n        }\n      ]\n    }\n  ],\n  \"next_cursor\": null,\n  \"server_unavailable\": false,\n  \"server_reason\": null\n}"
+            }
+          ]
+        },
+        {
+          "name": "DELETE /api/pia/music/history/{{history_id}}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/music/history/{{history_id}}",
+            "description": "Exclusão definitiva do item na PIA Server. NUNCA apaga o arquivo local: grava uma marca local (tombstone) para o item não voltar pela varredura da pasta. Não pareado: 400 pia_server_unpaired. Item desconhecido: 400 history_item_not_found.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 — excluído",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/history/{{history_id}}",
+                "description": "Exclusão definitiva do item na PIA Server. NUNCA apaga o arquivo local: grava uma marca local (tombstone) para o item não voltar pela varredura da pasta. Não pareado: 400 pia_server_unpaired. Item desconhecido: 400 history_item_not_found.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"ok\": true,\n  \"id\": \"7d3f0c1e-2b4a-4c8e-9f00-1122aabbccdd\"\n}"
+            },
+            {
+              "name": "400 — PIA não pareada",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/history/{{history_id}}",
+                "description": "Exclusão definitiva do item na PIA Server. NUNCA apaga o arquivo local: grava uma marca local (tombstone) para o item não voltar pela varredura da pasta. Não pareado: 400 pia_server_unpaired. Item desconhecido: 400 history_item_not_found.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"Para usar o Suno, entre na PIA Server em Configurações → PIA Server.\",\n  \"code\": \"pia_server_unpaired\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /api/pia/music/history/{{history_id}}/tracks/{{track_n}}/redownload",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/music/history/{{history_id}}/tracks/{{track_n}}/redownload",
+            "description": "Baixa de novo uma faixa Suno pelo proxy da PIA Server, em qualquer PC da conta, para a pasta de música deste PC. Vira job: devolve {job_id} para o watchJob; um 2º pedido da mesma faixa ainda baixando devolve o mesmo job_id. O evento track traz {item, track: {n, title, duration, extra, label, availability: local_file, file}, history_id}. Erros 400: pia_server_unpaired, history_item_not_found, track_not_found, suno_track_unavailable (link morto no Suno), not_origin_device (faixa local de outro PC) e local_audio_missing (faixa local deste PC que sumiu).",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 — job criado",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/history/{{history_id}}/tracks/{{track_n}}/redownload",
+                "description": "Baixa de novo uma faixa Suno pelo proxy da PIA Server, em qualquer PC da conta, para a pasta de música deste PC. Vira job: devolve {job_id} para o watchJob; um 2º pedido da mesma faixa ainda baixando devolve o mesmo job_id. O evento track traz {item, track: {n, title, duration, extra, label, availability: local_file, file}, history_id}. Erros 400: pia_server_unpaired, history_item_not_found, track_not_found, suno_track_unavailable (link morto no Suno), not_origin_device (faixa local de outro PC) e local_audio_missing (faixa local deste PC que sumiu).",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"job_id\": \"{{job_id}}\"\n}"
+            },
+            {
+              "name": "400 — música indisponível no Suno",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/music/history/{{history_id}}/tracks/{{track_n}}/redownload",
+                "description": "Baixa de novo uma faixa Suno pelo proxy da PIA Server, em qualquer PC da conta, para a pasta de música deste PC. Vira job: devolve {job_id} para o watchJob; um 2º pedido da mesma faixa ainda baixando devolve o mesmo job_id. O evento track traz {item, track: {n, title, duration, extra, label, availability: local_file, file}, history_id}. Erros 400: pia_server_unpaired, history_item_not_found, track_not_found, suno_track_unavailable (link morto no Suno), not_origin_device (faixa local de outro PC) e local_audio_missing (faixa local deste PC que sumiu).",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"Esta música não está mais disponível no Suno.\",\n  \"code\": \"suno_track_unavailable\"\n}"
+            }
+          ]
         }
       ]
     },
@@ -4485,7 +5496,7 @@
               }
             ],
             "url": "{{base_url}}/api/pia/apps/music/generate",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "description": "Gera um lote de músicas. Sucesso devolve `{job}` e o progresso segue no SSE. A recusa antes do job responde HTTP 400 com `{error, code}`, onde `code` é o motivo da indisponibilidade do Suno: `suno_not_connected`, `suno_credential_expired`, `pia_server_unpaired`, `pia_server_unreachable` ou `pia_server_unsupported`.",
             "auth": {
               "type": "noauth"
             },
@@ -4499,7 +5510,160 @@
               }
             }
           },
-          "response": []
+          "response": [
+            {
+              "name": "400 — Suno não conectado",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/apps/music/generate",
+                "description": "Gera um lote de músicas. Sucesso devolve `{job}` e o progresso segue no SSE. A recusa antes do job responde HTTP 400 com `{error, code}`, onde `code` é o motivo da indisponibilidade do Suno: `suno_not_connected`, `suno_credential_expired`, `pia_server_unpaired`, `pia_server_unreachable` ou `pia_server_unsupported`.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"prompt\": \"Piano instrumental tranquilo\",\n  \"lyrics\": \"\",\n  \"provider\": \"local\",\n  \"duration\": 30,\n  \"count\": 1\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"Conecte o Suno em Configurações → Música.\",\n  \"code\": \"suno_not_connected\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /api/pia/apps/music/generate · Suno (gasta créditos)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/apps/music/generate",
+            "description": "ATENÇÃO: gera de verdade no Suno e GASTA CRÉDITOS. Não execute sem o ok explícito do dono da conta. Cria o job na PIA Server e devolve {job}; o progresso segue no SSE. suno_account_id é obrigatório com 2 ou mais contas válidas (senão 400 suno_account_required) e opcional com uma só. Recusas antes do job (400 {error, code}): suno_not_connected, suno_credential_expired, suno_account_required, suno_account_not_found, suno_job_active, pia_server_unpaired, pia_server_unreachable, pia_server_unsupported.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"Piano instrumental tranquilo\",\n  \"lyrics\": \"\",\n  \"provider\": \"suno_mcp\",\n  \"duration\": 30,\n  \"count\": 2,\n  \"suno_account_id\": \"{{suno_account_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 — job criado",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/apps/music/generate",
+                "description": "ATENÇÃO: gera de verdade no Suno e GASTA CRÉDITOS. Não execute sem o ok explícito do dono da conta. Cria o job na PIA Server e devolve {job}; o progresso segue no SSE. suno_account_id é obrigatório com 2 ou mais contas válidas (senão 400 suno_account_required) e opcional com uma só. Recusas antes do job (400 {error, code}): suno_not_connected, suno_credential_expired, suno_account_required, suno_account_not_found, suno_job_active, pia_server_unpaired, pia_server_unreachable, pia_server_unsupported.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"prompt\": \"Piano instrumental tranquilo\",\n  \"lyrics\": \"\",\n  \"provider\": \"suno_mcp\",\n  \"duration\": 30,\n  \"count\": 2,\n  \"suno_account_id\": \"{{suno_account_id}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"job\": \"{{job_id}}\"\n}"
+            },
+            {
+              "name": "400 — escolha a conta Suno",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Origin",
+                    "value": "{{base_url}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/api/pia/apps/music/generate",
+                "description": "ATENÇÃO: gera de verdade no Suno e GASTA CRÉDITOS. Não execute sem o ok explícito do dono da conta. Cria o job na PIA Server e devolve {job}; o progresso segue no SSE. suno_account_id é obrigatório com 2 ou mais contas válidas (senão 400 suno_account_required) e opcional com uma só. Recusas antes do job (400 {error, code}): suno_not_connected, suno_credential_expired, suno_account_required, suno_account_not_found, suno_job_active, pia_server_unpaired, pia_server_unreachable, pia_server_unsupported.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"prompt\": \"Piano instrumental tranquilo\",\n  \"lyrics\": \"\",\n  \"provider\": \"suno_mcp\",\n  \"duration\": 30,\n  \"count\": 2,\n  \"suno_account_id\": \"{{suno_account_id}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"Escolha a conta Suno\",\n  \"code\": \"suno_account_required\"\n}"
+            }
+          ]
         },
         {
           "name": "POST /api/pia/apps/music/library",
@@ -4615,100 +5779,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /api/pia/apps/music/suno-oauth-callback",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{base_url}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/pia/apps/music/suno-oauth-callback",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
-            "auth": {
-              "type": "noauth"
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /api/pia/apps/music/suno-oauth-disconnect",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{base_url}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/pia/apps/music/suno-oauth-disconnect",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
-            "auth": {
-              "type": "noauth"
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /api/pia/apps/music/suno-oauth-start",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{base_url}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/pia/apps/music/suno-oauth-start",
-            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
-            "auth": {
-              "type": "noauth"
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"provider\": \"suno_mcp\",\n  \"gemini_model\": \"lyria-3.5\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

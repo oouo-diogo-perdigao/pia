@@ -16,6 +16,13 @@ PLAIN_MAGIC = b"PIA-BACKUP-PLAIN-1\n"
 BACKUP_HEADERS = (MAGIC, PLAIN_MAGIC)
 LIMIT = 16 * 1024**2
 MAX_BACKUP_BYTES = LIMIT + len(MAGIC) + 16 + 12 + 16
+# Device-local credentials (MCP connector tokens) never leave this computer:
+# they are skipped on export and discarded on import (backup and profile sync).
+LOCAL_ONLY_SECRET_PREFIXES = ("mcp:",)
+
+
+def local_only_secret(name):
+    return isinstance(name, str) and name.startswith(LOCAL_ONLY_SECRET_PREFIXES)
 
 
 def key(password, salt):
@@ -29,7 +36,9 @@ def export_config(password, store=None):
     if not isinstance(password, str):
         raise ValueError("Senha inválida.")
     store = store or get_store()
-    secret_names = [row[0] for row in store.rows("vault_entries")]
+    secret_names = [
+        row[0] for row in store.rows("vault_entries") if not local_only_secret(row[0])
+    ]
     secrets = {name: store.vault.get(name) for name in secret_names}
     secrets = {name: value for name, value in secrets.items() if value is not None}
     rows = store.rows("settings")
@@ -125,6 +134,12 @@ def decode(data, password):
         or not isinstance(value.get("secrets"), dict)
     ):
         raise ValueError("Conteúdo de migração inválido.")
+    # Backups made before mcp: entries were excluded may still carry them.
+    value["secrets"] = {
+        name: secret
+        for name, secret in value["secrets"].items()
+        if not local_only_secret(name)
+    }
     for row in value["settings"]:
         if (
             not isinstance(row, list)

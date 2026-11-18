@@ -7,6 +7,7 @@ import { Music2 } from "lucide-react";
 import { notify } from "./toasts";
 import Connectors, { connectors } from "./Connectors";
 import ToastCenter from "./ToastCenter";
+import SunoLegacyPrompt from "./SunoLegacyPrompt";
 import { Plug } from "lucide-react";
 import React, { useState, useEffect, useRef } from "react";
 import {
@@ -553,6 +554,7 @@ export default function Workspace({ standalone = null }) {
       <ErrorAlert />
       <ToastCenter />
       <MediaPlayer />
+      {!standalone && <SunoLegacyPrompt />}
       {!standalone && (
         <nav className="page-menu">
           <Menu>
