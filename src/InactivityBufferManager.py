@@ -17,6 +17,7 @@ except Exception:
 
 
 from .config_paths import SOUNDS_DIR
+
 PROCESSING_SOUND_PATH = str(SOUNDS_DIR / "end.mp3")
 
 

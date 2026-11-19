@@ -30,7 +30,8 @@ def _synthesize_and_speak(text_chunk: str, generation=None) -> None:
 def _consume_agent_stream(prompt_text: str) -> None:
     """Consome o stream SSE do agente e envia os trechos para o SAT de forma fluida."""
     from .voice_interrupt import epoch
-    generation=epoch()
+
+    generation = epoch()
     try:
         logging.info(f"[AGENT] Iniciando stream para -> '{prompt_text}'")
 
@@ -54,7 +55,7 @@ def _consume_agent_stream(prompt_text: str) -> None:
         response.raise_for_status()
 
         for line in response.iter_lines():
-            if epoch()!=generation:
+            if epoch() != generation:
                 response.close()
                 return
             if not line:
@@ -76,7 +77,7 @@ def _consume_agent_stream(prompt_text: str) -> None:
 
                         if content_fragment:
                             # Envia o pedaço imediatamente para o SAT falar
-                            _synthesize_and_speak(content_fragment,generation)
+                            _synthesize_and_speak(content_fragment, generation)
                 except json.JSONDecodeError:
                     continue
 

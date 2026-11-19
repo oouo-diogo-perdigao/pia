@@ -56,7 +56,9 @@ def _load_model_selection() -> tuple[str, str]:
     )
 
 
-def resolve_model(default_model: str, llm_provider: str = "", llm_model: str = "") -> str:
+def resolve_model(
+    default_model: str, llm_provider: str = "", llm_model: str = ""
+) -> str:
     provider = str(llm_provider or "").strip()
     model = str(llm_model or "").strip()
     if not provider and not model:
@@ -116,7 +118,7 @@ class PiaClient:
         self.headers = {"Content-Type": "application/json", **headers()}
         self.timeout = float(context.get("timeout", 3600))
 
-    def complete_json(self, prompt, fields, attempts=3):
+    def complete_json(self, prompt, fields, attempts=3, *, validate=None):
         payload = {
             "model": self.model,
             "stream": False,
@@ -160,7 +162,6 @@ class PiaClient:
                     for k in fields
                 ):
                     raise ValueError("Resposta JSON sem os campos obrigatórios.")
-                return data
             except requests.RequestException as exc:
                 if attempt + 1 == attempts:
                     raise RuntimeError(
@@ -179,4 +180,15 @@ class PiaClient:
                     or attempt + 1 == attempts
                 ):
                     raise
+            else:
+                if validate is None:
+                    return data
+                try:
+                    return validate(data)
+                except ValueError as exc:
+                    if attempt + 1 == attempts:
+                        raise RuntimeError(
+                            f"A PIA não gerou um resumo válido após {attempts} "
+                            f"tentativa(s). Último erro: {exc}"
+                        ) from exc
             time.sleep(min(2**attempt, 30))

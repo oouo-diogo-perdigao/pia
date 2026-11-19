@@ -1,4 +1,5 @@
 """Local web workspace service. No Qt imports; HTTP and native shells share state."""
+
 from __future__ import annotations
 from concurrent.futures import Future
 import importlib.util
@@ -22,7 +23,7 @@ class Job:
     def __init__(self, chat=None):
         self.id = secrets.token_hex(16)
         self.chat = chat
-        self.status, self.error, self.text = 'running', None, ''
+        self.status, self.error, self.text = "running", None, ""
         self.events = []
         self.cancelled = threading.Event()
         self.changed = threading.Condition()
@@ -41,60 +42,79 @@ class Job:
                 pass
 
     def emit(self, kind, **data):
-        if kind in ('done','error') and getattr(self,'plugin_identity',None):
+        if kind in ("done", "error") and getattr(self, "plugin_identity", None):
             from src.plugin_logs import write
-            write(self.plugin_identity,'job',kind)
+
+            write(self.plugin_identity, "job", kind)
         with self.changed:
-            if kind == 'delta':
-                self.text += data['text']
-            if kind in ('done', 'error'):
+            if kind == "delta":
+                self.text += data["text"]
+            if kind in ("done", "error"):
                 self.status = kind
-                self.error = data.get('error')
-            self.events.append({'type': kind, **data})
+                self.error = data.get("error")
+            self.events.append({"type": kind, **data})
             self.changed.notify_all()
 
 
 class Apps:
     def __init__(self, root=None):
-        self.root = Path(root or BASE_DIR / 'Plugins' / 'Apps')
+        self.root = Path(root or BASE_DIR / "Plugins" / "Apps")
         self.modules = {}
 
     def records(self):
         result = []
-        for file in sorted(self.root.glob('*/plugin.toml')):
-            data = tomllib.loads(file.read_text(encoding='utf-8'))
-            manifest = file.parent / 'pia.json'
+        for file in sorted(self.root.glob("*/plugin.toml")):
+            data = tomllib.loads(file.read_text(encoding="utf-8"))
+            manifest = file.parent / "pia.json"
             if manifest.exists():
-                meta = json.loads(manifest.read_text(encoding='utf-8'))
-                data.update(name=meta['nome'], info=meta.get('info', ''), about=meta.get('about'))
-                if data.get('web'):
-                    data['web']['entrypoint'] = meta.get('home', data['web']['entrypoint'])
-            if data.get('enabled', True) and re.fullmatch('[a-z][a-z0-9_]*', data.get('id', '')) and data.get('web'):
-                result.append({**data, 'folder': file.parent})
+                meta = json.loads(manifest.read_text(encoding="utf-8"))
+                data.update(
+                    name=meta["nome"],
+                    info=meta.get("info", ""),
+                    about=meta.get("about"),
+                )
+                if data.get("web"):
+                    data["web"]["entrypoint"] = meta.get(
+                        "home", data["web"]["entrypoint"]
+                    )
+            if (
+                data.get("enabled", True)
+                and re.fullmatch("[a-z][a-z0-9_]*", data.get("id", ""))
+                and data.get("web")
+            ):
+                result.append({**data, "folder": file.parent})
         return result
 
     def find(self, identity):
         for app in self.records():
-            if app['id'] == identity:
+            if app["id"] == identity:
                 return app
-        raise ValueError('Aplicativo não encontrado.')
+        raise ValueError("Aplicativo não encontrado.")
 
     def public(self):
-        return [{'id': a['id'], 'name': a['name'], 'icon': a.get('icon', 'app'),
-                 'info': a.get('info', ''), 'about': '/apps/' + a['id'] + '/' + (a.get('about') or 'about.html'),
-                 'url': '/apps/' + a['id'] + '/' + a['web']['entrypoint']} for a in self.records()]
+        return [
+            {
+                "id": a["id"],
+                "name": a["name"],
+                "icon": a.get("icon", "app"),
+                "info": a.get("info", ""),
+                "about": "/apps/" + a["id"] + "/" + (a.get("about") or "about.html"),
+                "url": "/apps/" + a["id"] + "/" + a["web"]["entrypoint"],
+            }
+            for a in self.records()
+        ]
 
     def load(self, identity):
         app = self.find(identity)
         if identity not in self.modules:
-            path = (app['folder'] / app['web']['api']).resolve()
-            if not path.is_relative_to(app['folder'].resolve()) or path.suffix != '.py':
-                raise ValueError('API do aplicativo inválida.')
-            package = '_pia_web_app_' + identity
+            path = (app["folder"] / app["web"]["api"]).resolve()
+            if not path.is_relative_to(app["folder"].resolve()) or path.suffix != ".py":
+                raise ValueError("API do aplicativo inválida.")
+            package = "_pia_web_app_" + identity
             module = types.ModuleType(package)
-            module.__path__ = [str(app['folder'])]
+            module.__path__ = [str(app["folder"])]
             sys.modules[package] = module
-            spec = importlib.util.spec_from_file_location(package + '.api', path)
+            spec = importlib.util.spec_from_file_location(package + ".api", path)
             api = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = api
             spec.loader.exec_module(api)
@@ -107,7 +127,7 @@ class Apps:
 
 class WorkspaceService:
     def __init__(self, backend=None, apps=None):
-        self.boot=secrets.token_hex(12)
+        self.boot = secrets.token_hex(12)
         self.native_handler = None
         self.jobs = {}
         self.requests = {}
@@ -116,19 +136,27 @@ class WorkspaceService:
         self.store = self.backend.store
         self.apps = apps or Apps()
         from src.notifications import NotificationCenter
-        self.notifications=getattr(self.backend,'notifications',None) or NotificationCenter(self.store,self.notify,getattr(self.backend,'speak',lambda text:None))
+
+        self.notifications = getattr(
+            self.backend, "notifications", None
+        ) or NotificationCenter(
+            self.store, self.notify, getattr(self.backend, "speak", lambda text: None)
+        )
         from src.media import MediaSessions
-        self.media=MediaSessions()
+
+        self.media = MediaSessions()
         from src.model_session import ModelSessionTracker, register_active_tracker
+
         self.model_session = ModelSessionTracker()
         register_active_tracker(self.model_session)
         if backend is None:
             self.start_profile_sync()
 
     def _model_session(self):
-        tracker = getattr(self, 'model_session', None)
+        tracker = getattr(self, "model_session", None)
         if tracker is None:
             from src.model_session import ModelSessionTracker, register_active_tracker
+
             tracker = ModelSessionTracker()
             self.model_session = tracker
             register_active_tracker(tracker)
@@ -136,398 +164,932 @@ class WorkspaceService:
 
     def start_profile_sync(self):
         from Plugins.Connectors.pia_server.profile_sync import start
+
         def idle():
-            return not any(job.status == 'running' for job in list(self.jobs.values()))
+            return not any(job.status == "running" for job in list(self.jobs.values()))
 
         def reload_runtime():
             if self.native_handler:
                 while not idle():
-                    time.sleep(.5)
-                self.native('restart')
+                    time.sleep(0.5)
+                self.native("restart")
 
         start(self.store, idle, reload_runtime)
 
     def notify(self, title, text, speak=False):
         if self.native_handler:
-            self.native_handler('notify', dict(title=title, text=text, speak=speak))
+            self.native_handler("notify", dict(title=title, text=text, speak=speak))
 
     def native(self, action, payload=None):
         if not self.native_handler:
-            raise RuntimeError('Esta operação exige a PIA aberta na sessão gráfica.')
+            raise RuntimeError("Esta operação exige a PIA aberta na sessão gráfica.")
         result = self.native_handler(action, payload or {})
         return result.result(timeout=180) if isinstance(result, Future) else result
 
     def state(self):
-        return {'boot':getattr(self,'boot','legacy'),'chats': self.store.chat_records(), 'folders': self.store.folders(), 'apps': sorted(self.apps.public(),key=lambda app:(self.store.get('ui:app-order',[]).index(app['id']) if app['id'] in self.store.get('ui:app-order',[]) else 999)),
-                'jobs': [{'id': j.id, 'chat': j.chat, 'status': j.status} for j in self.jobs.values() if j.status == 'running'],
-                'native': self.native_handler is not None,
-                'notifications':self.notification_counts(),'bots':self.bot_records()}
+        return {
+            "boot": getattr(self, "boot", "legacy"),
+            "chats": self.store.chat_records(),
+            "folders": self.store.folders(),
+            "apps": sorted(
+                self.apps.public(),
+                key=lambda app: (
+                    self.store.get("ui:app-order", []).index(app["id"])
+                    if app["id"] in self.store.get("ui:app-order", [])
+                    else 999
+                ),
+            ),
+            "jobs": [
+                {"id": j.id, "chat": j.chat, "status": j.status}
+                for j in self.jobs.values()
+                if j.status == "running"
+            ],
+            "native": self.native_handler is not None,
+            "notifications": self.notification_counts(),
+            "bots": self.bot_records(),
+        }
 
     def notification_counts(self):
         from Plugins.Connectors.pia_server.profile_sync import status
-        counts={k:v for k,v in self.notifications.snapshot().items() if k in ('counts','unread','settings')}
-        chats=self.store.unread_chats()
-        return {**counts,'chat_counts':chats,'chat_unread':sum(chats.values()),'profile_revision':status(self.store).get('revision')}
+
+        counts = {
+            k: v
+            for k, v in self.notifications.snapshot().items()
+            if k in ("counts", "unread", "settings")
+        }
+        chats = self.store.unread_chats()
+        return {
+            **counts,
+            "chat_counts": chats,
+            "chat_unread": sum(chats.values()),
+            "profile_revision": status(self.store).get("revision"),
+        }
 
     def bot_records(self):
-        records=[]
-        for file in sorted((BASE_DIR/'Plugins/Bot').glob('*/pia.json')):
-            meta=json.loads(file.read_text(encoding='utf-8'))
-            identity=meta.get('app_id','')
-            if not re.fullmatch('[a-z][a-z0-9_]*',identity):continue
-            records.append({'id':identity,'name':meta['nome'],'avatar':f'/bots/{identity}/avatar.svg' if (file.parent/'avatar.svg').is_file() else None,'description':meta.get('info',''),'url':f'/bots/{identity}/web/'+meta.get('home','index.html')})
+        records = []
+        for file in sorted((BASE_DIR / "Plugins/Bot").glob("*/pia.json")):
+            meta = json.loads(file.read_text(encoding="utf-8"))
+            identity = meta.get("app_id", "")
+            if not re.fullmatch("[a-z][a-z0-9_]*", identity):
+                continue
+            from src.tts_service import get_tts_service
+
+            records.append(
+                {
+                    "id": identity,
+                    "kind": "native",
+                    "name": meta["nome"],
+                    "avatar": f"/bots/{identity}/avatar.svg"
+                    if (file.parent / "avatar.svg").is_file()
+                    else None,
+                    "description": meta.get("info", ""),
+                    "url": f"/bots/{identity}/web/" + meta.get("home", "index.html"),
+                    "voice": get_tts_service().get_speaker_voice(f"native:{identity}"),
+                }
+            )
+        try:
+            from Plugins.OpenBot.service import get_openbot_service
+
+            records.extend(get_openbot_service().workspace_bot_records())
+        except Exception:
+            pass
         return records
 
-    def publish_notification(self,source,title,text,links=None):
-        if source not in dict(self.plugin_folders()):raise ValueError('Plugin não encontrado.')
-        return self.notifications.publish(source,title,text,links)
+    def publish_notification(self, source, title, text, links=None):
+        if source not in dict(self.plugin_folders()):
+            raise ValueError("Plugin não encontrado.")
+        return self.notifications.publish(source, title, text, links)
 
-    def send(self, chat, text, request=None):
+    def send(
+        self,
+        chat,
+        text,
+        request=None,
+        model=None,
+        bot_id=None,
+        system_prompt=None,
+    ):
         if not isinstance(text, str) or not text.strip():
-            raise ValueError('Mensagem vazia.')
+            raise ValueError("Mensagem vazia.")
         if len(text) > 100000:
-            raise ValueError('Mensagem muito longa.')
+            raise ValueError("Mensagem muito longa.")
         with self.lock:
             if request and request in self.requests:
                 return self.requests[request]
-            if not any(c['id'] == chat for c in self.store.chat_records()):
-                raise ValueError('Conversa não encontrada.')
-            if any(j.chat == chat and j.status == 'running' for j in self.jobs.values()):
-                raise ValueError('Aguarde a resposta desta conversa.')
+            if not chat and bot_id:
+                key = f"bot_chat:{bot_id}"
+                chat = self.store.get(key)
+                if not chat or not any(
+                    c["id"] == chat for c in self.store.chat_records()
+                ):
+                    chat = self.store.new_chat(f"Bot · {bot_id}")
+                    self.store.set(key, chat)
+            if not any(c["id"] == chat for c in self.store.chat_records()):
+                raise ValueError("Conversa não encontrada.")
+            if any(
+                j.chat == chat and j.status == "running" for j in self.jobs.values()
+            ):
+                raise ValueError("Aguarde a resposta desta conversa.")
             # Persist the user message before returning 202; the UI never waits for the model.
             history = self.store.messages(chat)
-            if not history or history[-1] != {'role': 'user', 'content': text.strip()}:
-                self.store.append(chat, 'user', text.strip())
-            self.store.set('draft:' + chat, '')
+            if not history or history[-1] != {"role": "user", "content": text.strip()}:
+                self.store.append(chat, "user", text.strip())
+            self.store.set("draft:" + chat, "")
             job = Job(chat)
             self.jobs[job.id] = job
             if request:
                 self.requests[request] = job.id
+
             def work():
                 try:
+
                     def delta(value):
                         if job.cancelled.is_set():
-                            raise InterruptedError('Resposta interrompida.')
-                        job.emit('delta', text=value)
+                            raise InterruptedError("Resposta interrompida.")
+                        job.emit("delta", text=value)
+
+                    reply_kwargs = {"on_delta": delta}
+                    if model:
+                        reply_kwargs["model"] = model
+                    if bot_id:
+                        reply_kwargs["bot_id"] = bot_id
+                    if system_prompt:
+                        reply_kwargs["system_prompt"] = system_prompt
                     reply_fn = self.backend.reply
                     try:
                         params = inspect.signature(reply_fn).parameters
-                        accepts_cancel = 'cancel_event' in params or any(
-                            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+                        accepts_cancel = "cancel_event" in params or any(
+                            p.kind == inspect.Parameter.VAR_KEYWORD
+                            for p in params.values()
                         )
                     except (TypeError, ValueError):
                         accepts_cancel = False
                     if accepts_cancel:
-                        reply_fn(chat, text.strip(), on_delta=delta, cancel_event=job.cancelled)
-                    else:
-                        reply_fn(chat, text.strip(), on_delta=delta)
+                        reply_kwargs["cancel_event"] = job.cancelled
+                    reply_fn(chat, text.strip(), **reply_kwargs)
                     if job.cancelled.is_set():
-                        raise InterruptedError('Resposta interrompida.')
-                    job.emit('done')
+                        raise InterruptedError("Resposta interrompida.")
+                    meta = getattr(self.backend, "_last_reply_meta", None) or {}
+                    job.emit("done", **meta)
                 except InterruptedError:
                     if job.text:
-                        self.store.append(chat, 'assistant', job.text)
-                    job.emit('done', cancelled=True)
+                        self.store.append(chat, "assistant", job.text)
+                    job.emit("done", cancelled=True)
                 except Exception as exc:
-                    job.emit('error', error=str(exc))
-            threading.Thread(target=work, daemon=True, name='pia-web-chat').start()
+                    job.emit("error", error=str(exc))
+
+            threading.Thread(target=work, daemon=True, name="pia-web-chat").start()
             return job.id
 
     def plugin_folders(self):
         result = []
-        for kind in ('Apps', 'Bot', 'Connectors', 'Skills', 'Browser'):
-            for folder in sorted((BASE_DIR / 'Plugins' / kind).glob('*')):
-                if folder.is_dir() and not folder.name.startswith(('.', '_')):
-                    result.append((kind + '/' + folder.name, folder))
+        for kind in ("Apps", "Bot", "Connectors", "Skills", "Browser"):
+            for folder in sorted((BASE_DIR / "Plugins" / kind).glob("*")):
+                if folder.is_dir() and not folder.name.startswith((".", "_")):
+                    result.append((kind + "/" + folder.name, folder))
         return result
 
     def settings(self):
-        from src.settings_store import schema,get_store,sensitive
+        from src.settings_store import schema, get_store, sensitive
         from Plugins.Connectors.pia_server.remote import SECTIONS
-        sections=[]
-        for identity,folder in [('general',CONFIG_DIR),*self.plugin_folders()]:
+
+        sections = []
+        for identity, folder in [("general", CONFIG_DIR), *self.plugin_folders()]:
             if identity in SECTIONS:
                 continue
-            definitions=schema(identity)
-            known={item['name'] for item in definitions}
-            definitions=definitions+[dict(name=name,type=kind,label=name.replace('_',' ').title()) for group,name,_,kind,_ in get_store().rows('settings') if group==identity and name not in known]
-            if identity == 'Connectors/pia_server':
-                definitions = [item for item in definitions if item['name'] not in ('PIA_SERVER_DEVICE_TOKEN', 'PIA_SERVER_SYNC_MEDIA')]
-            if not definitions:continue
-            values=get_store().values(identity)
-            rows=[dict(name=item['name'],base=item['name'],label=item.get('label',item['name']),type=item['type'],
-                       value=values.get(item['name'],''),sensitive=sensitive(item['name'],item['type']),
-                       configured=bool(values.get(item['name'])),link=item.get('link','https://github.com/oouo-diogo-perdigao/pia#readme')) for item in definitions]
-            manifest=folder/'pia.json'
-            meta=json.loads(manifest.read_text(encoding='utf-8')) if manifest.exists() else {}
-            sections.append(dict(id=identity,name='PIA · Geral' if identity=='general' else meta.get('nome',identity),fields=rows))
+            definitions = schema(identity)
+            known = {item["name"] for item in definitions}
+            definitions = definitions + [
+                dict(name=name, type=kind, label=name.replace("_", " ").title())
+                for group, name, _, kind, _ in get_store().rows("settings")
+                if group == identity and name not in known
+            ]
+            if identity == "Connectors/pia_server":
+                definitions = [
+                    item
+                    for item in definitions
+                    if item["name"]
+                    not in ("PIA_SERVER_DEVICE_TOKEN", "PIA_SERVER_SYNC_MEDIA")
+                ]
+            if not definitions:
+                continue
+            values = get_store().values(identity)
+            rows = [
+                dict(
+                    name=item["name"],
+                    base=item["name"],
+                    label=item.get("label", item["name"]),
+                    type=item["type"],
+                    value=values.get(item["name"], ""),
+                    sensitive=sensitive(item["name"], item["type"]),
+                    configured=bool(values.get(item["name"])),
+                    link=item.get(
+                        "link", "https://github.com/oouo-diogo-perdigao/pia#readme"
+                    ),
+                )
+                for item in definitions
+            ]
+            manifest = folder / "pia.json"
+            meta = (
+                json.loads(manifest.read_text(encoding="utf-8"))
+                if manifest.exists()
+                else {}
+            )
+            sections.append(
+                dict(
+                    id=identity,
+                    name="PIA · Geral"
+                    if identity == "general"
+                    else meta.get("nome", identity),
+                    fields=rows,
+                )
+            )
         return sections
 
-    def save_settings(self,section,values):
-        from src.settings_store import get_store,schema
+    def save_settings(self, section, values):
+        from src.settings_store import get_store, schema
         from Plugins.Connectors.pia_server.remote import SECTIONS
+
         if section in SECTIONS:
-            raise ValueError('Gerencie esse conector no painel da PIA Server.')
-        selected=next((item for item in self.settings() if item['id']==section),None)
-        allowed={item['name'] for item in selected['fields']} if selected else set()
-        if not isinstance(values,dict) or set(values)-allowed:raise ValueError('Configuração desconhecida.')
-        get_store().save(section,values)
-        return {'ok':True,'restart_required':True}
+            raise ValueError("Gerencie esse conector no painel da PIA Server.")
+        selected = next(
+            (item for item in self.settings() if item["id"] == section), None
+        )
+        allowed = {item["name"] for item in selected["fields"]} if selected else set()
+        if not isinstance(values, dict) or set(values) - allowed:
+            raise ValueError("Configuração desconhecida.")
+        if section == "general":
+            # Sincroniza validação de TTS caso algum campo TTS venha no save genérico
+            tts_keys = {
+                "TTS_PROVIDER",
+                "TTS_MODEL",
+                "TTS_DEFAULT_VOICE",
+                "TTS_DEFAULT_SPEED",
+            }
+            if any(k in values for k in tts_keys):
+                from src.tts_service import get_tts_service
+
+                get_tts_service().select(
+                    provider=values.get("TTS_PROVIDER"),
+                    model=values.get("TTS_MODEL"),
+                    voice=values.get("TTS_DEFAULT_VOICE"),
+                    speed=values.get("TTS_DEFAULT_SPEED"),
+                )
+                remaining = {k: v for k, v in values.items() if k not in tts_keys}
+                if remaining:
+                    get_store().save(section, remaining)
+                return {"ok": True, "restart_required": True}
+        get_store().save(section, values)
+        return {"ok": True, "restart_required": True}
 
     def upload_setting(self, data):
         """A user-selected file is owned by its config section, never publicly served."""
         import base64
         from src.env_types import split_key
-        section, name = data['section'], data['name']
-        available = next((s for s in self.settings() if s['id'] == section), None)
-        field = next((f for f in available['fields'] if f['name'] == name), None) if available else None
-        if not field or field['type'] != 'file':
-            raise ValueError('Esta variável não é um arquivo gerenciado.')
-        encoded=data.get('data')
-        if not isinstance(encoded,str) or len(encoded)>7*1024*1024:
-            raise ValueError('Arquivo excede 5 MiB ou é inválido.')
+
+        section, name = data["section"], data["name"]
+        available = next((s for s in self.settings() if s["id"] == section), None)
+        field = (
+            next((f for f in available["fields"] if f["name"] == name), None)
+            if available
+            else None
+        )
+        if not field or field["type"] != "file":
+            raise ValueError("Esta variável não é um arquivo gerenciado.")
+        encoded = data.get("data")
+        if not isinstance(encoded, str) or len(encoded) > 7 * 1024 * 1024:
+            raise ValueError("Arquivo excede 5 MiB ou é inválido.")
         content = base64.b64decode(encoded, validate=True)
         if len(content) > 5 * 1024 * 1024:
-            raise ValueError('Arquivo excede 5 MiB.')
+            raise ValueError("Arquivo excede 5 MiB.")
         base, _ = split_key(name)
-        from src.settings_store import sensitive,get_store
-        if base == 'GOOGLE_APPLICATION_CREDENTIALS':
+        from src.settings_store import sensitive, get_store
+
+        if base == "GOOGLE_APPLICATION_CREDENTIALS":
             credentials = json.loads(content)
-            if not isinstance(credentials, dict) or credentials.get('type') != 'service_account' or not credentials.get('client_email') or not credentials.get('private_key'):
-                raise ValueError('Selecione o JSON de credenciais de uma conta de serviço Google.')
+            if (
+                not isinstance(credentials, dict)
+                or credentials.get("type") != "service_account"
+                or not credentials.get("client_email")
+                or not credentials.get("private_key")
+            ):
+                raise ValueError(
+                    "Selecione o JSON de credenciais de uma conta de serviço Google."
+                )
         if sensitive(base):
-            get_store().save_file(section,base,str(data.get('filename','credencial.bin')),content)
-            return {'path':get_store().values(section)[base]}
-        folder = user_path('files',section.replace('/','_'))
-        extension = Path(str(data.get('filename', ''))).suffix.lower()
-        if not re.fullmatch(r'\.[a-z0-9]{1,10}', extension):
-            extension = '.bin'
-        target = folder / (section.split('/')[-1] + '_' + base + extension)
-        target.parent.mkdir(parents=True,exist_ok=True)
+            get_store().save_file(
+                section, base, str(data.get("filename", "credencial.bin")), content
+            )
+            return {"path": get_store().values(section)[base]}
+        folder = user_path("files", section.replace("/", "_"))
+        extension = Path(str(data.get("filename", ""))).suffix.lower()
+        if not re.fullmatch(r"\.[a-z0-9]{1,10}", extension):
+            extension = ".bin"
+        target = folder / (section.split("/")[-1] + "_" + base + extension)
+        target.parent.mkdir(parents=True, exist_ok=True)
         if target.is_symlink() or not target.resolve().is_relative_to(folder.resolve()):
-            raise ValueError('Destino inválido.')
-        temporary = target.with_name(target.name + '.' + secrets.token_hex(8) + '.tmp')
-        with temporary.open('xb') as out:
+            raise ValueError("Destino inválido.")
+        temporary = target.with_name(target.name + "." + secrets.token_hex(8) + ".tmp")
+        with temporary.open("xb") as out:
             out.write(content)
         temporary.chmod(0o600)
         temporary.replace(target)
         self.save_settings(section, {name: str(target.resolve())})
-        return {'path': str(target.resolve())}
+        return {"path": str(target.resolve())}
 
     def dispatch(self, method, path, data, query):
         from src.plugin_logs import write
-        parts=path.strip('/').split('/')
-        identity=None
-        if len(parts)>=2 and parts[0] in ('apps','bots','integrations') and (parts[0]=='bots' or len(parts)>=3):
-            identity={'apps':'Apps','bots':'Bot','integrations':'Connectors'}[parts[0]]+'/'+parts[1]
-        elif path.startswith('/accounts/') and data.get('plugin'):
-            identity='Connectors/'+data['plugin']
-        elif path=='/settings/save' and data.get('section','').startswith(('Apps/','Bot/','Connectors/')):
-            identity=data['section']
+
+        parts = path.strip("/").split("/")
+        identity = None
+        if (
+            len(parts) >= 2
+            and parts[0] in ("apps", "bots", "integrations")
+            and (parts[0] == "bots" or len(parts) >= 3)
+        ):
+            identity = (
+                {"apps": "Apps", "bots": "Bot", "integrations": "Connectors"}[parts[0]]
+                + "/"
+                + parts[1]
+            )
+        elif path.startswith("/accounts/") and data.get("plugin"):
+            identity = "Connectors/" + data["plugin"]
+        elif path == "/settings/save" and data.get("section", "").startswith(
+            ("Apps/", "Bot/", "Connectors/")
+        ):
+            identity = data["section"]
         try:
-            result=self._dispatch(method,path,data,query)
+            result = self._dispatch(method, path, data, query)
         except Exception as exc:
-            if identity:write(identity,parts[-1],type(exc).__name__)
+            if identity:
+                write(identity, parts[-1], type(exc).__name__)
             raise
-        if identity and method=='POST' and parts[-1] not in ('status','pipeline','config','accounts','folders','list','logs','channels','buckets','secrets','saved-image','list-saved'):
-            write(identity,parts[-1])
-            if isinstance(result,dict) and result.get('job') in self.jobs:
-                self.jobs[result['job']].plugin_identity=identity
-        if method == 'POST' and (path.startswith(('/settings/', '/bots/', '/chat/', '/folder/')) or path == '/preferences'):
+        if (
+            identity
+            and method == "POST"
+            and parts[-1]
+            not in (
+                "status",
+                "pipeline",
+                "config",
+                "accounts",
+                "folders",
+                "list",
+                "logs",
+                "channels",
+                "buckets",
+                "secrets",
+                "saved-image",
+                "list-saved",
+            )
+        ):
+            write(identity, parts[-1])
+            if isinstance(result, dict) and result.get("job") in self.jobs:
+                self.jobs[result["job"]].plugin_identity = identity
+        if method == "POST" and (
+            path.startswith(("/settings/", "/bots/", "/chat/", "/folder/"))
+            or path == "/preferences"
+        ):
             from Plugins.Connectors.pia_server.profile_sync import wake
+
             wake(self.store)
         return result
 
     def _dispatch(self, method, path, data, query):
-        if path=='/settings/storage':
-            from src.settings_store import get_store,document
-            return {'folder':str(user_path()),'database':str(get_store().path),'notes':document('migration/notes',[])}
-        if path=='/settings/credentials':
-            from src.settings_store import get_store
-            from Plugins.Connectors.pia_server.remote import managed_secret
-            return {'items':[row[0] for row in get_store().rows('vault_entries') if not managed_secret(row[0]) and row[0] != 'setting:Connectors/pia_server:PIA_SERVER_DEVICE_TOKEN']}
-        if path=='/settings/credential':
-            from src.settings_store import get_store
-            from Plugins.Connectors.pia_server.remote import managed_secret
-            store=get_store();name=data['name']
-            if managed_secret(name) or name == 'setting:Connectors/pia_server:PIA_SERVER_DEVICE_TOKEN':raise ValueError('Gerencie esse conector no painel da PIA Server.')
-            if name not in {row[0] for row in store.rows('vault_entries')}:raise ValueError('Credencial não encontrada.')
-            return {'value':store.vault.get(name)}
-        if path=='/settings/documents':
-            from src.settings_store import document,save_document
-            names=('keywords.txt','models.yaml','shortcuts.yaml')
-            if method=='POST':
-                name=data['name'];value=data['value']
-                if name not in names or not isinstance(value,str) or len(value)>1024*1024:raise ValueError('Documento inválido.')
-                if name.endswith('.yaml'):
-                    import yaml
-                    if not isinstance(yaml.safe_load(value),dict):raise ValueError('Esperado um mapa YAML.')
-                save_document('main/'+name,value)
-                return {'ok':True,'restart_required':True}
-            return {name:document('main/'+name,(CONFIG_DIR/name.replace('.', '.example.',1)).read_text(encoding='utf-8') if (CONFIG_DIR/name.replace('.', '.example.',1)).is_file() else '') for name in names}
+        from src.api.router import get_workspace_router
 
-        if path=='/notifications/counts':
+        matched, routed = get_workspace_router().dispatch(
+            method, path, self, data, query
+        )
+        if matched:
+            return routed
+        if path == "/settings/storage":
+            from src.settings_store import get_store, document
+
+            return {
+                "folder": str(user_path()),
+                "database": str(get_store().path),
+                "notes": document("migration/notes", []),
+            }
+        if path == "/settings/credentials":
+            from src.settings_store import get_store
+            from Plugins.Connectors.pia_server.remote import managed_secret
+
+            return {
+                "items": [
+                    row[0]
+                    for row in get_store().rows("vault_entries")
+                    if not managed_secret(row[0])
+                    and row[0]
+                    != "setting:Connectors/pia_server:PIA_SERVER_DEVICE_TOKEN"
+                ]
+            }
+        if path == "/settings/credential":
+            from src.settings_store import get_store
+            from Plugins.Connectors.pia_server.remote import managed_secret
+
+            store = get_store()
+            name = data["name"]
+            if (
+                managed_secret(name)
+                or name == "setting:Connectors/pia_server:PIA_SERVER_DEVICE_TOKEN"
+            ):
+                raise ValueError("Gerencie esse conector no painel da PIA Server.")
+            if name not in {row[0] for row in store.rows("vault_entries")}:
+                raise ValueError("Credencial não encontrada.")
+            return {"value": store.vault.get(name)}
+        if path == "/settings/documents":
+            from src.settings_store import document, save_document
+
+            names = ("keywords.txt", "models.yaml", "shortcuts.yaml")
+            if method == "POST":
+                name = data["name"]
+                value = data["value"]
+                if (
+                    name not in names
+                    or not isinstance(value, str)
+                    or len(value) > 1024 * 1024
+                ):
+                    raise ValueError("Documento inválido.")
+                if name.endswith(".yaml"):
+                    import yaml
+
+                    if not isinstance(yaml.safe_load(value), dict):
+                        raise ValueError("Esperado um mapa YAML.")
+                save_document("main/" + name, value)
+                return {"ok": True, "restart_required": True}
+            return {
+                name: document(
+                    "main/" + name,
+                    (CONFIG_DIR / name.replace(".", ".example.", 1)).read_text(
+                        encoding="utf-8"
+                    )
+                    if (CONFIG_DIR / name.replace(".", ".example.", 1)).is_file()
+                    else "",
+                )
+                for name in names
+            }
+
+        if path == "/notifications/counts":
             return self.notification_counts()
-        if path=='/chat/read':
-            self.store.read_chat(data['chat'],data['through'])
-            return {'ok':True}
-        if path=='/notifications':
-            value=self.notifications.snapshot()
-            value['sources']=[{'id':identity,'name':json.loads((folder/'pia.json').read_text(encoding='utf-8')).get('nome',identity) if (folder/'pia.json').is_file() else identity} for identity,folder in self.plugin_folders() if identity.startswith(('Apps/','Bot/'))]
+        if path == "/chat/read":
+            self.store.read_chat(data["chat"], data["through"])
+            return {"ok": True}
+        if path == "/notifications":
+            value = self.notifications.snapshot()
+            value["sources"] = [
+                {
+                    "id": identity,
+                    "name": json.loads(
+                        (folder / "pia.json").read_text(encoding="utf-8")
+                    ).get("nome", identity)
+                    if (folder / "pia.json").is_file()
+                    else identity,
+                }
+                for identity, folder in self.plugin_folders()
+                if identity.startswith(("Apps/", "Bot/"))
+            ]
             return value
-        if path=='/notifications/settings':
+        if path == "/notifications/settings":
             self.notifications.configure(data)
-            return {'ok':True}
-        if path=='/notifications/read':
-            self.notifications.read(data.get('id'),data.get('source'));return {'ok':True}
-        if path=='/notifications/publish':
-            return self.publish_notification(data['source'],data['title'],data['text'],data.get('links'))
-        if path=='/media/state':
-            playing=self.media.update(data.get('client'),data.get('playing'))
-            if self.native_handler:self.native('media-state',{'playing':playing})
-            return {'ok':True}
-        if path=='/logs/read':
+            return {"ok": True}
+        if path == "/notifications/read":
+            self.notifications.read(data.get("id"), data.get("source"))
+            return {"ok": True}
+        if path == "/notifications/publish":
+            return self.publish_notification(
+                data["source"], data["title"], data["text"], data.get("links")
+            )
+        if path == "/media/state":
+            playing = self.media.update(data.get("client"), data.get("playing"))
+            if self.native_handler:
+                self.native("media-state", {"playing": playing})
+            return {"ok": True}
+        if path == "/logs/read":
             from src.log_reader import read_log
-            return read_log(data['name'],data.get('cursor'),data.get('identity'))
-        if path=='/logs/open':
+
+            return read_log(data["name"], data.get("cursor"), data.get("identity"))
+        if path == "/logs/open":
             from src.log_reader import log_path
             from urllib.parse import quote
-            log_path(data['name'])
-            if self.native_handler:return self.native('open-log',{'name':data['name']})
-            return {'url':'/api/pia/logs/file?name='+quote(data['name'],safe='')}
-        if path == '/settings/upload':
-            return self.upload_setting(data)
-        if path == '/preferences':
-            if method == 'POST':
-                if data.get('language') not in ('pt-BR', 'en'):
-                    raise ValueError('Idioma inválido.')
-                self.store.set('ui:language', data['language'])
-            return {'language': self.store.get('ui:language', 'pt-BR')}
-        if path == '/apps/order':
-            order=data.get('order',[])
-            valid={a['id'] for a in self.apps.public()}
-            if not isinstance(order,list) or any(not isinstance(item,str) for item in order) or len(order)!=len(set(order)) or set(order)!=valid:raise ValueError('Ordem de aplicativos inválida.')
-            self.store.set('ui:app-order',order)
-            return {'ok':True}
-        if path == '/state':
-            return self.state()
-        if path == '/chat/new':
-            chat = self.store.new_chat()
-            if data.get('folder'):
-                self.store.update_chat(chat, folder=data['folder'], move=True)
-            return {'id': chat}
-        if path == '/chat/messages':
-            chat = query.get('chat', [''])[0]
-            selection = self.store.get('chat_model:' + chat, None)
-            if not isinstance(selection, dict):
-                selection = self.store.get('models:default', {'provider': '', 'model': ''})
-            if not isinstance(selection, dict):
-                selection = {'provider': '', 'model': ''}
-            return {
-                'messages': self.store.message_records(chat),
-                'draft': self.store.get('draft:' + chat, ''),
-                'model_selection': {
-                    'provider': str(selection.get('provider', '') or ''),
-                    'model': str(selection.get('model', '') or ''),
-                },
-            }
-        if path == '/chat/model':
-            chat = str(data.get('chat', '') or '')
-            provider = str(data.get('provider', '') or '')
-            model = str(data.get('model', '') or '')
-            selection = {'provider': provider, 'model': model}
-            if chat:
-                self.store.set('chat_model:' + chat, selection)
-            if data.get('set_default'):
-                self.store.set('models:default', selection)
-            return {'ok': True, 'model_selection': selection}
-        if path == '/chat/send':
-            return {'job': self.send(data['chat'], data['text'], data.get('request'))}
-        if path == '/chat/cancel':
-            job = self.jobs[data['job']]
-            if hasattr(job, 'cancel'):
-                job.cancel()
-            else:
-                job.cancelled.set()
-            return {'ok': True}
-        if path == '/chat/draft':
-            self.store.set('draft:' + data['chat'], str(data.get('text', ''))[:100000])
-            return {'ok': True}
-        if path == '/chat/update':
-            self.store.update_chat(data['chat'], title=data.get('title'), folder=data.get('folder'), move='folder' in data, pinned=data.get('pinned'), archived=data.get('archived'))
-            return {'ok': True}
-        if path in ('/chat/message', '/chat/delete-many'):
-            targets = data.get('chats', []) if path.endswith('delete-many') else [data['chat']]
-            with self.lock:
-                if (path.endswith('delete-many') or data.get('action') not in ('speak','fork')) and any(j.chat in targets and j.status == 'running' for j in self.jobs.values()):
-                    raise ValueError('Interrompa a resposta e aguarde antes de alterar esta conversa.')
-                if path.endswith('delete-many'):
-                    for chat in targets: self.store.delete_chat(chat)
-                    return {'ok': True}
-                chat, identity, action = data['chat'], int(data['id']), data['action']
-                node = next((n for n in self.store.message_records(chat) if n['id']==identity), None)
-                if action == 'select':
-                    self.store.select_message(chat, identity)
-                    return {'ok': True}
-                if node is None: raise ValueError('Mensagem não encontrada na ramificação atual.')
-                if action == 'fork': return {'chat': self.store.fork(chat,identity)}
-                if action == 'delete':
-                    self.store.remove_message(chat,identity)
-                    return {'ok': True}
-                if action == 'speak':
-                    threading.Thread(target=self.backend.speak,args=(node['content'],),daemon=True).start()
-                    return {'ok': True}
-                if action == 'edit':
-                    text = data.get('text','').strip()
-                    if not text: raise ValueError('Mensagem vazia.')
-                    self.store.select_message(chat,node['parent'],descendants=False)
-                    self.store.append(chat,node['role'],text)
-                    if node['role']=='assistant': return {'ok': True}
-                elif action == 'retry':
-                    if node['role']=='assistant':
-                        self.store.select_message(chat,node['parent'],descendants=False)
-                    else:
-                        self.store.select_message(chat,identity,descendants=False)
-                    history = self.store.messages(chat)
-                    if not history or history[-1]['role']!='user': raise ValueError('Não há mensagem para gerar novamente.')
-                    text = history[-1]['content']
-                else: raise ValueError('Ação desconhecida.')
-                return {'job': self.send(chat,text)}
-        if path == '/chat/delete':
-            if any(j.chat == data['chat'] and j.status == 'running' for j in self.jobs.values()):
-                raise ValueError('Aguarde a resposta antes de excluir.')
-            self.store.delete_chat(data['chat'])
-            return {'ok': True}
-        if path == '/folder/save':
-            return {'id': self.store.save_folder(data['name'], data.get('id'))}
-        if path == '/folder/delete':
-            self.store.remove_folder(data['id'])
-            return {'ok': True}
-        if path == '/settings':
-            return self.settings()
-        if path == '/settings/save':
-            result=self.save_settings(data['section'], data['values'])
+
+            log_path(data["name"])
             if self.native_handler:
+                return self.native("open-log", {"name": data["name"]})
+            return {"url": "/api/pia/logs/file?name=" + quote(data["name"], safe="")}
+        if path == "/settings/upload":
+            return self.upload_setting(data)
+        if path == "/preferences":
+            if method == "POST":
+                if data.get("language") not in ("pt-BR", "en"):
+                    raise ValueError("Idioma inválido.")
+                self.store.set("ui:language", data["language"])
+            return {"language": self.store.get("ui:language", "pt-BR")}
+        if path == "/apps/order":
+            order = data.get("order", [])
+            valid = {a["id"] for a in self.apps.public()}
+            if (
+                not isinstance(order, list)
+                or any(not isinstance(item, str) for item in order)
+                or len(order) != len(set(order))
+                or set(order) != valid
+            ):
+                raise ValueError("Ordem de aplicativos inválida.")
+            self.store.set("ui:app-order", order)
+            return {"ok": True}
+        if path == "/state":
+            return self.state()
+        if path == "/chat/new":
+            chat = self.store.new_chat()
+            if data.get("folder"):
+                self.store.update_chat(chat, folder=data["folder"], move=True)
+            return {"id": chat}
+        if path == "/chat/models":
+            from src.llm_routing import available_chat_models
+
+            return available_chat_models()
+        if path == "/chat/messages":
+            chat = query.get("chat", [""])[0]
+            selection = self.store.get("chat_model:" + chat, None)
+            if not isinstance(selection, dict):
+                selection = self.store.get("models:default", {})
+            if not isinstance(selection, dict):
+                selection = {}
+            return {
+                "model_selection": {
+                    "provider": str(selection.get("provider") or ""),
+                    "model": str(selection.get("model") or ""),
+                },
+                "messages": self.store.message_records(chat),
+                "draft": self.store.get("draft:" + chat, ""),
+            }
+        if path == "/chat/model":
+            chat = str(data.get("chat") or "")
+            selection = {
+                "provider": str(data.get("provider") or ""),
+                "model": str(data.get("model") or ""),
+            }
+            if chat:
+                self.store.set("chat_model:" + chat, selection)
+            if data.get("set_default"):
+                self.store.set("models:default", selection)
+            return {"ok": True, "model_selection": selection}
+        if path == "/chat/send":
+            bot_id = data.get("bot_id") or data.get("agent_id")
+            return {
+                "job": self.send(
+                    data.get("chat"),
+                    data["text"],
+                    data.get("request"),
+                    model=data.get("model"),
+                    bot_id=bot_id,
+                    system_prompt=data.get("system_prompt"),
+                )
+            }
+        if path == "/chat/cancel":
+            self.jobs[data["job"]].cancel()
+            return {"ok": True}
+        if path == "/chat/draft":
+            self.store.set("draft:" + data["chat"], str(data.get("text", ""))[:100000])
+            return {"ok": True}
+        if path == "/chat/update":
+            self.store.update_chat(
+                data["chat"],
+                title=data.get("title"),
+                folder=data.get("folder"),
+                move="folder" in data,
+                pinned=data.get("pinned"),
+                archived=data.get("archived"),
+            )
+            return {"ok": True}
+        if path in ("/chat/message", "/chat/delete-many"):
+            targets = (
+                data.get("chats", [])
+                if path.endswith("delete-many")
+                else [data["chat"]]
+            )
+            with self.lock:
+                if (
+                    path.endswith("delete-many")
+                    or data.get("action") not in ("speak", "fork")
+                ) and any(
+                    j.chat in targets and j.status == "running"
+                    for j in self.jobs.values()
+                ):
+                    raise ValueError(
+                        "Interrompa a resposta e aguarde antes de alterar esta conversa."
+                    )
+                if path.endswith("delete-many"):
+                    for chat in targets:
+                        self.store.delete_chat(chat)
+                    return {"ok": True}
+                chat, identity, action = data["chat"], int(data["id"]), data["action"]
+                node = next(
+                    (
+                        n
+                        for n in self.store.message_records(chat)
+                        if n["id"] == identity
+                    ),
+                    None,
+                )
+                if action == "select":
+                    self.store.select_message(chat, identity)
+                    return {"ok": True}
+                if node is None:
+                    raise ValueError("Mensagem não encontrada na ramificação atual.")
+                if action == "fork":
+                    return {"chat": self.store.fork(chat, identity)}
+                if action == "delete":
+                    self.store.remove_message(chat, identity)
+                    return {"ok": True}
+                if action == "speak":
+                    threading.Thread(
+                        target=self.backend.speak, args=(node["content"],), daemon=True
+                    ).start()
+                    return {"ok": True}
+                if action == "edit":
+                    text = data.get("text", "").strip()
+                    if not text:
+                        raise ValueError("Mensagem vazia.")
+                    self.store.select_message(chat, node["parent"], descendants=False)
+                    self.store.append(chat, node["role"], text)
+                    if node["role"] == "assistant":
+                        return {"ok": True}
+                elif action == "retry":
+                    if node["role"] == "assistant":
+                        self.store.select_message(
+                            chat, node["parent"], descendants=False
+                        )
+                    else:
+                        self.store.select_message(chat, identity, descendants=False)
+                    history = self.store.messages(chat)
+                    if not history or history[-1]["role"] != "user":
+                        raise ValueError("Não há mensagem para gerar novamente.")
+                    text = history[-1]["content"]
+                else:
+                    raise ValueError("Ação desconhecida.")
+                return {"job": self.send(chat, text)}
+        if path == "/chat/delete":
+            if any(
+                j.chat == data["chat"] and j.status == "running"
+                for j in self.jobs.values()
+            ):
+                raise ValueError("Aguarde a resposta antes de excluir.")
+            self.store.delete_chat(data["chat"])
+            return {"ok": True}
+        if path == "/folder/save":
+            return {"id": self.store.save_folder(data["name"], data.get("id"))}
+        if path == "/folder/delete":
+            self.store.remove_folder(data["id"])
+            return {"ok": True}
+        if path == "/settings":
+            return self.settings()
+        if path == "/settings/save":
+            result = self.save_settings(data["section"], data["values"])
+            if self.native_handler:
+
                 def restart_idle():
-                    while any(job.status=='running' for job in list(self.jobs.values())):time.sleep(.5)
-                    self.native('restart')
-                threading.Thread(target=restart_idle,daemon=True,name='pia-settings-restart').start()
-                result['restarting']=True
+                    while any(
+                        job.status == "running" for job in list(self.jobs.values())
+                    ):
+                        time.sleep(0.5)
+                    self.native("restart")
+
+                threading.Thread(
+                    target=restart_idle, daemon=True, name="pia-settings-restart"
+                ).start()
+                result["restarting"] = True
             return result
-        if path == '/accounts':
-            return {'providers': self.backend.resources.manifests(), 'accounts': self.backend.resources.accounts()}
-        if path == '/bots':
+        if path == "/accounts":
+            return {
+                "providers": self.backend.resources.manifests(),
+                "accounts": self.backend.resources.accounts(),
+            }
+        if path == "/bots":
             return self.bot_records()
-        if path == '/bots/secretaria':
-            if method == 'POST':
-                self.backend.secretary.configure(data)
+        if path == "/tts/providers":
+            from src.tts_service import get_tts_service
+
+            return get_tts_service().catalog()
+        if path == "/tts/voices":
+            from src.tts_service import get_tts_service
+
+            provider_id = (query.get("provider") or [""])[0].strip()
+            model_id = (query.get("model") or [None])[0]
+            refresh = (query.get("refresh") or [""])[0].lower() in ("1", "true", "yes")
+            return get_tts_service().voices(
+                provider_id, model_id=model_id, refresh=refresh
+            )
+        if path == "/tts/selection":
+            from src.tts_service import get_tts_service
+
+            return get_tts_service().selection()
+        if path == "/music/providers":
+            # T6: through the music app API (resumes this PC's Suno job).
+            return self.apps.load("music").route("GET", path, data, query, self)
+        if path == "/music/select" and method == "POST":
+            return self.apps.load("music").route(method, path, data, query, self)
+        if path == "/music/suno/legacy-credentials" and method == "GET":
+            from Plugins.Apps.music import suno_legacy
+
+            return suno_legacy.legacy_state()
+        if path == "/music/suno/legacy-credentials/remove" and method == "POST":
+            from Plugins.Apps.music import suno_legacy
+
+            return suno_legacy.remove_legacy(data)
+        if path == "/music/suno/legacy-credentials/dismiss" and method == "POST":
+            from Plugins.Apps.music import suno_legacy
+
+            return suno_legacy.dismiss_legacy()
+        if path.startswith("/music/"):
+            # T6: catalog, select, Suno via PIA Server and history live in the
+            # music app API (shared job registry with /apps/music/*).
+            return self.apps.load("music").route(method, path, data, query, self)
+        if path == "/mcp/servers":
+            from src.mcp_connectors import ACCOUNT_MODES, get_mcp_manager
+
+            mgr = get_mcp_manager()
+            if method == "POST":
+                return {"server": mgr.save_server(data)}
+            return {"servers": mgr.list_servers(), "account_modes": ACCOUNT_MODES}
+        if path.startswith("/mcp/servers/"):
+            from urllib.parse import unquote
+            from src.mcp_connectors import get_mcp_manager
+
+            mgr = get_mcp_manager()
+            rest = path.removeprefix("/mcp/servers/").strip("/")
+            parts_mcp = [unquote(p) for p in rest.split("/") if p]
+            if len(parts_mcp) == 1:
+                sid = parts_mcp[0]
+                if method == "DELETE":
+                    return mgr.delete_server(sid)
+                if method in ("PUT", "POST", "PATCH"):
+                    return {"server": mgr.save_server(data, server_id=sid)}
+                return {"server": mgr.get_server(sid)}
+            if len(parts_mcp) == 2 and parts_mcp[1] in ("tools", "inspect"):
+                return mgr.inspect_server(parts_mcp[0])
+            if len(parts_mcp) == 3 and parts_mcp[1] == "oauth":
+                sid, action_oauth = parts_mcp[0], parts_mcp[2]
+                if action_oauth == "start" and method == "POST":
+                    return mgr.start_oauth(
+                        sid, account_id=data.get("account_id"), payload=data
+                    )
+                if action_oauth == "callback" and method == "POST":
+                    return mgr.complete_oauth(sid, payload=data)
+            raise ValueError("Operação MCP não encontrada.")
+        if path == "/plugins":
+            from src.plugins_catalog import get_plugins_catalog
+
+            return {"plugins": get_plugins_catalog().list_plugins()}
+        if (
+            path.startswith("/plugins/")
+            and path.endswith("/toggle")
+            and method == "POST"
+        ):
+            from urllib.parse import unquote
+            from src.plugins_catalog import get_plugins_catalog
+
+            plugin_id = unquote(
+                path.removeprefix("/plugins/").removesuffix("/toggle").strip("/")
+            )
+            return get_plugins_catalog().toggle_plugin(
+                plugin_id, data.get("enabled") if "enabled" in data else None
+            )
+        if path == "/skills":
+            from src.skills_catalog import get_skills_catalog
+
+            cat = get_skills_catalog()
+            if method == "POST":
+                return {"skill": cat.create_skill(data)}
+            return {"skills": cat.list_skills()}
+        if path.startswith("/skills/"):
+            from urllib.parse import unquote
+            from src.skills_catalog import get_skills_catalog
+
+            cat = get_skills_catalog()
+            rest = path.removeprefix("/skills/").strip("/")
+            parts_sk = [unquote(p) for p in rest.split("/") if p]
+            if len(parts_sk) == 1:
+                sk_id = parts_sk[0]
+                if method == "DELETE":
+                    return cat.delete_skill(sk_id)
+                if method in ("PUT", "POST", "PATCH"):
+                    return {"skill": cat.update_skill(sk_id, data)}
+                return {"skill": cat.get_skill(sk_id)}
+            if len(parts_sk) == 2 and parts_sk[1] == "toggle" and method == "POST":
+                return {
+                    "skill": cat.toggle_skill(
+                        parts_sk[0],
+                        data.get("enabled") if "enabled" in data else None,
+                    )
+                }
+            if len(parts_sk) == 2 and parts_sk[1] == "execute" and method == "POST":
+                return cat.execute_skill(parts_sk[0], data)
+            raise ValueError("Operação de skill não encontrada.")
+        if path == "/tts/select" and method == "POST":
+            from src.tts_service import get_tts_service
+
+            return get_tts_service().select(
+                provider=data.get("provider"),
+                model=data.get("model"),
+                voice=data.get("voice"),
+                speed=data.get("speed"),
+                revision=data.get("revision"),
+            )
+        if path == "/tts/install" and method == "POST":
+            from src.tts_service import get_tts_service
+
+            return get_tts_service().install(
+                str(data.get("provider") or ""),
+                data.get("model"),
+                request_id=data.get("request_id"),
+                workspace_jobs=self.jobs,
+            )
+        if path == "/tts/uninstall" and method == "POST":
+            from src.tts_service import get_tts_service
+
+            return get_tts_service().uninstall(
+                str(data.get("provider") or ""),
+                data.get("model"),
+                request_id=data.get("request_id"),
+                workspace_jobs=self.jobs,
+            )
+        if path.startswith("/tts/jobs/"):
+            from src.tts_service import get_tts_service
+
+            if path.endswith("/cancel") and method == "POST":
+                job_id = (
+                    path.removeprefix("/tts/jobs/").removesuffix("/cancel").strip("/")
+                )
+                return get_tts_service().cancel_job(job_id)
+            job_id = path.removeprefix("/tts/jobs/").strip("/")
+            return get_tts_service().get_job(job_id)
+        if path == "/tts/preview" and method == "POST":
+            from src.tts_service import get_tts_service
+
+            return get_tts_service().preview(
+                profile=data.get("profile"),
+                text=data.get("text"),
+                workspace_jobs=self.jobs,
+            )
+        if path == "/tts/stop" and method == "POST":
+            from src.TTSManager import TTSManager
+
+            if hasattr(self.backend, "voice_stop"):
+                self.backend.voice_stop.set()
+            TTSManager().stop()
+            return {"ok": True}
+        if path.startswith("/speakers/") and path.endswith("/voice"):
+            from urllib.parse import unquote
+            from src.tts_service import get_tts_service
+
+            speaker_id = unquote(
+                path.removeprefix("/speakers/").removesuffix("/voice").strip("/")
+            )
+            svc = get_tts_service()
+            if method in ("PUT", "POST"):
+                return svc.set_speaker_voice(
+                    speaker_id,
+                    mode=str(data.get("mode") or "inherit"),
+                    profile=data.get("profile"),
+                    revision=data.get("revision"),
+                )
+            return svc.get_speaker_voice(speaker_id)
+        if path == "/bots/secretaria":
+            from src.tts_service import get_tts_service
+
+            svc = get_tts_service()
+            if method == "POST":
+                if isinstance(data.get("voice"), dict):
+                    v = data["voice"]
+                    svc.set_speaker_voice(
+                        "native:secretaria",
+                        mode=str(v.get("mode") or "inherit"),
+                        profile=v.get("profile"),
+                        revision=v.get("revision"),
+                    )
+                cfg_payload = {k: val for k, val in data.items() if k != "voice"}
+                if cfg_payload:
+                    self.backend.secretary.configure(cfg_payload)
             from Plugins.Bot.secretaria.bot import MAIL_FILTERS
-            return {'filters':[{'id':key,'name':label} for key,(label,_) in MAIL_FILTERS.items()], 'config': self.backend.secretary.config(), 'accounts': self.backend.resources.accounts('google'),
-                    'status': [self.store.get('secretary:status:' + a['id'], {}) for a in self.backend.resources.accounts('google')]}
-        if path == '/bots/secretaria/poll':
+
+            return {
+                "filters": [
+                    {"id": key, "name": label}
+                    for key, (label, _) in MAIL_FILTERS.items()
+                ],
+                "config": self.backend.secretary.config(),
+                "voice": svc.get_speaker_voice("native:secretaria"),
+                "accounts": self.backend.resources.accounts("google"),
+                "status": [
+                    self.store.get("secretary:status:" + a["id"], {})
+                    for a in self.backend.resources.accounts("google")
+                ],
+            }
+        if path == "/bots/secretaria/poll":
             threading.Thread(target=self.backend.secretary.poll, daemon=True).start()
-            return {'ok': True}
-        if path.startswith('/models/'):
+            return {"ok": True}
+        if path.startswith("/models/"):
             from src.model_session import (
                 PROVIDERS_ORDER,
                 PROVIDER_META,
@@ -538,186 +1100,279 @@ class WorkspaceService:
                 save_provider_key,
                 verify_api_key,
             )
+
             tracker = self._model_session()
-            sub = path.removeprefix('/models/')
-            if sub == 'status':
-                verify_live = bool(data.get('verify')) if isinstance(data, dict) else False
-                refresh_quota = bool(data.get('refresh_quota')) if isinstance(data, dict) else False
-                return build_status_payload(self.store, tracker, verify_live=verify_live, refresh_quota=refresh_quota)
-            if sub == 'reset-session':
+            sub = path.removeprefix("/models/")
+            if sub == "status":
+                verify_live = (
+                    bool(data.get("verify")) if isinstance(data, dict) else False
+                )
+                refresh_quota = (
+                    bool(data.get("refresh_quota")) if isinstance(data, dict) else False
+                )
+                return build_status_payload(
+                    self.store,
+                    tracker,
+                    verify_live=verify_live,
+                    refresh_quota=refresh_quota,
+                )
+            if sub == "reset-session":
                 tracker.reset()
-                return {'ok': True}
-            if sub == 'default':
-                provider = str(data.get('provider', '') or '')
-                model = str(data.get('model', '') or '')
-                self.store.set('models:default', {'provider': provider, 'model': model})
-                return {'ok': True, 'default_provider': provider, 'default_model': model}
-            if sub == 'connect':
-                provider = str(data.get('provider', '') or '').strip().lower()
+                return {"ok": True}
+            if sub == "default":
+                provider = str(data.get("provider", "") or "")
+                model = str(data.get("model", "") or "")
+                self.store.set("models:default", {"provider": provider, "model": model})
+                return {
+                    "ok": True,
+                    "default_provider": provider,
+                    "default_model": model,
+                }
+            if sub == "connect":
+                provider = str(data.get("provider", "") or "").strip().lower()
                 if provider not in PROVIDERS_ORDER:
-                    raise ValueError('Provedor desconhecido.')
+                    raise ValueError("Provedor desconhecido.")
                 meta = PROVIDER_META[provider]
-                if meta['auth_type'] == 'cli':
+                if meta["auth_type"] == "cli":
                     from Plugins.Connectors.agents.service import start_login
-                    action = str(data.get('action', 'verify') or 'verify')
+
+                    action = str(data.get("action", "verify") or "verify")
                     started = False
-                    command = meta.get('login_command', provider)
-                    if action == 'login':
+                    command = meta.get("login_command", provider)
+                    if action == "login":
                         login_res = start_login(provider)
-                        started = bool(login_res.get('started'))
-                        command = login_res.get('command', command)
+                        started = bool(login_res.get("started"))
+                        command = login_res.get("command", command)
                     record = build_provider_record(provider, tracker)
-                    return {'ok': True, 'started': started, 'command': command, 'provider': record}
-                if meta['auth_type'] == 'api_key':
-                    api_key = str(data.get('api_key', '') or '').strip()
+                    return {
+                        "ok": True,
+                        "started": started,
+                        "command": command,
+                        "provider": record,
+                    }
+                if meta["auth_type"] == "api_key":
+                    api_key = str(data.get("api_key", "") or "").strip()
                     if not api_key:
-                        raise ValueError('Informe a chave da API.')
+                        raise ValueError("Informe a chave da API.")
                     ok, err = verify_api_key(provider, api_key)
                     if not ok:
                         raise ValueError(err)
                     save_provider_key(provider, api_key)
-                    record = build_provider_record(provider, tracker, verify_live=False, refresh_quota=(provider == 'openrouter'))
-                    return {'ok': True, 'provider': record}
+                    record = build_provider_record(
+                        provider,
+                        tracker,
+                        verify_live=False,
+                        refresh_quota=(provider == "openrouter"),
+                    )
+                    return {"ok": True, "provider": record}
                 record = build_provider_record(provider, tracker, verify_live=True)
-                return {'ok': True, 'provider': record}
-            if sub == 'disconnect':
-                provider = str(data.get('provider', '') or '').strip().lower()
+                return {"ok": True, "provider": record}
+            if sub == "disconnect":
+                provider = str(data.get("provider", "") or "").strip().lower()
                 if provider not in PROVIDERS_ORDER:
-                    raise ValueError('Provedor desconhecido.')
-                if PROVIDER_META[provider]['auth_type'] == 'api_key':
+                    raise ValueError("Provedor desconhecido.")
+                if PROVIDER_META[provider]["auth_type"] == "api_key":
                     clear_provider_key(provider)
-                    if provider == 'openrouter':
-                        tracker.quota_cache.pop('openrouter', None)
+                    if provider == "openrouter":
+                        tracker.quota_cache.pop("openrouter", None)
                 record = build_provider_record(provider, tracker)
-                return {'ok': True, 'provider': record}
-            if sub == 'verify':
-                provider = str(data.get('provider', '') or '').strip().lower()
+                return {"ok": True, "provider": record}
+            if sub == "verify":
+                provider = str(data.get("provider", "") or "").strip().lower()
                 if provider not in PROVIDERS_ORDER:
-                    raise ValueError('Provedor desconhecido.')
-                record = build_provider_record(provider, tracker, verify_live=True, refresh_quota=(provider == 'openrouter'))
-                return {'ok': True, 'provider': record}
-            if sub == 'quota':
-                provider = str(data.get('provider', '') or '').strip().lower()
+                    raise ValueError("Provedor desconhecido.")
+                record = build_provider_record(
+                    provider,
+                    tracker,
+                    verify_live=True,
+                    refresh_quota=(provider == "openrouter"),
+                )
+                return {"ok": True, "provider": record}
+            if sub == "quota":
+                provider = str(data.get("provider", "") or "").strip().lower()
                 if provider not in PROVIDERS_ORDER:
-                    raise ValueError('Provedor desconhecido.')
+                    raise ValueError("Provedor desconhecido.")
                 quota = fetch_provider_quota(provider)
-                if provider == 'openrouter':
-                    tracker.set_quota('openrouter', quota)
-                record = build_provider_record(provider, tracker, verify_live=False, refresh_quota=False)
-                record['provider_quota'] = quota
-                return {'ok': True, 'provider': record, 'provider_quota': quota}
-            raise ValueError('Operação de modelos desconhecida.')
-        if path.startswith('/integrations/'):
-            _,_,plugin,action=path.split('/',3)
-            if plugin == 'pia_server' and action == 'account':
+                if provider == "openrouter":
+                    tracker.set_quota("openrouter", quota)
+                record = build_provider_record(
+                    provider, tracker, verify_live=False, refresh_quota=False
+                )
+                record["provider_quota"] = quota
+                return {"ok": True, "provider": record, "provider_quota": quota}
+            raise ValueError("Operação de modelos desconhecida.")
+        if path.startswith("/integrations/"):
+            _, _, plugin, action = path.split("/", 3)
+            if plugin == "pia_server" and action == "account":
                 from Plugins.Connectors.pia_server.remote import account_profile
+
                 return account_profile()
-            if plugin == 'pia_server' and action in ('login-start', 'login-poll', 'logout'):
+            if plugin == "pia_server" and action in (
+                "login-start",
+                "login-poll",
+                "logout",
+            ):
                 from Plugins.Connectors.pia_server import login
-                if action == 'login-start':
-                    return login.begin(data.get('server', ''))
-                if action == 'logout':
+
+                if action == "login-start":
+                    return login.begin(data.get("server", ""))
+                if action == "logout":
                     from Plugins.Connectors.pia_server.profile_sync import stop
+
                     result = login.logout()
                     stop(self.store)
                     return result
-                identity = data.get('id')
+                identity = data.get("id")
                 if not isinstance(identity, str):
-                    raise ValueError('Pedido de login inválido.')
+                    raise ValueError("Pedido de login inválido.")
                 result = login.poll(identity)
-                if result.pop('changed', False):
+                if result.pop("changed", False):
                     from Plugins.Connectors.pia_server.service import start
+
                     start(self.notifications)
                     self.start_profile_sync()
                 return result
-            if plugin == 'pia_server' and action == 'profile-status':
+            if plugin == "pia_server" and action == "profile-status":
                 from Plugins.Connectors.pia_server.profile_sync import status
+
                 return status(self.store)
-            if plugin=='agents':
-                from Plugins.Connectors.agents.service import ask,status
-                if action=='status':return status()
-                if action=='reset-session':
+            if plugin == "agents":
+                from Plugins.Connectors.agents.service import ask, status
+
+                if action == "status":
+                    return status()
+                if action == "reset-session":
                     self._model_session().reset()
-                    return {'ok':True}
-                if action=='ask':
-                    job=Job();self.jobs[job.id]=job
+                    return {"ok": True}
+                if action == "ask":
+                    job = Job()
+                    self.jobs[job.id] = job
+
                     def external():
-                        try:job.emit('done',result=ask(data['provider'],data['prompt']))
-                        except Exception as exc:job.emit('error',error=str(exc))
-                    threading.Thread(target=external,daemon=True).start()
-                    return {'job':job.id}
-            if plugin=='google':
+                        try:
+                            job.emit(
+                                "done", result=ask(data["provider"], data["prompt"])
+                            )
+                        except Exception as exc:
+                            job.emit("error", error=str(exc))
+
+                    threading.Thread(target=external, daemon=True).start()
+                    return {"job": job.id}
+            if plugin == "google":
                 from Plugins.Connectors.google.drive import Drive
-                drive=Drive(self.backend.resources)
-                if action=='accounts':return {'accounts':drive.accounts(),'folder':drive.config().get('GOOGLE_DRIVE_FOLDER_ID','')}
-                if action=='folders':return drive.list(account=data.get('account'),folder=data.get('folder'),folders_only=True,cursor=data.get('cursor'),search=data.get('search'))
-            if plugin == 'taverns':
+
+                drive = Drive(self.backend.resources)
+                if action == "accounts":
+                    return {
+                        "accounts": drive.accounts(),
+                        "folder": drive.config().get("GOOGLE_DRIVE_FOLDER_ID", ""),
+                    }
+                if action == "folders":
+                    return drive.list(
+                        account=data.get("account"),
+                        folder=data.get("folder"),
+                        folders_only=True,
+                        cursor=data.get("cursor"),
+                        search=data.get("search"),
+                    )
+            if plugin == "taverns":
                 from Plugins.Connectors.taverns.service import Taverns
+
                 bot = Taverns()
-                if action == 'channels':
+                if action == "channels":
                     return bot.channels()
-                if action == 'test':
-                    return bot.send('PIA · Mensagem de teste. A publicação neste canal está funcionando.', data.get('destination'))
-            if plugin=='discord':
+                if action == "test":
+                    return bot.send(
+                        "PIA · Mensagem de teste. A publicação neste canal está funcionando.",
+                        data.get("destination"),
+                    )
+            if plugin == "discord":
                 from Plugins.Connectors.pia_server.remote import managed
-                if managed() and action in ('register-link','listener','unlink'):
-                    raise ValueError('Gerencie o bot Discord no painel da PIA Server.')
+
+                if managed() and action in ("register-link", "listener", "unlink"):
+                    raise ValueError("Gerencie o bot Discord no painel da PIA Server.")
                 from Plugins.Connectors.discord.service import Discord
                 from Plugins.Connectors.discord.runtime import get_runtime
-                bot=Discord()
-                if action=='status':return {**bot.public(),'gateway':get_runtime().status()}
-                if action=='logs':return {'text':bot.logs()}
-                if action=='channels':return {'channels':bot.channels()}
-                if action=='send':return bot.send(data['text'],data.get('channel'))
+
+                bot = Discord()
+                if action == "status":
+                    return {**bot.public(), "gateway": get_runtime().status()}
+                if action == "logs":
+                    return {"text": bot.logs()}
+                if action == "channels":
+                    return {"channels": bot.channels()}
+                if action == "send":
+                    return bot.send(data["text"], data.get("channel"))
                 try:
-                    if action=='diagnose':return bot.diagnose(data.get('channel'))
-                    if action=='test':return bot.send('PIA · Mensagem de teste. A publicação neste canal está funcionando.',data.get('channel'))
-                    if action=='register-link':
-                        registered=bot.register_link()
+                    if action == "diagnose":
+                        return bot.diagnose(data.get("channel"))
+                    if action == "test":
+                        return bot.send(
+                            "PIA · Mensagem de teste. A publicação neste canal está funcionando.",
+                            data.get("channel"),
+                        )
+                    if action == "register-link":
+                        registered = bot.register_link()
                         bot.enable(True)
                         get_runtime().restart()
                         return registered
-                    if action=='listener':
-                        bot.enable(data['enabled'])
-                        if data['enabled']:get_runtime().restart()
-                        else:get_runtime().stop()
+                    if action == "listener":
+                        bot.enable(data["enabled"])
+                        if data["enabled"]:
+                            get_runtime().restart()
+                        else:
+                            get_runtime().stop()
                         return get_runtime().status()
-                    if action=='unlink':return bot.unlink()
+                    if action == "unlink":
+                        return bot.unlink()
                 except Exception as exc:
-                    bot.log(str(exc),error=True)
+                    bot.log(str(exc), error=True)
                     raise ValueError(bot.clean(str(exc))) from None
-            raise ValueError('Integração desconhecida.')
-        if path.startswith('/apps/'):
-            _, _, identity, action = path.split('/', 3)
+            raise ValueError("Integração desconhecida.")
+        if path.startswith("/apps/"):
+            _, _, identity, action = path.split("/", 3)
             return self.apps.call(identity, action, data, self)
-        if path == '/native':
-            return self.native(data['action'], data.get('payload', {}))
-        if path=='/logs/clear':
-            directory=(BASE_DIR/'logs').resolve()
-            if data.get('all') is True:files=list(directory.rglob('*.log'))
+        if path == "/native":
+            return self.native(data["action"], data.get("payload", {}))
+        if path == "/logs/clear":
+            directory = (BASE_DIR / "logs").resolve()
+            if data.get("all") is True:
+                files = list(directory.rglob("*.log"))
             else:
-                name=data.get('name','')
-                if not isinstance(name,str) or '..' in Path(name).parts or Path(name).is_absolute() or not name.endswith('.log'):raise ValueError('Log inválido.')
-                files=[directory/name]
-            cleared=[]
+                name = data.get("name", "")
+                if (
+                    not isinstance(name, str)
+                    or ".." in Path(name).parts
+                    or Path(name).is_absolute()
+                    or not name.endswith(".log")
+                ):
+                    raise ValueError("Log inválido.")
+                files = [directory / name]
+            cleared = []
             for file in files:
-                if not file.resolve().is_relative_to(directory) or not file.is_file():raise ValueError('Log não encontrado.')
-                with file.open('wb'):pass
+                if not file.resolve().is_relative_to(directory) or not file.is_file():
+                    raise ValueError("Log não encontrado.")
+                with file.open("wb"):
+                    pass
                 cleared.append(file.relative_to(directory).as_posix())
-            return {'cleared':cleared}
-        if path == '/logs':
+            return {"cleared": cleared}
+        if path == "/logs":
             from src.log_reader import read_log
+
             result = []
-            directory=BASE_DIR/'logs'
-            for identity,_ in self.plugin_folders():
-                file=directory/'plugins'/(identity+'.log')
-                if not file.resolve().is_relative_to(directory.resolve()):continue
-                file.parent.mkdir(parents=True,exist_ok=True);file.touch(exist_ok=True)
-            for file in sorted(directory.rglob('*.log')):
-                if not file.resolve().is_relative_to(directory.resolve()):continue
+            directory = BASE_DIR / "logs"
+            for identity, _ in self.plugin_folders():
+                file = directory / "plugins" / (identity + ".log")
+                if not file.resolve().is_relative_to(directory.resolve()):
+                    continue
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.touch(exist_ok=True)
+            for file in sorted(directory.rglob("*.log")):
+                if not file.resolve().is_relative_to(directory.resolve()):
+                    continue
                 result.append(read_log(file.relative_to(directory).as_posix()))
             return result
-        raise ValueError('Operação não encontrada.')
+        raise ValueError("Operação não encontrada.")
 
 
 _service = None

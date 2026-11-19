@@ -1,5 +1,11 @@
 [
   {
+    "name": "MUSIC_PROVIDER",
+    "type": "string",
+    "default": "local",
+    "label": "Music Provider"
+  },
+  {
     "name": "MUSIC_LOCAL_URL",
     "type": "string",
     "default": "http://127.0.0.1:8015",

@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "test": "node --test navigation.test.js forms.test.js resources.test.js models.test.js"
+    "test": "node --test navigation.test.js legal-links.test.js legal-ui.test.js forms.test.js resources.test.js tts-helpers.test.js mini.test.js openbot-helpers.test.js settings-simplification.test.js chat-helpers.test.js extensions-helpers.test.js music-helpers.test.js music-suno-helpers.test.js music-history-helpers.test.js progress-helpers.test.js clipboard-helpers.test.js plugins/registry.test.js features/mcp/mcp-presets.test.js features/bots/bot-chat-helpers.test.js models.test.js",
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write ."
   },
   "dependencies": {
     "@mantine/core": "8.3.18",
@@ -16,6 +18,9 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "globals": "^17.14.0",
     "prettier": "^3.9.10",
     "vite": "^7.1.0"
   }

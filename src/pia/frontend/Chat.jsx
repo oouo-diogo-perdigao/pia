@@ -1,5 +1,5 @@
 import { MediaTrack } from "./MediaPlayer";
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Alert,
   ActionIcon,
@@ -17,6 +17,8 @@ import {
   Paper,
   Loader,
   Checkbox,
+  Modal,
+  Divider,
 } from "@mantine/core";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -39,8 +41,13 @@ import {
   Search,
   Settings,
   AlertTriangle,
+  Download,
+  FileText,
+  Database,
+  ArrowUpRight,
 } from "lucide-react";
 import { api, watchJob, safe, report, copy } from "./api";
+import { notify } from "./toasts";
 import { Icon, usePia } from "./shared";
 import ProviderDrawer from "./ProviderDrawer";
 import {
@@ -49,10 +56,108 @@ import {
   formatSessionUsage,
   resolveSelectedModel,
 } from "./models";
-function Message({ record, onAction }) {
+import MessageInfoPopover, {
+  McpUsageBadge,
+} from "./features/chat/MessageInfoPopover";
+import SuggestionChips from "./features/chat/SuggestionChips";
+import {
+  buildChatSendPayload,
+  buildChatActionPayload,
+  formatMessageInfo,
+  extractMessageMedia,
+  extractMessageSuggestions,
+  isImageUrl,
+  isAudioUrl,
+  createChatSpeechController,
+} from "./chat-helpers";
+
+function buildMarkdownComponents(onPreviewImage) {
+  return {
+    img: ({ src, alt, ...props }) =>
+      src ? (
+        <img
+          src={src}
+          alt={alt || "Imagem"}
+          loading="lazy"
+          className="chat-inline-image"
+          onClick={() =>
+            onPreviewImage?.({ url: src, title: alt || "Captura / Imagem" })
+          }
+          {...props}
+        />
+      ) : null,
+    a: ({ href, children, ...props }) => {
+      if (isAudioUrl(href)) {
+        const label =
+          typeof children === "string" ? children : "Música / Áudio gerado";
+        return (
+          <span className="chat-media-chip">
+            <MediaTrack url={href} title={label} />
+            <a href={href} download>
+              Baixar áudio
+            </a>
+          </span>
+        );
+      }
+      if (isImageUrl(href)) {
+        const label = typeof children === "string" ? children : "Imagem";
+        return (
+          <span>
+            <img
+              src={href}
+              alt={label}
+              loading="lazy"
+              className="chat-inline-image"
+              onClick={() => onPreviewImage?.({ url: href, title: label })}
+            />
+            <a href={href} download>
+              {children}
+            </a>
+          </span>
+        );
+      }
+      return (
+        <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+          {children}
+        </a>
+      );
+    },
+  };
+}
+
+function Message({
+  record,
+  onAction,
+  isSpeaking,
+  onToggleSpeak,
+  onPreviewImage,
+  onSendSuggestion,
+  busy,
+}) {
   const { t } = usePia(),
     [editing, setEditing] = useState(false),
-    [text, setText] = useState(record.content);
+    [text, setText] = useState(record.content),
+    [infoOpen, setInfoOpen] = useState(false),
+    [copied, setCopied] = useState(false),
+    copyTimer = useRef();
+
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
+
+  const info = useMemo(() => formatMessageInfo(record), [record]);
+  const media = useMemo(() => extractMessageMedia(record), [record]);
+  const suggestions = useMemo(
+    () => extractMessageSuggestions(record),
+    [record],
+  );
+  const markdownComponents = useMemo(
+    () => buildMarkdownComponents(onPreviewImage),
+    [onPreviewImage],
+  );
+  const hasAttachments =
+    media.images.length > 0 ||
+    media.audios.length > 0 ||
+    media.files.length > 0;
+
   return (
     <article className={"message " + record.role} data-message={record.id}>
       <div className="message-body">
@@ -92,34 +197,143 @@ function Message({ record, onAction }) {
             </Group>
           </Paper>
         ) : (
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              a: ({ href, children, ...props }) =>
-                href?.startsWith("/api/pia/music/files/") ? (
-                  <span>
-                    <MediaTrack url={href} title="Música gerada" />
-                    <a href={href} download>
-                      {children}
-                    </a>
-                  </span>
-                ) : (
-                  <a href={href} {...props}>
-                    {children}
-                  </a>
-                ),
-            }}
-          >
-            {record.content}
-          </ReactMarkdown>
+          <>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={markdownComponents}
+            >
+              {record.content}
+            </ReactMarkdown>
+            {hasAttachments && (
+              <div className="chat-attachments">
+                {media.images.map((img) => (
+                  <div key={img.url}>
+                    <img
+                      src={img.url}
+                      alt={img.title}
+                      loading="lazy"
+                      className="chat-inline-image"
+                      onClick={() =>
+                        onPreviewImage?.({ url: img.url, title: img.title })
+                      }
+                    />
+                    <Group gap={6} mt={4}>
+                      <Text size="xs" c="dimmed">
+                        {img.title}
+                      </Text>
+                      {img.downloadUrl && (
+                        <a href={img.downloadUrl} download>
+                          <Group gap={4} wrap="nowrap">
+                            <Download size={12} />
+                            <Text size="xs">Baixar</Text>
+                          </Group>
+                        </a>
+                      )}
+                    </Group>
+                  </div>
+                ))}
+                {media.audios.map((audio) => (
+                  <Paper
+                    key={audio.url}
+                    withBorder
+                    p="xs"
+                    className="chat-attachment-card"
+                  >
+                    <Group justify="space-between" wrap="wrap" gap="xs">
+                      <MediaTrack url={audio.url} title={audio.title} />
+                      {audio.downloadUrl && (
+                        <a href={audio.downloadUrl} download>
+                          <Group gap={4} wrap="nowrap">
+                            <Download size={13} />
+                            <Text size="xs">Baixar</Text>
+                          </Group>
+                        </a>
+                      )}
+                    </Group>
+                  </Paper>
+                ))}
+                {media.files.map((file, idx) => (
+                  <Paper
+                    key={file.url || `${file.name}-${idx}`}
+                    withBorder
+                    p="xs"
+                    className="chat-attachment-card"
+                  >
+                    <Group justify="space-between" gap="xs">
+                      <Group gap={6}>
+                        {file.bucket || file.kind === "bucket" ? (
+                          <Database size={14} />
+                        ) : (
+                          <FileText size={14} />
+                        )}
+                        <Text size="xs" fw={500}>
+                          {file.name}
+                        </Text>
+                        {file.bucket && (
+                          <Badge size="xs" variant="light" color="blue">
+                            {file.bucket}
+                          </Badge>
+                        )}
+                      </Group>
+                      {file.url && (
+                        <a href={file.url} download>
+                          <Group gap={4} wrap="nowrap">
+                            <Download size={13} />
+                            <Text size="xs">Baixar</Text>
+                          </Group>
+                        </a>
+                      )}
+                    </Group>
+                    {file.transcript && (
+                      <div className="chat-transcript-preview">
+                        {file.transcript}
+                      </div>
+                    )}
+                  </Paper>
+                ))}
+              </div>
+            )}
+            {record.role === "assistant" &&
+              (info.tools.length > 0 || info.mcpBadge) && (
+                <Group className="message-tools" gap={6}>
+                  <McpUsageBadge info={info} />
+                  {info.tools.map((tool) => (
+                    <Badge
+                      key={tool.name}
+                      size="xs"
+                      variant="dot"
+                      color="violet"
+                    >
+                      {tool.detail
+                        ? `${tool.name} · ${tool.detail}`
+                        : tool.name}
+                    </Badge>
+                  ))}
+                </Group>
+              )}
+            {record.role === "assistant" && (
+              <SuggestionChips
+                suggestions={suggestions}
+                busy={busy}
+                label={t("Sugestões rápidas")}
+                onSendSuggestion={onSendSuggestion}
+              />
+            )}
+          </>
         )}
       </div>
       <Group className="message-actions" gap={3}>
         <Icon
           feedback
           icon={Copy}
-          label={t("Copiar")}
-          onClick={() => copy(record.content)}
+          label={copied ? "Copiado!" : t("Copiar")}
+          onClick={async () => {
+            await copy(record.content);
+            setCopied(true);
+            clearTimeout(copyTimer.current);
+            copyTimer.current = setTimeout(() => setCopied(false), 2000);
+            notify("Copiado para a área de transferência.");
+          }}
         />
         <Icon
           icon={Pencil}
@@ -141,11 +355,20 @@ function Message({ record, onAction }) {
           onClick={() => onAction(record, "fork")}
         />
         <Icon
-          feedback
-          icon={Volume2}
-          label={t("Tocar")}
-          onClick={() => onAction(record, "speak")}
+          icon={isSpeaking ? Square : Volume2}
+          color={isSpeaking ? "red" : "gray"}
+          label={isSpeaking ? t("Parar fala") : t("Tocar")}
+          onClick={() => onToggleSpeak?.(record)}
         />
+        {record.role === "assistant" && (
+          <MessageInfoPopover
+            info={info}
+            opened={infoOpen}
+            onChange={setInfoOpen}
+            onToggle={() => setInfoOpen((open) => !open)}
+            t={t}
+          />
+        )}
         <Icon
           icon={RotateCcw}
           label={t("Tentar novamente")}
@@ -215,7 +438,9 @@ export default function Chat({ chat }) {
     [searchQuery, setSearchQuery] = useState(""),
     [drawerOpen, setDrawerOpen] = useState(false),
     [drawerFocusProvider, setDrawerFocusProvider] = useState(null),
-    [sessionAnnouncement, setSessionAnnouncement] = useState("");
+    [sessionAnnouncement, setSessionAnnouncement] = useState(""),
+    [speakingId, setSpeakingId] = useState(null),
+    [previewImage, setPreviewImage] = useState(null);
   const scroll = useRef(),
     follow = useRef(true),
     source = useRef(),
@@ -223,7 +448,12 @@ export default function Chat({ chat }) {
     activeChat = useRef(chat),
     seenMessage = useRef(0),
     readTimer = useRef(),
-    selectorBtnRef = useRef(null);
+    selectorBtnRef = useRef(null),
+    speechController = useRef(null);
+  const streamingMarkdownComponents = useMemo(
+    () => buildMarkdownComponents(setPreviewImage),
+    [],
+  );
 
   async function loadCatalog() {
     try {
@@ -236,6 +466,78 @@ export default function Chat({ chat }) {
       setCatalogLoading(false);
     }
   }
+  useEffect(() => {
+    const controller = createChatSpeechController({
+      synthesize: async (record, speechText, { signal }) => {
+        const selection = await api("/tts/selection").catch(() => null);
+        const profile = selection?.profile || selection?.active || null;
+        if (profile?.provider && profile?.voice) {
+          try {
+            const started = await api("/tts/preview", {
+              profile,
+              text: speechText,
+            });
+            if (started?.job_id) {
+              return { jobId: started.job_id };
+            }
+            if (started?.audio_url) {
+              return { audioUrl: started.audio_url };
+            }
+          } catch {
+            // Fall through to full-length /v1/audio/speech or chat speak action.
+          }
+        }
+        try {
+          const response = await fetch("/v1/audio/speech", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              input: speechText.slice(0, 4096),
+              ...(profile?.voice ? { voice: profile.voice } : {}),
+              ...(profile?.speed ? { speed: Number(profile.speed) } : {}),
+              response_format: "mp3",
+            }),
+            signal,
+          });
+          if (response.ok) {
+            const blob = await response.blob();
+            return { objectUrl: URL.createObjectURL(blob) };
+          }
+        } catch (err) {
+          if (err?.name === "AbortError") throw err;
+        }
+        const fallback = await api("/chat/message", {
+          chat: activeChat.current,
+          id: record.id,
+          action: "speak",
+        });
+        if (fallback?.audio_url || fallback?.job_id) {
+          return {
+            audioUrl: fallback.audio_url,
+            jobId: fallback.job_id,
+          };
+        }
+        return { serverSide: true };
+      },
+      watch: watchJob,
+      pollJob: (jobId) => api(`/tts/jobs/${jobId}`),
+      cancelRemote: async (entry) => {
+        if (entry?.remoteJobId && !entry.playbackStarted) {
+          await api(`/tts/jobs/${entry.remoteJobId}/cancel`, {}).catch(
+            () => {},
+          );
+        }
+        await api("/tts/stop", {}).catch(() => {});
+      },
+      onStateChange: ({ activeId }) => setSpeakingId(activeId),
+      onError: report,
+    });
+    speechController.current = controller;
+    return () => {
+      controller.stop();
+      speechController.current = null;
+    };
+  }, []);
   async function markVisible() {
     if (
       !chat ||
@@ -298,7 +600,58 @@ export default function Chat({ chat }) {
         setRunning(null);
         setStreaming("");
         if (event.type === "error") report(event.error);
-        load().catch(report);
+        const doneMeta =
+          event.result && typeof event.result === "object"
+            ? event.result
+            : event;
+        load()
+          .then(() => {
+            if (
+              doneMeta?.model ||
+              doneMeta?.provider ||
+              doneMeta?.tools_used ||
+              doneMeta?.mcp_account ||
+              doneMeta?.account_mode ||
+              doneMeta?.mcp_server ||
+              doneMeta?.active_context
+            ) {
+              setMessages((prev) => {
+                const copyList = [...prev];
+                for (let idx = copyList.length - 1; idx >= 0; idx--) {
+                  if (copyList[idx]?.role === "assistant") {
+                    copyList[idx] = {
+                      ...copyList[idx],
+                      ...(doneMeta.model && !copyList[idx].model
+                        ? { model: doneMeta.model }
+                        : {}),
+                      ...(doneMeta.provider && !copyList[idx].provider
+                        ? { provider: doneMeta.provider }
+                        : {}),
+                      ...(doneMeta.tools_used && !copyList[idx].tools_used
+                        ? { tools_used: doneMeta.tools_used }
+                        : {}),
+                      ...(doneMeta.mcp_account && !copyList[idx].mcp_account
+                        ? { mcp_account: doneMeta.mcp_account }
+                        : {}),
+                      ...(doneMeta.account_mode && !copyList[idx].account_mode
+                        ? { account_mode: doneMeta.account_mode }
+                        : {}),
+                      ...(doneMeta.mcp_server && !copyList[idx].mcp_server
+                        ? { mcp_server: doneMeta.mcp_server }
+                        : {}),
+                      ...(doneMeta.active_context &&
+                      !copyList[idx].active_context
+                        ? { active_context: doneMeta.active_context }
+                        : {}),
+                    };
+                    break;
+                  }
+                }
+                return copyList;
+              });
+            }
+          })
+          .catch(report);
         refresh().catch(report);
         loadCatalog().then(() => {
           if (event.type === "done" && !event.cancelled) {
@@ -314,6 +667,7 @@ export default function Chat({ chat }) {
   useEffect(() => {
     activeChat.current = chat;
     seenMessage.current = 0;
+    speechController.current?.stop();
     setRunning(null);
     setStreaming("");
     load(true).catch(report);
@@ -322,6 +676,7 @@ export default function Chat({ chat }) {
     return () => {
       activeChat.current = null;
       source.current?.close();
+      speechController.current?.stop();
       clearTimeout(draftTimer.current);
       clearTimeout(readTimer.current);
     };
@@ -369,17 +724,21 @@ export default function Chat({ chat }) {
     }
   }
 
-  async function send() {
+  async function send(overrideText) {
+    const isOverride = typeof overrideText === "string";
     if (running) {
+      if (isOverride) return;
       await api("/chat/cancel", { job: running });
       return;
     }
     if (isBlocked) return;
-    const text = draft.trim();
+    const text = (isOverride ? overrideText : draft).trim();
     if (!text || sending) return;
     setSending(true);
-    clearTimeout(draftTimer.current);
-    setDraft("");
+    if (!isOverride) {
+      clearTimeout(draftTimer.current);
+      setDraft("");
+    }
     let target = chat;
     try {
       if (!target) {
@@ -405,27 +764,33 @@ export default function Chat({ chat }) {
         ...old,
         { id: "pending", role: "user", content: text },
       ]);
-      const result = await api("/chat/send", {
-        chat: target,
-        text,
-        request: crypto.randomUUID(),
-      });
+      const result = await api(
+        "/chat/send",
+        buildChatSendPayload({
+          chat: target,
+          text,
+          request: crypto.randomUUID(),
+        }),
+      );
       if (target === activeChat.current) watch(result.job);
       await refresh();
     } catch (error) {
-      setDraft(text);
+      if (!isOverride) setDraft(text);
       throw error;
     } finally {
       setSending(false);
     }
   }
   async function action(record, action, text) {
-    const result = await api("/chat/message", {
-      chat,
-      id: record.id,
-      action,
-      ...(text !== undefined ? { text } : {}),
-    });
+    const result = await api(
+      "/chat/message",
+      buildChatActionPayload({
+        chat,
+        id: record.id,
+        action,
+        text,
+      }),
+    );
     if (result.chat) {
       await refresh();
       navigate({ view: "chat", chat: result.chat });
@@ -490,7 +855,16 @@ export default function Chat({ chat }) {
               <div className="message-body">{record.content}</div>
             </article>
           ) : (
-            <Message key={record.id} record={record} onAction={action} />
+            <Message
+              key={record.id}
+              record={record}
+              onAction={action}
+              isSpeaking={speakingId === record.id}
+              onToggleSpeak={(rec) => speechController.current?.toggle(rec)}
+              onPreviewImage={setPreviewImage}
+              onSendSuggestion={(prompt) => send(prompt)}
+              busy={sending || Boolean(running)}
+            />
           ),
         )}
         {(running || sending) && (
@@ -499,21 +873,7 @@ export default function Chat({ chat }) {
               {streaming ? (
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
-                  components={{
-                    a: ({ href, children, ...props }) =>
-                      href?.startsWith("/api/pia/music/files/") ? (
-                        <span>
-                          <MediaTrack url={href} title="Música gerada" />
-                          <a href={href} download>
-                            {children}
-                          </a>
-                        </span>
-                      ) : (
-                        <a href={href} {...props}>
-                          {children}
-                        </a>
-                      ),
-                  }}
+                  components={streamingMarkdownComponents}
                 >
                   {streaming}
                 </ReactMarkdown>
@@ -547,6 +907,29 @@ export default function Chat({ chat }) {
       >
         {sessionAnnouncement}
       </div>
+      <Modal
+        opened={Boolean(previewImage)}
+        onClose={() => setPreviewImage(null)}
+        title={previewImage?.title || t("Visualização")}
+        size="xl"
+        centered
+      >
+        {previewImage && (
+          <Stack gap="sm" align="center">
+            <img
+              src={previewImage.url}
+              alt={previewImage.title || "Imagem"}
+              style={{ maxWidth: "100%", maxHeight: "75vh", borderRadius: 10 }}
+            />
+            <a href={previewImage.url} download>
+              <Group gap={6}>
+                <Download size={14} />
+                <Text size="sm">{t("Baixar imagem")}</Text>
+              </Group>
+            </a>
+          </Stack>
+        )}
+      </Modal>
       <div className="composer-wrap">
         {(() => {
           const selectorData = buildSelectorOptions(catalog);

@@ -35,7 +35,11 @@ class AudioManager:
         self.object_storage_manager: ObjectStorageManager = object_storage_manager
         self.name = name
         self.pasta_extraida = pasta_extraida
-        self.recording_metadata = recording_metadata if recording_metadata is not None else self.ler_metadados_da_gravacao(Path(pasta_extraida))
+        self.recording_metadata = (
+            recording_metadata
+            if recording_metadata is not None
+            else self.ler_metadados_da_gravacao(Path(pasta_extraida))
+        )
         self.track_usernames = self.ler_nomes_das_faixas(self.recording_metadata)
         self.NomesReais = NomesReais
         self.PersonagensDoJogo = PersonagensDoJogo
@@ -99,7 +103,9 @@ class AudioManager:
         nome_base = os.path.splitext(os.path.basename(caminho_arquivo))[0]
         identificador = self.track_usernames.get(os.path.basename(caminho_arquivo))
         if not identificador:
-            identificador = nome_base.split("-", 1)[1] if "-" in nome_base else nome_base
+            identificador = (
+                nome_base.split("-", 1)[1] if "-" in nome_base else nome_base
+            )
         nome_real = self.NomesReais.get(identificador, identificador)
         if nome_real == identificador:
             print(
@@ -368,6 +374,7 @@ class AudioManager:
                     arquivo,
                 ],
                 capture_output=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 text=True,
                 check=True,
             )
@@ -410,24 +417,32 @@ class AudioManager:
         comando.extend(args)
 
         # Arquivo temporário evita bloquear quando o FFmpeg escreve muito no stderr.
-        error_log = tempfile.TemporaryFile(mode='w+', encoding='utf-8', errors='replace')
+        error_log = tempfile.TemporaryFile(
+            mode="w+", encoding="utf-8", errors="replace"
+        )
         processo = subprocess.Popen(
             comando,
             stdout=subprocess.PIPE,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             stderr=error_log,
             text=True,
-            encoding='utf-8',
-            errors='replace',
+            encoding="utf-8",
+            errors="replace",
         )
 
-        emit('progress',state='processing',label=descricao,processed=0,duration=duracao,percent=0)
+        emit(
+            "progress",
+            state="processing",
+            label=descricao,
+            processed=0,
+            duration=duracao,
+            percent=0,
+        )
         barra = tqdm(
-            disable=os.getenv('CRAIG_GUI_EVENTS')=='1',
+            disable=os.getenv("CRAIG_GUI_EVENTS") == "1",
             total=duracao,
             desc=f"{descricao} ({AudioManager.formatar_tempo(duracao)})",
-            bar_format=(
-                "{l_bar}{bar}| {percentage:3.0f}% " f"[{{elapsed}}<{{remaining}}]"
-            ),
+            bar_format=("{l_bar}{bar}| {percentage:3.0f}% [{elapsed}<{remaining}]"),
         )
 
         ultimo = 0.0
@@ -451,7 +466,14 @@ class AudioManager:
                 if segundos > ultimo:
                     barra.update(segundos - ultimo)
                     ultimo = segundos
-                    emit('progress',state='processing',label=descricao,processed=segundos,duration=duracao,percent=100*segundos/duracao if duracao else 0)
+                    emit(
+                        "progress",
+                        state="processing",
+                        label=descricao,
+                        processed=segundos,
+                        duration=duracao,
+                        percent=100 * segundos / duracao if duracao else 0,
+                    )
 
         processo.wait()
         error_log.seek(0)
@@ -462,11 +484,16 @@ class AudioManager:
             barra.n = duracao
             barra.refresh()
         barra.close()
-        emit('progress',state='completed' if processo.returncode==0 else 'error',label=descricao,percent=100 if processo.returncode==0 else 0)
+        emit(
+            "progress",
+            state="completed" if processo.returncode == 0 else "error",
+            label=descricao,
+            percent=100 if processo.returncode == 0 else 0,
+        )
 
         if processo.returncode != 0:
             if stderr.strip():
-                print(f'FFmpeg ({descricao}):\n{stderr.strip()}', flush=True)
+                print(f"FFmpeg ({descricao}):\n{stderr.strip()}", flush=True)
             raise subprocess.CalledProcessError(
                 processo.returncode,
                 comando,
@@ -638,7 +665,7 @@ class AudioManager:
                 "-metadata",
                 f"language={publication['language']}",
                 "-metadata",
-                f"publisher=TravelRPG",
+                "publisher=TravelRPG",
                 "-metadata",
                 f"organization={publication['brand']}",
                 "-metadata",
@@ -810,9 +837,7 @@ class AudioManager:
                     f"S{temporada_max:02d}E{episodio_max:02d}"
                 )
 
-                print(
-                    f"Próximo episódio: " f"S{temporada_max:02d}E{proximo_episodio:02d}"
-                )
+                print(f"Próximo episódio: S{temporada_max:02d}E{proximo_episodio:02d}")
 
                 return temporada_max, proximo_episodio
 
@@ -900,6 +925,6 @@ class AudioManager:
             f"S{temporada_max:02d}E{episodio_max:02d}"
         )
 
-        print(f"Próximo episódio: " f"S{temporada_max:02d}E{proximo_episodio:02d}")
+        print(f"Próximo episódio: S{temporada_max:02d}E{proximo_episodio:02d}")
 
         return temporada_max, proximo_episodio

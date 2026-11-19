@@ -1,0 +1,4 @@
+id = "openbot"
+name = "OpenBot"
+type = "openbot"
+entrypoint = "Plugins.OpenBot.service:get_openbot_service"

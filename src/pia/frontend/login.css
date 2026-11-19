@@ -8,7 +8,8 @@
   margin: 0;
   box-sizing: border-box;
   border: 0;
-  background: radial-gradient(ellipse at 35% 5%, #31254b 0%, transparent 60%),
+  background:
+    radial-gradient(ellipse at 35% 5%, #31254b 0%, transparent 60%),
     radial-gradient(ellipse at 100% 95%, #17284c 0%, transparent 53%), #11121b;
 }
 .pia-login-card {
@@ -23,9 +24,18 @@
   box-shadow: 0 1.2rem 4rem #0b091a77;
   text-align: center;
 }
-.pia-login-logo { display: block; margin: 0 auto 1rem; }
-.pia-login-card h2 { font-size: 1.6rem; margin: 0 0 .5rem; }
-.pia-login-card p { color: #c6bed8; margin: .5rem 0 1.2rem; }
+.pia-login-logo {
+  display: block;
+  margin: 0 auto 1rem;
+}
+.pia-login-card h2 {
+  font-size: 1.6rem;
+  margin: 0 0 0.5rem;
+}
+.pia-login-card p {
+  color: #c6bed8;
+  margin: 0.5rem 0 1.2rem;
+}
 .google-signin {
   box-sizing: border-box;
   display: inline-flex;
@@ -39,15 +49,91 @@
   border-radius: 20px;
   background: #fff;
   color: #1f1f1f;
-  font: 500 14px/20px "Google Sans", Arial, sans-serif;
+  font:
+    500 14px/20px "Google Sans",
+    Arial,
+    sans-serif;
   text-decoration: none;
   cursor: pointer;
 }
-.google-signin img { width: 20px; height: 20px; object-fit: none; object-position: center; }
-.google-signin:hover:not(:disabled) { background: #edf3fc; color: #1f1f1f; }
-.google-signin:focus-visible { outline: 2px solid #b6a2ff; outline-offset: 4px; }
-.google-signin:disabled { opacity: .65; cursor: wait; }
-.pia-login-options { text-align: left; color: #c6bed8; margin-top: 1.1rem; }
-.pia-login-options summary { cursor: pointer; font-size: .85rem; text-align: center; }
-.pia-login-options label { margin-top: .75rem; }
-.pia-login-code { display: block; color: #eee8ff; font: 700 1.7rem monospace; letter-spacing: .22em; }
+.google-signin img {
+  width: 20px;
+  height: 20px;
+  object-fit: none;
+  object-position: center;
+}
+.google-signin:hover:not(:disabled) {
+  background: #edf3fc;
+  color: #1f1f1f;
+}
+.google-signin:focus-visible {
+  outline: 2px solid #b6a2ff;
+  outline-offset: 4px;
+}
+.google-signin:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+.pia-login-options {
+  text-align: left;
+  color: #c6bed8;
+  margin-top: 1.1rem;
+}
+.pia-login-options summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  text-align: center;
+}
+.pia-login-options label {
+  margin-top: 0.75rem;
+}
+.pia-login-code {
+  display: block;
+  color: #eee8ff;
+  font: 700 1.7rem monospace;
+  letter-spacing: 0.22em;
+}
+/* Rodapé legal (feature 0002, RF05; spec UX 2.2, idêntico ao web/login.css do
+   pia-server, com 13 px efetivos sobre o root de 16 px do Mantine). O sublinhado é
+   obrigatório (link × texto = 1,12:1) e o foco #b6a2ff dá 7,85:1 sobre #1c192b. */
+.pia-login-card .pia-legal-footer {
+  margin: 1.25rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px solid #373250;
+  color: #c6bed8;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  text-align: center;
+  text-wrap: pretty;
+}
+.pia-legal-footer a {
+  color: #d4c4ff;
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  border-radius: 2px;
+  padding-block: 0.125rem;
+}
+.pia-legal-footer a:visited {
+  color: #d4c4ff;
+}
+.pia-legal-footer a:hover {
+  color: #f3edff;
+  text-decoration-thickness: 2px;
+}
+.pia-legal-footer a:focus-visible {
+  outline: 2px solid #b6a2ff;
+  outline-offset: 2px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

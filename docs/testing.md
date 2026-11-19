@@ -39,6 +39,10 @@ Com dependências Qt/Chromium instaladas, no Windows:
 
 No Linux, substitua o executável por `.venv/bin/python`; disponibilidade depende das bibliotecas gráficas. Esses scripts usam fixtures/simulações. Não confunda sucesso em offscreen com validação física de câmera, áudio, bandeja e múltiplos monitores.
 
+## Música / Suno
+
+Os testes do Suno usam o fake local da pia-server `tests/fixtures/fake_pia_server_suno.py` (helpers e fixture `remote` em `tests/_suno_remote_support.py`), só em loopback. Não faça geração real nem chamada ao Suno ou a uma pia-server real na suíte comum. Os e2e (`tests/test_music_suno_e2e.py`) percorrem `web_api` com um `context` fake e cobrem status e contas, connect, geração (sucesso, extra, parcial, cancelamento, offline e volta, 409, 410), retomada e varredura de segredos; o histórico, a fila RN14 e o redownload estão em `tests/test_music_history_t6.py`, a migração das credenciais antigas em `tests/test_music_suno_t8_legacy.py` e os ajustes de contrato da T9 em `tests/test_music_t9_contract.py`. Roteiros manuais: `docs/suno-music-roteiros.md`.
+
 ## Áreas críticas
 
 - Transcrição: json/text/verbose_json/srt/vtt, duração e timestamps reais, silêncio, fallback, repetição, emendas/pausas e arquivos longos; sem downloads de modelos na suite comum.

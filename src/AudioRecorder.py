@@ -4,12 +4,15 @@ import io
 import queue
 import wave
 import numpy as np
-import sounddevice as sd
 import os
 import site
 from threading import Event
+from typing import TYPE_CHECKING
 
 from .config import STT_SAMPLE_RATE, STT_CHANNELS, logging
+
+if TYPE_CHECKING:
+    import sounddevice as sd
 
 # Configuração de DLLs NVIDIA
 venv_path = site.getsitepackages()[0]
@@ -33,12 +36,15 @@ class AudioRecorder:
         self.audio_queue = queue.Queue()
         self._raw_frames = []
         from .voice_interrupt import SpeechOnset
-        self.speech_onset=SpeechOnset()
-        self.speech_started=Event()
+
+        self.speech_onset = SpeechOnset()
+        self.speech_started = Event()
         try:
             import webrtcvad
-            self.vad=webrtcvad.Vad(2)
-        except ImportError:self.vad=None
+
+            self.vad = webrtcvad.Vad(2)
+        except ImportError:
+            self.vad = None
 
         # Configurações do Buffer de Fala (Estilo VTuber)
         self.speech_threshold = 0.0030  # Sensibilidade de captação de voz
@@ -57,12 +63,24 @@ class AudioRecorder:
         rms = float(np.sqrt(np.mean(indata**2)))
 
         from .voice_interrupt import is_echo
-        is_above_threshold = rms > self.speech_threshold and not is_echo(indata,self.sample_rate)
-        if is_above_threshold and self.vad is not None and self.sample_rate in (8000,16000,32000,48000):
-            mono=np.mean(indata,axis=1) if indata.ndim>1 else indata
-            size=int(self.sample_rate*.03)
-            if len(mono)>=size:is_above_threshold=self.vad.is_speech((mono[:size].clip(-1,1)*32767).astype('<i2').tobytes(),self.sample_rate)
-        if self.speech_onset.feed(is_above_threshold,frames/self.sample_rate):self.speech_started.set()
+
+        is_above_threshold = rms > self.speech_threshold and not is_echo(
+            indata, self.sample_rate
+        )
+        if (
+            is_above_threshold
+            and self.vad is not None
+            and self.sample_rate in (8000, 16000, 32000, 48000)
+        ):
+            mono = np.mean(indata, axis=1) if indata.ndim > 1 else indata
+            size = int(self.sample_rate * 0.03)
+            if len(mono) >= size:
+                is_above_threshold = self.vad.is_speech(
+                    (mono[:size].clip(-1, 1) * 32767).astype("<i2").tobytes(),
+                    self.sample_rate,
+                )
+        if self.speech_onset.feed(is_above_threshold, frames / self.sample_rate):
+            self.speech_started.set()
 
         # Detecta se a pessoa está falando
         if is_above_threshold:
@@ -109,13 +127,18 @@ class AudioRecorder:
             return
         self.is_recording = True
         self.speech_started.clear()
-        self.speech_onset.active=0;self.speech_onset.fired=False
+        self.speech_onset.active = 0
+        self.speech_onset.fired = False
         self.is_speaking = False
         self.has_spoken = False
         self.silence_counter = 0
         self._raw_frames = []
 
         logging.info("[AUDIO] Abrindo fluxo do microfone (%d Hz)...", self.sample_rate)
+        # Import tardio: o sounddevice inicializa o PortAudio ao ser importado,
+        # o que quebra a coleta de testes em runners sem servidor de áudio.
+        import sounddevice as sd
+
         self.stream = sd.InputStream(
             samplerate=self.sample_rate,
             channels=self.channels,

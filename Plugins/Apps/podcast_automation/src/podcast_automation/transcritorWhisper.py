@@ -32,9 +32,9 @@ class TranscritorWhisper:
     def __init__(self, nomes_reais: dict, campaign_details: dict):
         self.nomes_reais = nomes_reais
         self.campaign_details = campaign_details
-        self.pia=PiaTranscription()
-        self.edit_timeline=[]
-        self.cache_rebuilt=False
+        self.pia = PiaTranscription()
+        self.edit_timeline = []
+        self.cache_rebuilt = False
 
     def carregar_modelo(self):
         """Provider choice and model lifetime are managed by PIA."""
@@ -82,20 +82,55 @@ class TranscritorWhisper:
 
             if os.path.isfile(caminho_saida):
                 try:
-                    with open(caminho_saida,encoding='utf-8') as cached:rows=json.load(cached)
-                    if not isinstance(rows,list):raise ValueError('Cache de transcrição inválido.')
-                    if any(not isinstance(row.get('texto'),str) or not all(isinstance(row.get(key),(int,float)) and math.isfinite(row[key]) for key in ('inicio','fim')) or row['inicio']<0 or row['fim']<row['inicio'] for row in rows):raise ValueError('Cache sem timestamps válidos.')
-                    certificate=Path(caminho_saida).with_suffix('.stt-validated.json')
-                    digest=hashlib.sha256(Path(caminho_saida).read_bytes()).hexdigest()
-                    verified=json.loads(certificate.read_text(encoding='utf-8')) if certificate.exists() else {}
-                    healthy=(verified.get('version')==2 and verified.get('sha256')==digest) or not find_repetition([{'start':row['inicio'],'end':row['fim'],'text':row['texto']} for row in rows])
+                    with open(caminho_saida, encoding="utf-8") as cached:
+                        rows = json.load(cached)
+                    if not isinstance(rows, list):
+                        raise ValueError("Cache de transcrição inválido.")
+                    if any(
+                        not isinstance(row.get("texto"), str)
+                        or not all(
+                            isinstance(row.get(key), (int, float))
+                            and math.isfinite(row[key])
+                            for key in ("inicio", "fim")
+                        )
+                        or row["inicio"] < 0
+                        or row["fim"] < row["inicio"]
+                        for row in rows
+                    ):
+                        raise ValueError("Cache sem timestamps válidos.")
+                    certificate = Path(caminho_saida).with_suffix(".stt-validated.json")
+                    digest = hashlib.sha256(
+                        Path(caminho_saida).read_bytes()
+                    ).hexdigest()
+                    verified = (
+                        json.loads(certificate.read_text(encoding="utf-8"))
+                        if certificate.exists()
+                        else {}
+                    )
+                    healthy = (
+                        verified.get("version") == 2
+                        and verified.get("sha256") == digest
+                    ) or not find_repetition(
+                        [
+                            {
+                                "start": row["inicio"],
+                                "end": row["fim"],
+                                "text": row["texto"],
+                            }
+                            for row in rows
+                        ]
+                    )
                     if healthy:
-                        print(f'Pulando ({caminho_saida}) transcrição já existe e foi validada')
+                        print(
+                            f"Pulando ({caminho_saida}) transcrição já existe e foi validada"
+                        )
                         continue
-                    print(f'Cache com repetição suspeita: {caminho_saida}; retranscrevendo pela PIA.')
-                except (ValueError,KeyError,TypeError,AttributeError):
-                    print(f'Cache inválido: {caminho_saida}; retranscrevendo pela PIA.')
-                self.cache_rebuilt=True
+                    print(
+                        f"Cache com repetição suspeita: {caminho_saida}; retranscrevendo pela PIA."
+                    )
+                except (ValueError, KeyError, TypeError, AttributeError):
+                    print(f"Cache inválido: {caminho_saida}; retranscrevendo pela PIA.")
+                self.cache_rebuilt = True
 
             grupos_pendentes.append((arquivos, nome_jogador, caminho_saida))
 
@@ -107,8 +142,8 @@ class TranscritorWhisper:
 
         self.carregar_modelo()
 
-        total_files=sum(len(files) for files in self.grupos_transcricao.values())
-        completed_files=total_files-sum(len(group[0]) for group in grupos_pendentes)
+        total_files = sum(len(files) for files in self.grupos_transcricao.values())
+        completed_files = total_files - sum(len(group[0]) for group in grupos_pendentes)
 
         total_jogadores = len(grupos_pendentes)
 
@@ -149,7 +184,7 @@ class TranscritorWhisper:
             return f"[{str_progresso}<{str_restante}] {str_duracao_total}"
 
         barra_total = tqdm(
-            disable=os.getenv('CRAIG_GUI_EVENTS')=='1',
+            disable=os.getenv("CRAIG_GUI_EVENTS") == "1",
             total=duracao_total_geral,
             desc="Transcrição Geral",
             position=0,
@@ -170,12 +205,11 @@ class TranscritorWhisper:
                 caminho_saida,
                 duracao_total_jogador,
             ) in enumerate(grupos_com_duracao, start=1):
-
                 resultado = []
                 progresso_jogador = 0.0
 
                 barra_jogador = tqdm(
-                    disable=os.getenv('CRAIG_GUI_EVENTS')=='1',
+                    disable=os.getenv("CRAIG_GUI_EVENTS") == "1",
                     total=duracao_total_jogador,
                     desc=f"Transcrevendo ({nome_jogador}) {indice_jogador}/{total_jogadores}",
                     position=1,
@@ -228,8 +262,14 @@ class TranscritorWhisper:
                     for caminho_arquivo in arquivos:
                         duracao_arquivo = duracoes_por_arquivo.get(caminho_arquivo, 0.0)
 
-                        self.pia.progress_context={'total':total_files,'completed':completed_files,'label':'Transcrever'}
-                        segmentos = self.pia.transcribe(caminho_arquivo, duracao_arquivo)
+                        self.pia.progress_context = {
+                            "total": total_files,
+                            "completed": completed_files,
+                            "label": "Transcrever",
+                        }
+                        segmentos = self.pia.transcribe(
+                            caminho_arquivo, duracao_arquivo
+                        )
                         informacoes = None
 
                         ultimo_segmento = 0.0
@@ -262,9 +302,20 @@ class TranscritorWhisper:
                         if restante_arquivo > 0:
                             atualizar_barras(restante_arquivo)
 
-                        completed_files+=1
+                        completed_files += 1
                         from podcast_automation.ui_events import emit
-                        emit('progress',state='completed',label='Transcrever',processed=duracao_arquivo,duration=duracao_arquivo,percent=100,total=total_files,completed=completed_files,speed=getattr(self.pia,'last_speed',0))
+
+                        emit(
+                            "progress",
+                            state="completed",
+                            label="Transcrever",
+                            processed=duracao_arquivo,
+                            duration=duracao_arquivo,
+                            percent=100,
+                            total=total_files,
+                            completed=completed_files,
+                            speed=getattr(self.pia, "last_speed", 0),
+                        )
 
                         if informacoes is not None:
                             tqdm.write(
@@ -306,7 +357,7 @@ class TranscritorWhisper:
                         vistos.add(chave)
                         unicos.append(segmento)
 
-                temporary=Path(caminho_saida).with_suffix(".json.tmp")
+                temporary = Path(caminho_saida).with_suffix(".json.tmp")
                 with temporary.open("w", encoding="utf-8") as f:
                     json.dump(
                         [seg.__dict__ for seg in unicos],
@@ -316,9 +367,18 @@ class TranscritorWhisper:
                     )
 
                 temporary.replace(caminho_saida)
-                certificate=Path(caminho_saida).with_suffix('.stt-validated.json')
+                certificate = Path(caminho_saida).with_suffix(".stt-validated.json")
                 from src.resource_plugins import save_json
-                save_json(certificate,{'version':2,'sha256':hashlib.sha256(Path(caminho_saida).read_bytes()).hexdigest()})
+
+                save_json(
+                    certificate,
+                    {
+                        "version": 2,
+                        "sha256": hashlib.sha256(
+                            Path(caminho_saida).read_bytes()
+                        ).hexdigest(),
+                    },
+                )
                 tqdm.write(
                     f"Arquivo JSON gerado para {nome_jogador}: {caminho_saida}\n"
                 )
@@ -343,12 +403,23 @@ class TranscritorWhisper:
                 dados = json.load(f)
                 # Old participant caches may already contain point annotations.
                 # Repair before subtitle merging so their text is not dropped.
-                rows=sorted([{**item,'start':float(item.get('inicio',0)),
-                              'end':float(item.get('fim',item.get('inicio',0)))} for item in dados],key=lambda row:row['start'])
-                rows,_=repair_point_segments(rows,max((row['end'] for row in rows),default=0))
+                rows = sorted(
+                    [
+                        {
+                            **item,
+                            "start": float(item.get("inicio", 0)),
+                            "end": float(item.get("fim", item.get("inicio", 0))),
+                        }
+                        for item in dados
+                    ],
+                    key=lambda row: row["start"],
+                )
+                rows, _ = repair_point_segments(
+                    rows, max((row["end"] for row in rows), default=0)
+                )
                 for item in rows:
-                    inicio = item['start']
-                    fim = item['end']
+                    inicio = item["start"]
+                    fim = item["end"]
                     if self.edit_timeline:
                         inicio = map_time(inicio, self.edit_timeline)
                         fim = map_time(fim, self.edit_timeline)
@@ -405,7 +476,6 @@ class TranscritorWhisper:
         # verifica se o arquivo srt existe e nao esta vazio, se sim, pula a gravação
         with open(self.srt_path, "w", encoding="utf-8") as f:
             for i, (aSeconds, bSeconds, textos) in enumerate(self.cues, start=1):
-
                 h = int(aSeconds // 3600)
                 m = int((aSeconds % 3600) // 60)
                 s = int(aSeconds % 60)
@@ -429,7 +499,6 @@ class TranscritorWhisper:
         with open(self.vtt_path, "w", encoding="utf-8") as f:
             f.write("WEBVTT\n\n")
             for i, (aSeconds, bSeconds, textos) in enumerate(self.cues, start=1):
-
                 h = int(aSeconds // 3600)
                 m = int((aSeconds % 3600) // 60)
                 s = int(aSeconds % 60)

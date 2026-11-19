@@ -56,7 +56,8 @@ class LocalActions:
         self._queued_audio_thread.start()
 
         from src.user_paths import user_path
-        self._output_dir = user_path('images')
+
+        self._output_dir = user_path("images")
         self._output_dir.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -227,7 +228,9 @@ class LocalActions:
             pygame.mixer.set_reserved(1)
             return True
         except Exception:
-            logging.warning("pygame mixer couldn't be initialized - audio playback disabled")
+            logging.warning(
+                "pygame mixer couldn't be initialized - audio playback disabled"
+            )
             return False
 
     @staticmethod
@@ -258,8 +261,7 @@ class LocalActions:
             raise ValueError("Áudio vazio.")
 
         suffix = (
-            mimetypes.guess_extension((content_type or "").split(";", 1)[0])
-            or ".audio"
+            mimetypes.guess_extension((content_type or "").split(";", 1)[0]) or ".audio"
         )
         return {
             "id": uuid.uuid4().hex,

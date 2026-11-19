@@ -4,23 +4,28 @@ import json
 import os
 from functools import lru_cache
 from pathlib import Path
-from src.settings_store import values,document
+from src.settings_store import values, document
 from src.user_paths import user_path
 
-ROOT=Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[2]
 
-def option(name,default=None):return values('Apps/podcast_automation').get(name,default)
+
+def option(name, default=None):
+    return values("Apps/podcast_automation").get(name, default)
 
 
 def project_path(value: str) -> Path:
     path = Path(value).expanduser()
-    return path if path.is_absolute() else user_path('apps/podcast_automation')/path
+    return path if path.is_absolute() else user_path("apps/podcast_automation") / path
 
 
 @lru_cache(maxsize=1)
 def get_config() -> dict:
-    data=document('Apps/podcast_automation/campaigns')
-    if data is None:data=json.loads((ROOT/'docs/examples/config.example.json').read_text(encoding='utf-8'))
+    data = document("Apps/podcast_automation/campaigns")
+    if data is None:
+        data = json.loads(
+            (ROOT / "docs/examples/config.example.json").read_text(encoding="utf-8")
+        )
     for key in (
         "nomes_reais",
         "campaign_details",
@@ -43,17 +48,26 @@ def get_config() -> dict:
                 f"Mesa de {narrator}: Campanha e rss_key são obrigatórios."
             )
         if not isinstance(table.get("players"), dict) or any(
-            not isinstance(player, str) or not isinstance(character, str)
-            or not player.strip() or not character.strip()
+            not isinstance(player, str)
+            or not isinstance(character, str)
+            or not player.strip()
+            or not character.strip()
             for player, character in table["players"].items()
         ):
-            raise ValueError(f"Mesa de {narrator}: players deve mapear jogadores para personagens.")
+            raise ValueError(
+                f"Mesa de {narrator}: players deve mapear jogadores para personagens."
+            )
         if not isinstance(table.get("closed", False), bool):
             raise ValueError(f"Mesa de {narrator}: closed deve ser true ou false.")
         key = table["rss_key"]
-        if (not isinstance(key, str) or not key.endswith("/rss.xml")
-                or any(part in ("", ".", "..") for part in key.split("/"))):
-            raise ValueError(f"Mesa de {narrator}: rss_key deve apontar para pasta/rss.xml, sem barras extras ou caminhos relativos.")
+        if (
+            not isinstance(key, str)
+            or not key.endswith("/rss.xml")
+            or any(part in ("", ".", "..") for part in key.split("/"))
+        ):
+            raise ValueError(
+                f"Mesa de {narrator}: rss_key deve apontar para pasta/rss.xml, sem barras extras ou caminhos relativos."
+            )
         folder = key.rsplit("/", 1)[0]
         if folder in folders:
             raise ValueError(f"Mais de uma mesa referencia a pasta {folder}.")
@@ -69,12 +83,19 @@ def env_bool(name: str, default: bool = False) -> bool:
 
 
 def get_download_dir() -> Path:
-    path = user_path('apps/podcast_automation/download')
+    path = user_path("apps/podcast_automation/download")
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def output_formats():
-    value=get_config().get('outputs',{})
-    if not isinstance(value,dict) or any(not isinstance(v,bool) for v in value.values()):raise ValueError('outputs deve conter opções booleanas.')
-    return {**{name:True for name in ('resumo.json','srt','txt','vtt')},**value,'mp3':True}
+    value = get_config().get("outputs", {})
+    if not isinstance(value, dict) or any(
+        not isinstance(v, bool) for v in value.values()
+    ):
+        raise ValueError("outputs deve conter opções booleanas.")
+    return {
+        **{name: True for name in ("resumo.json", "srt", "txt", "vtt")},
+        **value,
+        "mp3": True,
+    }

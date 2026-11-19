@@ -24,7 +24,12 @@ from .notification import announce_publication
 
 
 def configure():
-    global NomesReais, CampaignDetails, LIMITE_DIFERENCA_ZIP, LIMITE_DIFERENCA_DATA, PUBLICAR_DIRETO
+    global \
+        NomesReais, \
+        CampaignDetails, \
+        LIMITE_DIFERENCA_ZIP, \
+        LIMITE_DIFERENCA_DATA, \
+        PUBLICAR_DIRETO
     config = get_config()
     NomesReais = config["nomes_reais"]
     CampaignDetails = config["campaign_details"]
@@ -154,11 +159,17 @@ def publicar_sessao(
     )
     print(f"Publicando arquivos em {modo}: {prefixo}")
 
-    formats=output_formats()
-    arquivos=[{'caminho':item['audio_path'],'content_type':'audio/mpeg'}]
-    for format,key,mime in [('srt','srt_path','text/plain; charset=utf-8'),('vtt','vtt_path','text/vtt; charset=utf-8'),('txt','roteiro_path','text/plain; charset=utf-8'),('resumo.json','resumo_json_path','application/json')]:
-        path=item.get(key)
-        if formats[format] and path and os.path.isfile(path):arquivos.append({'caminho':path,'content_type':mime})
+    formats = output_formats()
+    arquivos = [{"caminho": item["audio_path"], "content_type": "audio/mpeg"}]
+    for format, key, mime in [
+        ("srt", "srt_path", "text/plain; charset=utf-8"),
+        ("vtt", "vtt_path", "text/vtt; charset=utf-8"),
+        ("txt", "roteiro_path", "text/plain; charset=utf-8"),
+        ("resumo.json", "resumo_json_path", "application/json"),
+    ]:
+        path = item.get(key)
+        if formats[format] and path and os.path.isfile(path):
+            arquivos.append({"caminho": path, "content_type": mime})
 
     for arquivo in arquivos:
         caminho = arquivo["caminho"]
@@ -172,42 +183,73 @@ def publicar_sessao(
             chave,
             content_type,
         )
-        url=obj_storage.public_url(chave)
-        emit('artifact',name=nome_destino,url=url)
-        if caminho==item.get('audio_path'):item.setdefault('publication_links',{})['MP3']=url
-        elif caminho==item.get('roteiro_path'):item.setdefault('publication_links',{})['Transcrição TXT']=url
+        url = obj_storage.public_url(chave)
+        emit("artifact", name=nome_destino, url=url)
+        if caminho == item.get("audio_path"):
+            item.setdefault("publication_links", {})["MP3"] = url
+        elif caminho == item.get("roteiro_path"):
+            item.setdefault("publication_links", {})["Transcrição TXT"] = url
 
 
-def finalizar_publicacao(item, drive, obj_storage, rss_updater, sessoes_processadas, assinatura):
+def finalizar_publicacao(
+    item, drive, obj_storage, rss_updater, sessoes_processadas, assinatura
+):
     """Only commit the source/cleanup after both feed derivatives were rebuilt."""
-    folder_rss=item['rss_key'].rsplit('/',1)[0]
+    folder_rss = item["rss_key"].rsplit("/", 1)[0]
     stage(9)
-    result=rss_updater.updateRssTranscriptionFiles(folder=folder_rss)
-    if (not isinstance(result,dict) or result.get('success') is not True
-            or not any(folder.get('folder')==folder_rss for folder in result.get('folders',[]))):
-        errors=result.get('errors',[]) if isinstance(result,dict) else []
-        detail='; '.join(str(error.get('erro',error)) for error in errors) or 'A campanha não foi atualizada.'
-        raise RuntimeError('Falha ao atualizar RSS e transcrições: '+detail+
-                           ' O ZIP e os arquivos locais foram preservados; a origem não foi marcada como processada.')
-    emit('artifact',name='RSS',url=obj_storage.public_url(item['rss_key']))
-    emit('artifact',name='Transcrições',url=obj_storage.public_url(folder_rss+'/transcripts.html'))
-    drive.rename_processed(item['id'],item['name'])
+    result = rss_updater.updateRssTranscriptionFiles(folder=folder_rss)
+    if (
+        not isinstance(result, dict)
+        or result.get("success") is not True
+        or not any(
+            folder.get("folder") == folder_rss for folder in result.get("folders", [])
+        )
+    ):
+        errors = result.get("errors", []) if isinstance(result, dict) else []
+        detail = (
+            "; ".join(str(error.get("erro", error)) for error in errors)
+            or "A campanha não foi atualizada."
+        )
+        raise RuntimeError(
+            "Falha ao atualizar RSS e transcrições: "
+            + detail
+            + " O ZIP e os arquivos locais foram preservados; a origem não foi marcada como processada."
+        )
+    emit("artifact", name="RSS", url=obj_storage.public_url(item["rss_key"]))
+    emit(
+        "artifact",
+        name="Transcrições",
+        url=obj_storage.public_url(folder_rss + "/transcripts.html"),
+    )
+    drive.rename_processed(item["id"], item["name"])
     stage(10)
     sessoes_processadas.append(assinatura)
-    limpar_temporarios(item['pasta_extraida'],item['local_zip'])
-    emit('complete')
+    limpar_temporarios(item["pasta_extraida"], item["local_zip"])
+    emit("complete")
     print("Sessão publicada com sucesso!")
-    links={**item.get('publication_links',{}),'RSS':obj_storage.public_url(item['rss_key']),
-           'Transcrições gerais':obj_storage.public_url(folder_rss+'/transcripts.html')}
-    announce_publication(item["nome_sessao"], item["campanha"],links,
-                         season=item.get('season'),number=item.get('episode'),players=item.get('jogadores',()))
+    links = {
+        **item.get("publication_links", {}),
+        "RSS": obj_storage.public_url(item["rss_key"]),
+        "Transcrições gerais": obj_storage.public_url(folder_rss + "/transcripts.html"),
+    }
+    announce_publication(
+        item["nome_sessao"],
+        item["campanha"],
+        links,
+        season=item.get("season"),
+        number=item.get("episode"),
+        players=item.get("jogadores", ()),
+    )
 
 
 def metadados_da_sessao(pasta_extraida, nome, drive):
     metadata = AudioManager.ler_metadados_da_gravacao(Path(pasta_extraida))
     if not isinstance(metadata, dict) or not metadata:
         return {}
-    for name, fields in ((nome, ("sessionTitle", "seasonEnd")), (metadata.get("previousRecordingName"), ("seasonEnd",))):
+    for name, fields in (
+        (nome, ("sessionTitle", "seasonEnd")),
+        (metadata.get("previousRecordingName"), ("seasonEnd",)),
+    ):
         if not isinstance(name, str) or not name.lower().endswith(".zip"):
             continue
         companion = drive.recording_metadata(name)
@@ -232,7 +274,7 @@ def processar_sessao(
     print(f"Processando sessão: {item['name']}")
     print("========================================")
 
-    emit('session', name=item['name'])
+    emit("session", name=item["name"])
     stage(0)
     local_zip = drive.download_file(item)
     item["local_zip"] = str(local_zip)
@@ -241,8 +283,11 @@ def processar_sessao(
 
     metadata = metadados_da_sessao(item["pasta_extraida"], item["name"], drive)
     from Plugins.Apps.podcast_automation.recording_queue import waiting_for_metadata
+
     if waiting_for_metadata(metadata.get("metadataEditableUntil")):
-        print("A sessão ainda pode ser nomeada no Discord. O processamento aguardará o prazo.")
+        print(
+            "A sessão ainda pode ser nomeada no Discord. O processamento aguardará o prazo."
+        )
         return
 
     audio = AudioManager(
@@ -259,12 +304,10 @@ def processar_sessao(
     # ============================================================
     duracao = AudioManager.obter_duracao_audio(audio.arquivos_participantes)
 
-    print(f"Duração da sessão: " f"{AudioManager.formatar_tempo(duracao)}")
+    print(f"Duração da sessão: {AudioManager.formatar_tempo(duracao)}")
 
     if duracao < get_config()["processing"]["minimum_session_seconds"]:
-        print(
-            "Sessão abaixo da duração mínima configurada — " "marcando como ok-omitido."
-        )
+        print("Sessão abaixo da duração mínima configurada — marcando como ok-omitido.")
 
         drive.rename_processed(
             item["id"],
@@ -277,7 +320,7 @@ def processar_sessao(
             item["local_zip"],
         )
 
-        emit('skipped', reason='Sessão abaixo da duração mínima')
+        emit("skipped", reason="Sessão abaixo da duração mínima")
         return
 
     # ============================================================
@@ -291,7 +334,7 @@ def processar_sessao(
     )
 
     if duplicada:
-        print("Sessão duplicada detectada. " f"Equivalente a: {duplicada['arquivo']}")
+        print(f"Sessão duplicada detectada. Equivalente a: {duplicada['arquivo']}")
 
         drive.rename_processed(
             item["id"],
@@ -303,7 +346,7 @@ def processar_sessao(
             item["local_zip"],
         )
 
-        emit('skipped', reason='Sessão duplicada')
+        emit("skipped", reason="Sessão duplicada")
         return
 
     stage(2)
@@ -318,49 +361,76 @@ def processar_sessao(
     item["narrador"] = audio.narrador
     item["personagens"] = audio.personagens
     item["jogadores"] = audio.jogadores
-    item['season']=audio.session
-    item['episode']=audio.episode
+    item["season"] = audio.session
+    item["episode"] = audio.episode
     item["ouvintes"] = audio.ouvintes
     item["rss_key"] = audio.rss
 
-    formats=output_formats()
-    transcribe=any(formats[name] for name in ('srt','vtt','txt','resumo.json'))
-    gerador=None
+    formats = output_formats()
+    transcribe = any(formats[name] for name in ("srt", "vtt", "txt", "resumo.json"))
+    gerador = None
     if transcribe:
         stage(4)
         whisper.carregar_pasta(item)
         whisper.build()
-        if getattr(whisper,'cache_rebuilt',False) is True:
-            old=Path(whisper.roteiro_path).with_suffix('.resumo.json')
-            for cached in (old,old.with_suffix('.llm.json')):
-                if cached.resolve().is_relative_to(Path(item['pasta_extraida']).resolve()):cached.unlink(missing_ok=True)
+        if getattr(whisper, "cache_rebuilt", False) is True:
+            old = Path(whisper.roteiro_path).with_suffix(".resumo.json")
+            for cached in (old, old.with_suffix(".llm.json")):
+                if cached.resolve().is_relative_to(
+                    Path(item["pasta_extraida"]).resolve()
+                ):
+                    cached.unlink(missing_ok=True)
         stage(5)
-        if formats['srt']:item['srt_path']=whisper.gravar_srt()
-        if formats['vtt']:item['vtt_path']=whisper.gravar_vtt()
-        if formats['txt'] or formats['resumo.json']:item['roteiro_path']=whisper.gravar_roteiro()
-    titulo_gravacao = audio.recording_metadata.get('sessionTitle')
+        if formats["srt"]:
+            item["srt_path"] = whisper.gravar_srt()
+        if formats["vtt"]:
+            item["vtt_path"] = whisper.gravar_vtt()
+        if formats["txt"] or formats["resumo.json"]:
+            item["roteiro_path"] = whisper.gravar_roteiro()
+    titulo_gravacao = audio.recording_metadata.get("sessionTitle")
     if not isinstance(titulo_gravacao, str):
-        titulo_gravacao = ''
-    item['nome_sessao'] = titulo_gravacao or item.get('nome_sessao') or f'Sessão {audio.session} · Episódio {audio.episode}'
-    if formats['resumo.json']:
+        titulo_gravacao = ""
+    item["nome_sessao"] = (
+        titulo_gravacao
+        or item.get("nome_sessao")
+        or f"Sessão {audio.session} · Episódio {audio.episode}"
+    )
+    if formats["resumo.json"]:
         stage(6)
-        gerador=GeradorResumoSessao(campanha=item['campanha'],narrador=item['narrador'],personagens=item['personagens'],jogadores=item['jogadores'],ouvintes=item['ouvintes'],roteiro_path=item['roteiro_path'],obj_storage=obj_storage,rss_key=item['rss_key'])
-        titulo_gerado, item['resumo_rapido'], item['resumo_completo'] = gerador.gerar_resumo()
-        item['nome_sessao'] = titulo_gravacao or titulo_gerado
-        if formats['txt']:gerador.incluir_resumo_no_roteiro(item)
+        gerador = GeradorResumoSessao(
+            campanha=item["campanha"],
+            narrador=item["narrador"],
+            personagens=item["personagens"],
+            jogadores=item["jogadores"],
+            ouvintes=item["ouvintes"],
+            roteiro_path=item["roteiro_path"],
+            obj_storage=obj_storage,
+            rss_key=item["rss_key"],
+        )
+        titulo_gerado, item["resumo_rapido"], item["resumo_completo"] = (
+            gerador.gerar_resumo()
+        )
+        item["nome_sessao"] = titulo_gravacao or titulo_gerado
+        if formats["txt"]:
+            gerador.incluir_resumo_no_roteiro(item)
     stage(7)
-    caminhos_audio=audio.renomear_arquivos(item['nome_sessao'])
+    caminhos_audio = audio.renomear_arquivos(item["nome_sessao"])
     if transcribe:
-        caminhos_texto=whisper.renomear_arquivos(item['nome_sessao'])
+        caminhos_texto = whisper.renomear_arquivos(item["nome_sessao"])
         item.update(caminhos_texto)
-        if gerador:item.update(gerador.renomear_arquivos(item['nome_sessao'],caminhos_texto['roteiro_path']))
+        if gerador:
+            item.update(
+                gerador.renomear_arquivos(
+                    item["nome_sessao"], caminhos_texto["roteiro_path"]
+                )
+            )
         # The summary may use an internal script without exporting a TXT artifact.
-        if not formats['txt'] and item.get('roteiro_path'):Path(item['roteiro_path']).unlink(missing_ok=True)
+        if not formats["txt"] and item.get("roteiro_path"):
+            Path(item["roteiro_path"]).unlink(missing_ok=True)
     audio.alterar_title(item["nome_sessao"])
 
     item["mix_path"] = caminhos_audio["audio_mix_path"]
     item["audio_path"] = caminhos_audio["audio_path"]
-
 
     stage(8)
     publicar_sessao(
@@ -368,7 +438,9 @@ def processar_sessao(
         item,
     )
 
-    finalizar_publicacao(item,drive,obj_storage,rss_updater,sessoes_processadas,assinatura)
+    finalizar_publicacao(
+        item, drive, obj_storage, rss_updater, sessoes_processadas, assinatura
+    )
 
 
 def main() -> None:
@@ -378,9 +450,15 @@ def main() -> None:
 
     configure()
     if env_bool("DRIVE_PROCESS", True):
-        drive=GoogleDriveClient()
-        folder_path=get_config().get('integrations',{}).get('google_folder') or drive.plugin.default_folder
-        if not folder_path:raise RuntimeError('Selecione uma pasta do Google Drive no painel do podcast.')
+        drive = GoogleDriveClient()
+        folder_path = (
+            get_config().get("integrations", {}).get("google_folder")
+            or drive.plugin.default_folder
+        )
+        if not folder_path:
+            raise RuntimeError(
+                "Selecione uma pasta do Google Drive no painel do podcast."
+            )
     else:
         drive = LocalDriveClient()
         folder_path = str(
@@ -401,6 +479,7 @@ def main() -> None:
         print(f"* {arquivo['name']}{estado}")
 
     from Plugins.Apps.podcast_automation.recording_queue import pending_files
+
     pendentes = pending_files(drive_files)
     pendentes.sort(key=data_criacao)
 
@@ -436,7 +515,7 @@ def run() -> None:
     )
     args = parser.parse_args()
     configure()
-    work = user_path('apps/podcast_automation/work')
+    work = user_path("apps/podcast_automation/work")
     work.mkdir(parents=True, exist_ok=True)
     os.chdir(work)
     interval = int(option("POLL_INTERVAL_SECONDS", "600"))
@@ -444,17 +523,18 @@ def run() -> None:
         raise ValueError("POLL_INTERVAL_SECONDS deve ser positivo.")
     while True:
         if args.once:
-            try:main()
+            try:
+                main()
             except Exception as exc:
-                emit('failed',error=str(exc))
+                emit("failed", error=str(exc))
                 raise
             return
         try:
             main()
         except Exception:
-            emit('failed')
+            emit("failed")
             traceback.print_exc()
-        emit('waiting', seconds=interval)
+        emit("waiting", seconds=interval)
         print(f"Aguardando {interval} segundos")
         time.sleep(interval)
 

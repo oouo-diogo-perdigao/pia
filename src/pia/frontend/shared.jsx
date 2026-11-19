@@ -1,4 +1,5 @@
 import { formatTime } from "./forms";
+import { isFinalProgressState, progressColor } from "./progress-helpers";
 import React, {
   useState,
   useRef,
@@ -46,7 +47,13 @@ export function Icon({
   useEffect(() => () => clearTimeout(timer.current), []);
   return (
     <Tooltip
-      label={armed ? "Clique novamente para excluir" : label}
+      label={
+        armed
+          ? "Clique novamente para excluir"
+          : feedback && ok
+            ? "Copiado!"
+            : label
+      }
       openDelay={250}
     >
       <ActionIcon
@@ -111,8 +118,8 @@ export function WorkProgress({ value }) {
       </Group>
       <Progress
         value={percent}
-        animated={!["completed", "error"].includes(value.state)}
-        color={value.state === "error" ? "red" : "violet"}
+        animated={!isFinalProgressState(value.state)}
+        color={progressColor(value.state)}
         size="sm"
         mt="xs"
       />
@@ -215,7 +222,9 @@ export function LogViewer({
 }
 export function ErrorAlert() {
   const [error, setError] = useState(""),
+    [copied, setCopied] = useState(false),
     timer = useRef(),
+    copiedTimer = useRef(),
     remaining = useRef(20000),
     started = useRef(0),
     hovered = useRef(false);
@@ -226,6 +235,8 @@ export function ErrorAlert() {
   useEffect(() => {
     const listener = (event) => {
       clearTimeout(timer.current);
+      clearTimeout(copiedTimer.current);
+      setCopied(false);
       remaining.current = 20000;
       setError(String(event.detail));
       if (!hovered.current) start();
@@ -240,17 +251,29 @@ export function ErrorAlert() {
       window.removeEventListener("pia:error", listener);
       window.removeEventListener("unhandledrejection", rejection);
       clearTimeout(timer.current);
+      clearTimeout(copiedTimer.current);
     };
   }, []);
+  const handleCopy = safe(async (event) => {
+    if (event?.target?.closest?.(".mantine-Alert-closeButton, button")) return;
+    await copy(error);
+    setCopied(true);
+    clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => setCopied(false), 2000);
+  });
   return (
     error && (
       <Alert
-        color="red"
+        color={copied ? "teal" : "red"}
         className="error-toast"
-        title="Erro · clique para copiar"
+        title={copied ? "Copiado!" : "Erro · clique para copiar"}
         withCloseButton
-        onClose={() => setError("")}
-        onClick={() => safe(() => copy(error))()}
+        onClose={() => {
+          clearTimeout(copiedTimer.current);
+          setCopied(false);
+          setError("");
+        }}
+        onClick={handleCopy}
         onMouseEnter={() => {
           hovered.current = true;
           clearTimeout(timer.current);

@@ -1,12 +1,35 @@
-import { fieldGroup } from "./settings-groups";
+import { splitTtsFields } from "./tts-helpers";
 import { DocumentSettings, VaultSettings } from "./ProfileSettings";
 import LogsPanel from "./LogsPanel";
+import McpConnectorsPanel from "./McpConnectorsPanel";
+import PluginsPanel from "./PluginsPanel";
+import SkillsPanel from "./SkillsPanel";
 import { fingerprint } from "./forms";
 import React, { useState, useEffect, useRef } from "react";
-import { Button, Group, Paper, Text, Title, TextInput, PasswordInput, Select, Stack, FileButton, Anchor } from "@mantine/core";
+import {
+  Anchor,
+  Button,
+  Group,
+  Paper,
+  Text,
+  Title,
+  TextInput,
+  PasswordInput,
+  Select,
+  Stack,
+  FileButton,
+} from "@mantine/core";
 import { ExternalLink, Folder, Upload } from "lucide-react";
 import { api, report, safe, session } from "./api";
 import { Icon, Nav, usePia } from "./shared";
+import TTSSettingsPanel from "./TTSSettingsPanel";
+import MusicSettingsPanel from "./MusicSettingsPanel";
+import GeneralSettingsTabs from "./GeneralSettingsTabs";
+import {
+  GENERAL_TABS,
+  buildManagedInitialValues,
+  safeArray,
+} from "./settings-simplification";
 
 function ServerProfilePanel() {
   const [profile, setProfile] = useState({ state: "pending" });
@@ -34,7 +57,8 @@ function ServerProfilePanel() {
     synced: "Perfil sincronizado.",
     retrying: "Não foi possível sincronizar. A PIA tentará novamente.",
     disconnected: "Entre na PIA Server para sincronizar.",
-    "different-account": "Este perfil pertence a outra conta. Entre com a conta original para sincronizar.",
+    "different-account":
+      "Este perfil pertence a outra conta. Entre com a conta original para sincronizar.",
   };
 
   return (
@@ -46,8 +70,14 @@ function ServerProfilePanel() {
           dos conectores são gerenciadas no servidor. Caminhos e preferências
           deste computador são mantidos localmente.
         </Text>
-        <Text size="sm" role="status">{messages[profile.state]}</Text>
-        <Anchor href="https://pia.travelrpg.com" target="_blank" rel="noreferrer">
+        <Text size="sm" role="status">
+          {messages[profile.state]}
+        </Text>
+        <Anchor
+          href="https://pia.travelrpg.com"
+          target="_blank"
+          rel="noreferrer"
+        >
           Abrir painel da PIA Server
         </Anchor>
       </Stack>
@@ -56,9 +86,10 @@ function ServerProfilePanel() {
 }
 
 export default function SettingsPanel({ section = "general" }) {
-  const { navigate, language, setLanguage, t, boot, setRestarting } = usePia(),
+  const { navigate, t, boot, setRestarting } = usePia(),
     [sections, setSections] = useState([]),
     [values, setValues] = useState({}),
+    [initialValues, setInitialValues] = useState({}),
     [savedValues, setSavedValues] = useState(""),
     [logs, setLogs] = useState([]),
     [notice, setNotice] = useState(""),
@@ -66,19 +97,27 @@ export default function SettingsPanel({ section = "general" }) {
   useEffect(() => {
     let active = true;
     if (
-      !["logs", "documents", "credentials"].includes(
-        section,
-      )
+      ![
+        "logs",
+        "documents",
+        "credentials",
+        "mcp",
+        "plugins",
+        "skills",
+      ].includes(section)
     ) {
       api("/settings")
         .then((result) => {
           if (!active) return;
-          setSections(result);
-          const selected = result.find((s) => s.id === section) || result[0];
-          const initial = Object.fromEntries(
-            selected.fields.map((field) => [field.name, field.value]),
-          );
+          const safeResult = safeArray(result);
+          setSections(safeResult);
+          const selected =
+            safeResult.find((s) => s?.id === section) || safeResult[0];
+          const initial = selected
+            ? buildManagedInitialValues(selected.id, selected.fields)
+            : {};
           setValues(initial);
+          setInitialValues(initial);
           setSavedValues(fingerprint(initial));
         })
         .catch(report);
@@ -90,14 +129,31 @@ export default function SettingsPanel({ section = "general" }) {
   if (section === "logs") return <LogsPanel />;
   if (section === "documents") return <DocumentSettings />;
   if (section === "credentials") return <VaultSettings />;
-  const selected = sections.find((s) => s.id === section) || sections[0];
+  if (section === "mcp") return <McpConnectorsPanel />;
+  if (section === "plugins") return <PluginsPanel />;
+  if (section === "skills") return <SkillsPanel />;
+  const safeSections = safeArray(sections);
+  const selected =
+    safeSections.find((s) => s?.id === section) || safeSections[0];
   if (!selected) return <Text>{t("Carregando…")}</Text>;
+  const selectedFields = safeArray(selected.fields);
+  const { otherFields } =
+    selected.id === "general"
+      ? splitTtsFields(selectedFields)
+      : { otherFields: selectedFields };
+  const isCustomTtsTab = selected.id === "general" && group === "TTS";
+  const isCustomMusicTab =
+    (selected.id === "general" && group === "Música") ||
+    selected.id === "Apps/music";
+  const isSimplifiedGeneralTab =
+    selected.id === "general" && !isCustomTtsTab && !isCustomMusicTab;
   async function save() {
     const result = await api("/settings/save", {
       section: selected.id,
       values,
     });
     setSavedValues(fingerprint(values));
+    setInitialValues(values);
     if (result.restarting) {
       setRestarting(true);
       await new Promise((resolve) => setTimeout(resolve, 1300));
@@ -160,29 +216,8 @@ export default function SettingsPanel({ section = "general" }) {
         </Title>
         <Stack>
           {selected.id === "general" && (
-            <Select
-              label={t("Idioma")}
-              data={[
-                { value: "pt-BR", label: "Português" },
-                { value: "en", label: "English" },
-              ]}
-              value={language}
-              onChange={safe(async (value) => {
-                await api("/preferences", { language: value });
-                setLanguage(value);
-              })}
-            />
-          )}{" "}
-          {selected.id === "general" && (
-            <Group gap="xs">
-              {[
-                "Geral",
-                "STT",
-                "TTS",
-                "Imagens · ICE",
-                "LLMs",
-                "Voz e áudio",
-              ].map((name) => (
+            <Group gap="xs" wrap="wrap">
+              {GENERAL_TABS.map((name) => (
                 <Button
                   key={name}
                   variant={group === name ? "light" : "subtle"}
@@ -193,128 +228,154 @@ export default function SettingsPanel({ section = "general" }) {
               ))}
             </Group>
           )}
-          {selected.fields
-            .filter(
-              (field) =>
-                selected.id !== "general" || fieldGroup(field) === group,
-            )
-            .map((field) => (
-              <Group
-                key={field.name}
-                className="env-row"
-                wrap="nowrap"
-                align="center"
-                gap="xs"
-              >
-                <Text
-                  component="label"
-                  htmlFor={"env-" + field.name}
-                  size="xs"
-                  className="env-name"
+          {isCustomTtsTab ? (
+            <TTSSettingsPanel />
+          ) : isCustomMusicTab ? (
+            <MusicSettingsPanel />
+          ) : isSimplifiedGeneralTab ? (
+            <>
+              <GeneralSettingsTabs
+                group={group}
+                fields={selected.fields}
+                values={values}
+                initialValues={initialValues}
+                setValues={setValues}
+              />
+              {(group !== "Geral" || fingerprint(values) !== savedValues) && (
+                <Group justify="flex-end">
+                  <Button
+                    disabled={fingerprint(values) === savedValues}
+                    onClick={safe(save)}
+                  >
+                    {t("Salvar configurações")}
+                  </Button>
+                </Group>
+              )}
+              {notice && <Text size="sm">{notice}</Text>}
+            </>
+          ) : (
+            <>
+              {otherFields.map((field) => (
+                <Group
+                  key={field.name}
+                  className="env-row"
+                  wrap="nowrap"
+                  align="center"
+                  gap="xs"
                 >
-                  {field.label || field.name}
-                </Text>
-                <div className="grow">
-                  {field.type === "bool" ? (
-                    <Select
-                      id={"env-" + field.name}
-                      aria-label={field.name}
-                      data={[
-                        { value: "", label: '""' },
-                        { value: "true", label: "true" },
-                        { value: "false", label: "false" },
-                      ]}
-                      value={values[field.name] || ""}
-                      onChange={(value) =>
-                        setValues({ ...values, [field.name]: value || "" })
-                      }
-                    />
-                  ) : field.sensitive ? (
-                    <PasswordInput
-                      id={"env-" + field.name}
-                      aria-label={field.name}
-                      value={values[field.name] || ""}
-                      onChange={(event) =>
-                        setValues({
-                          ...values,
-                          [field.name]: event.target.value,
-                        })
-                      }
-                    />
-                  ) : (
-                    <TextInput
-                      id={"env-" + field.name}
-                      aria-label={field.name}
-                      type={
-                        ["int", "float"].includes(field.type)
-                          ? "number"
-                          : "text"
-                      }
-                      step={field.type === "int" ? "1" : "any"}
-                      value={values[field.name] || ""}
-                      onChange={(event) =>
-                        setValues({
-                          ...values,
-                          [field.name]: event.target.value,
-                        })
-                      }
-                    />
-                  )}
-                </div>
-                {["path", "file"].includes(field.type) && (
-                  <Icon
-                    icon={Folder}
-                    label={t("Selecionar pasta")}
-                    onClick={async () => {
-                      const result = await api("/native", {
-                        action: "choose-path",
-                        payload: {
-                          mode: field.type === "file" ? "file" : "directory",
-                        },
-                      });
-                      if (result.path)
-                        setValues({ ...values, [field.name]: result.path });
-                    }}
-                  />
-                )}
-                {field.type === "file" && (
-                  <>
-                    <FileButton onChange={safe((file) => upload(field, file))}>
-                      {(props) => (
-                        <span {...props}>
-                          <Icon icon={Upload} label="Carregar arquivo" />
-                        </span>
-                      )}
-                    </FileButton>
+                  <Text
+                    component="label"
+                    htmlFor={"env-" + field.name}
+                    size="xs"
+                    className="env-name"
+                  >
+                    {field.label || field.name}
+                  </Text>
+                  <div className="grow">
+                    {field.type === "bool" ? (
+                      <Select
+                        id={"env-" + field.name}
+                        aria-label={field.name}
+                        data={[
+                          { value: "", label: '""' },
+                          { value: "true", label: "true" },
+                          { value: "false", label: "false" },
+                        ]}
+                        value={values[field.name] || ""}
+                        onChange={(value) =>
+                          setValues({ ...values, [field.name]: value || "" })
+                        }
+                      />
+                    ) : field.sensitive ? (
+                      <PasswordInput
+                        id={"env-" + field.name}
+                        aria-label={field.name}
+                        value={values[field.name] || ""}
+                        onChange={(event) =>
+                          setValues({
+                            ...values,
+                            [field.name]: event.target.value,
+                          })
+                        }
+                      />
+                    ) : (
+                      <TextInput
+                        id={"env-" + field.name}
+                        aria-label={field.name}
+                        type={
+                          ["int", "float"].includes(field.type)
+                            ? "number"
+                            : "text"
+                        }
+                        step={field.type === "int" ? "1" : "any"}
+                        value={values[field.name] || ""}
+                        onChange={(event) =>
+                          setValues({
+                            ...values,
+                            [field.name]: event.target.value,
+                          })
+                        }
+                      />
+                    )}
+                  </div>
+                  {["path", "file"].includes(field.type) && (
                     <Icon
                       icon={Folder}
-                      label="Abrir pasta do arquivo"
-                      onClick={() =>
-                        api("/native", {
-                          action: "reveal-file",
-                          payload: { path: values[field.name] },
-                        })
-                      }
+                      label={t("Selecionar pasta")}
+                      onClick={async () => {
+                        const result = await api("/native", {
+                          action: "choose-path",
+                          payload: {
+                            mode: field.type === "file" ? "file" : "directory",
+                          },
+                        });
+                        if (result.path)
+                          setValues({ ...values, [field.name]: result.path });
+                      }}
                     />
-                  </>
-                )}
-                <Icon
-                  icon={ExternalLink}
-                  label={t("Configurar ↗")}
-                  component="a"
-                  href={field.link}
-                  target="_blank"
-                  rel="noreferrer"
-                />
-              </Group>
-            ))}
-          <Button
-            disabled={fingerprint(values) === savedValues}
-            onClick={safe(save)}
-          >
-            {t("Salvar configurações")}
-          </Button>
-          {notice && <Text size="sm">{notice}</Text>}
+                  )}
+                  {field.type === "file" && (
+                    <>
+                      <FileButton
+                        onChange={safe((file) => upload(field, file))}
+                      >
+                        {(props) => (
+                          <span {...props}>
+                            <Icon icon={Upload} label="Carregar arquivo" />
+                          </span>
+                        )}
+                      </FileButton>
+                      <Icon
+                        icon={Folder}
+                        label="Abrir pasta do arquivo"
+                        onClick={() =>
+                          api("/native", {
+                            action: "reveal-file",
+                            payload: { path: values[field.name] },
+                          })
+                        }
+                      />
+                    </>
+                  )}
+                  <Icon
+                    icon={ExternalLink}
+                    label={t("Configurar ↗")}
+                    component="a"
+                    href={field.link}
+                    target="_blank"
+                    rel="noreferrer"
+                  />
+                </Group>
+              ))}
+              <Button
+                disabled={fingerprint(values) === savedValues}
+                onClick={safe(save)}
+              >
+                {t("Salvar configurações")}
+              </Button>
+              {notice && <Text size="sm">{notice}</Text>}
+            </>
+          )}
         </Stack>
       </Paper>
       {selected.id === "Connectors/pia_server" && <ServerProfilePanel />}

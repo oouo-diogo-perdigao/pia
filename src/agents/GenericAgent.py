@@ -19,6 +19,10 @@ class GenericAgent:
     def __init__(self):
         self.model_disabled_until = {}
         self._lock = threading.Lock()
+        self._local = threading.local()
+
+    def last_meta(self):
+        return dict(getattr(self._local, "last_meta", None) or {})
 
     def _candidates(self, model):
         from ..model_session import explicit_model_candidate
@@ -47,13 +51,22 @@ class GenericAgent:
         # One exhausted Gemini model must not disable all other Gemini models.
         if candidate.provider != "local":
             with self._lock:
-                self.model_disabled_until[candidate.key] = time.monotonic() + LLM_REMOTE_COOLDOWN_SECONDS
-        logging.warning("[LLM] Modelo %s falhou (%s); tentando o próximo.", candidate.model, type(exc).__name__)
+                self.model_disabled_until[candidate.key] = (
+                    time.monotonic() + LLM_REMOTE_COOLDOWN_SECONDS
+                )
+        logging.warning(
+            "[LLM] Modelo %s falhou (%s); tentando o próximo.",
+            candidate.model,
+            type(exc).__name__,
+        )
 
     @staticmethod
     def _messages(prompt):
         return [
-            {"role": "system", "content": "Você é uma assistente inteligente, prestativa e sucinta. Responda de forma direta em português."},
+            {
+                "role": "system",
+                "content": "Você é uma assistente inteligente, prestativa e sucinta. Responda de forma direta em português.",
+            },
             {"role": "user", "content": prompt},
         ]
 
@@ -63,18 +76,28 @@ class GenericAgent:
                 response = litellm.completion(messages=messages, **options, **params)
                 if not response.choices:
                     raise RuntimeError("Resposta LLM sem choices.")
-                logger_llm.info("[LLM] provider=%s model=%s", candidate.provider, candidate.model)
+                logger_llm.info(
+                    "[LLM] provider=%s model=%s", candidate.provider, candidate.model
+                )
+                self._local.last_meta = {
+                    "provider": candidate.provider,
+                    "model": candidate.model,
+                }
                 return response
             except Exception as exc:
                 self._failed(candidate, exc)
-        raise RuntimeError("Todos os modelos LLM selecionados falharam, estão em cooldown ou não possuem credenciais.")
+        raise RuntimeError(
+            "Todos os modelos LLM selecionados falharam, estão em cooldown ou não possuem credenciais."
+        )
 
     def complete_stream(self, messages, model=None, **options):
         for candidate, params in self._candidates(model):
             emitted = False
             response = None
             try:
-                response = litellm.completion(messages=messages, stream=True, **options, **params)
+                response = litellm.completion(
+                    messages=messages, stream=True, **options, **params
+                )
                 # Buffer metadata so a pre-content failure can safely fall back.
                 pending = []
                 for chunk in response:
@@ -88,6 +111,10 @@ class GenericAgent:
                     )
                     if meaningful:
                         emitted = True
+                        self._local.last_meta = {
+                            "provider": candidate.provider,
+                            "model": candidate.model,
+                        }
                     if emitted:
                         yield from pending
                         pending.clear()
@@ -106,10 +133,15 @@ class GenericAgent:
                         response.close()
                     except Exception:
                         logging.debug("[LLM] Falha ao fechar stream.")
-        raise RuntimeError("Todos os modelos LLM selecionados falharam, estão em cooldown ou não possuem credenciais.")
+        raise RuntimeError(
+            "Todos os modelos LLM selecionados falharam, estão em cooldown ou não possuem credenciais."
+        )
 
     def run(self, prompt, model=None):
-        return self.complete(self._messages(prompt), model).choices[0].message.content or ""
+        return (
+            self.complete(self._messages(prompt), model).choices[0].message.content
+            or ""
+        )
 
     def run_stream(self, prompt, model=None):
         for chunk in self.complete_stream(self._messages(prompt), model):
