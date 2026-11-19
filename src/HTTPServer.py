@@ -490,7 +490,7 @@ class HTTPServer(BaseHTTPRequestHandler):
                 logging.info("[IMAGE] Requisição de listagem de modelos recebida.")
                 models = (
                     TTS_MANAGER.models() + STT_MANAGER.models() + ICE_MANAGER.models()
-                    + tuple(TIERS) + tuple(dict.fromkeys(m.model for m in catalog()))
+                    + tuple(TIERS) + ("codex", "agy") + tuple(dict.fromkeys(m.model for m in catalog()))
                 )
                 self.send_json(
                     200,
@@ -692,6 +692,14 @@ class HTTPServer(BaseHTTPRequestHandler):
 
     def _chat_completion(self, body):
         # do_POST has already read the request body. Never read rfile twice.
+        from src.model_session import (
+            PROVIDERS_ORDER,
+            check_explicit_provider_ready,
+            extract_usage_counts,
+            get_active_tracker,
+            infer_provider_from_selector,
+            sanitize_error,
+        )
         if body is None:
             return
         try:
@@ -707,7 +715,8 @@ class HTTPServer(BaseHTTPRequestHandler):
             model = data.get("model")
             if model is not None and not isinstance(model, str):
                 raise ValueError("model deve ser texto.")
-            if not select_models(model):
+            eff_provider, eff_model = infer_provider_from_selector(None, model)
+            if eff_provider not in ("codex", "agy") and not select_models(model):
                 raise ValueError("O seletor LLM não selecionou nenhum modelo configurado.")
             stream = data.get("stream", False)
             if not isinstance(stream, bool):
@@ -722,10 +731,105 @@ class HTTPServer(BaseHTTPRequestHandler):
             self.send_openai_error(400, str(exc))
             return
 
+        tracker = get_active_tracker()
+        if eff_provider in PROVIDERS_ORDER:
+            try:
+                check_explicit_provider_ready(eff_provider, tracker)
+            except Exception as exc:
+                self.send_openai_error(503, sanitize_error(exc), error_type="server_error")
+                return
+
+        if eff_provider in ("codex", "agy"):
+            from Plugins.Connectors.agents import service as agents_service
+            parts = []
+            for msg in messages:
+                role = str(msg.get("role", "user")).strip()
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    content = " ".join(
+                        str(item.get("text", ""))
+                        for item in content
+                        if isinstance(item, dict) and item.get("type") == "text"
+                    )
+                parts.append(f"{role}: {content}" if len(messages) > 1 else str(content))
+            prompt_text = "\n\n".join(parts).strip()
+            try:
+                cli_res = agents_service.ask(eff_provider, prompt_text, model=eff_model or None)
+            except Exception as exc:
+                self.send_openai_error(503, sanitize_error(exc), error_type="server_error")
+                return
+            answer = cli_res.get("text", "")
+            p_tok, c_tok, t_tok = extract_usage_counts(cli_res)
+            if tracker is not None:
+                tracker.record_usage(eff_provider, p_tok, c_tok, t_tok)
+            usage_payload = (
+                {
+                    "prompt_tokens": p_tok or 0,
+                    "completion_tokens": c_tok or 0,
+                    "total_tokens": t_tok if t_tok is not None else ((p_tok or 0) + (c_tok or 0)),
+                }
+                if any(x is not None for x in (p_tok, c_tok, t_tok))
+                else None
+            )
+            model_id = f"{eff_provider}/{eff_model}" if eff_model else eff_provider
+            if not stream:
+                payload = {
+                    "id": f"chatcmpl-{eff_provider}",
+                    "object": "chat.completion",
+                    "created": int(time.time()),
+                    "model": model_id,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": answer},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                }
+                if usage_payload:
+                    payload["usage"] = usage_payload
+                self.send_json(200, payload)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.close_connection = True
+            first_chunk = {
+                "id": f"chatcmpl-{eff_provider}",
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": model_id,
+                "choices": [{"index": 0, "delta": {"role": "assistant", "content": answer}, "finish_reason": None}],
+            }
+            last_chunk = {
+                "id": f"chatcmpl-{eff_provider}",
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": model_id,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            }
+            if usage_payload:
+                last_chunk["usage"] = usage_payload
+            self.wfile.write(f"data: {json.dumps(first_chunk, ensure_ascii=False)}\n\n".encode("utf-8"))
+            self.wfile.write(f"data: {json.dumps(last_chunk, ensure_ascii=False)}\n\n".encode("utf-8"))
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+            return
+
         manager = BUFFER_MANAGER.agent_manager
         if not stream:
             try:
                 response = manager.complete(messages, model=model, **options)
+                if tracker is not None:
+                    used_provider = (
+                        eff_provider
+                        if eff_provider in PROVIDERS_ORDER
+                        else infer_provider_from_selector(None, getattr(response, "model", None))[0]
+                    )
+                    if used_provider in PROVIDERS_ORDER:
+                        tracker.record_usage(used_provider, *extract_usage_counts(response))
                 self.send_json(200, response.model_dump(exclude_none=True))
             except Exception:
                 logging.exception("[LLM] Todos os candidatos falharam.")
@@ -734,6 +838,8 @@ class HTTPServer(BaseHTTPRequestHandler):
 
         iterator = manager.complete_stream(messages, model=model, **options)
         started = False
+        last_usage = (None, None, None)
+        resolved_model_name = ""
         try:
             # Resolve fallback before committing a successful HTTP response.
             first = next(iterator)
@@ -745,12 +851,26 @@ class HTTPServer(BaseHTTPRequestHandler):
             self.close_connection = True
             started = True
             def send_chunk(chunk):
+                nonlocal last_usage, resolved_model_name
+                u = extract_usage_counts(chunk)
+                if any(x is not None for x in u):
+                    last_usage = u
+                if getattr(chunk, "model", None):
+                    resolved_model_name = str(chunk.model)
                 payload = json.dumps(chunk.model_dump(exclude_none=True), ensure_ascii=False)
                 self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
                 self.wfile.flush()
             send_chunk(first)
             for chunk in iterator:
                 send_chunk(chunk)
+            if tracker is not None:
+                used_provider = (
+                    eff_provider
+                    if eff_provider in PROVIDERS_ORDER
+                    else infer_provider_from_selector(None, resolved_model_name)[0]
+                )
+                if used_provider in PROVIDERS_ORDER:
+                    tracker.record_usage(used_provider, *last_usage)
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):

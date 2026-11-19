@@ -2,6 +2,7 @@
 from __future__ import annotations
 from concurrent.futures import Future
 import importlib.util
+import inspect
 import json
 from pathlib import Path
 import re
@@ -25,6 +26,19 @@ class Job:
         self.events = []
         self.cancelled = threading.Event()
         self.changed = threading.Condition()
+        self.cancel_hooks = []
+
+    def add_cancel_hook(self, callback):
+        if callable(callback):
+            self.cancel_hooks.append(callback)
+
+    def cancel(self):
+        self.cancelled.set()
+        for hook in list(self.cancel_hooks):
+            try:
+                hook()
+            except Exception:
+                pass
 
     def emit(self, kind, **data):
         if kind in ('done','error') and getattr(self,'plugin_identity',None):
@@ -105,8 +119,20 @@ class WorkspaceService:
         self.notifications=getattr(self.backend,'notifications',None) or NotificationCenter(self.store,self.notify,getattr(self.backend,'speak',lambda text:None))
         from src.media import MediaSessions
         self.media=MediaSessions()
+        from src.model_session import ModelSessionTracker, register_active_tracker
+        self.model_session = ModelSessionTracker()
+        register_active_tracker(self.model_session)
         if backend is None:
             self.start_profile_sync()
+
+    def _model_session(self):
+        tracker = getattr(self, 'model_session', None)
+        if tracker is None:
+            from src.model_session import ModelSessionTracker, register_active_tracker
+            tracker = ModelSessionTracker()
+            self.model_session = tracker
+            register_active_tracker(tracker)
+        return tracker
 
     def start_profile_sync(self):
         from Plugins.Connectors.pia_server.profile_sync import start
@@ -183,7 +209,20 @@ class WorkspaceService:
                         if job.cancelled.is_set():
                             raise InterruptedError('Resposta interrompida.')
                         job.emit('delta', text=value)
-                    self.backend.reply(chat, text.strip(), on_delta=delta)
+                    reply_fn = self.backend.reply
+                    try:
+                        params = inspect.signature(reply_fn).parameters
+                        accepts_cancel = 'cancel_event' in params or any(
+                            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+                        )
+                    except (TypeError, ValueError):
+                        accepts_cancel = False
+                    if accepts_cancel:
+                        reply_fn(chat, text.strip(), on_delta=delta, cancel_event=job.cancelled)
+                    else:
+                        reply_fn(chat, text.strip(), on_delta=delta)
+                    if job.cancelled.is_set():
+                        raise InterruptedError('Resposta interrompida.')
                     job.emit('done')
                 except InterruptedError:
                     if job.text:
@@ -379,11 +418,37 @@ class WorkspaceService:
             return {'id': chat}
         if path == '/chat/messages':
             chat = query.get('chat', [''])[0]
-            return {'messages': self.store.message_records(chat), 'draft': self.store.get('draft:' + chat, '')}
+            selection = self.store.get('chat_model:' + chat, None)
+            if not isinstance(selection, dict):
+                selection = self.store.get('models:default', {'provider': '', 'model': ''})
+            if not isinstance(selection, dict):
+                selection = {'provider': '', 'model': ''}
+            return {
+                'messages': self.store.message_records(chat),
+                'draft': self.store.get('draft:' + chat, ''),
+                'model_selection': {
+                    'provider': str(selection.get('provider', '') or ''),
+                    'model': str(selection.get('model', '') or ''),
+                },
+            }
+        if path == '/chat/model':
+            chat = str(data.get('chat', '') or '')
+            provider = str(data.get('provider', '') or '')
+            model = str(data.get('model', '') or '')
+            selection = {'provider': provider, 'model': model}
+            if chat:
+                self.store.set('chat_model:' + chat, selection)
+            if data.get('set_default'):
+                self.store.set('models:default', selection)
+            return {'ok': True, 'model_selection': selection}
         if path == '/chat/send':
             return {'job': self.send(data['chat'], data['text'], data.get('request'))}
         if path == '/chat/cancel':
-            self.jobs[data['job']].cancelled.set()
+            job = self.jobs[data['job']]
+            if hasattr(job, 'cancel'):
+                job.cancel()
+            else:
+                job.cancelled.set()
             return {'ok': True}
         if path == '/chat/draft':
             self.store.set('draft:' + data['chat'], str(data.get('text', ''))[:100000])
@@ -462,6 +527,86 @@ class WorkspaceService:
         if path == '/bots/secretaria/poll':
             threading.Thread(target=self.backend.secretary.poll, daemon=True).start()
             return {'ok': True}
+        if path.startswith('/models/'):
+            from src.model_session import (
+                PROVIDERS_ORDER,
+                PROVIDER_META,
+                build_provider_record,
+                build_status_payload,
+                clear_provider_key,
+                fetch_provider_quota,
+                save_provider_key,
+                verify_api_key,
+            )
+            tracker = self._model_session()
+            sub = path.removeprefix('/models/')
+            if sub == 'status':
+                verify_live = bool(data.get('verify')) if isinstance(data, dict) else False
+                refresh_quota = bool(data.get('refresh_quota')) if isinstance(data, dict) else False
+                return build_status_payload(self.store, tracker, verify_live=verify_live, refresh_quota=refresh_quota)
+            if sub == 'reset-session':
+                tracker.reset()
+                return {'ok': True}
+            if sub == 'default':
+                provider = str(data.get('provider', '') or '')
+                model = str(data.get('model', '') or '')
+                self.store.set('models:default', {'provider': provider, 'model': model})
+                return {'ok': True, 'default_provider': provider, 'default_model': model}
+            if sub == 'connect':
+                provider = str(data.get('provider', '') or '').strip().lower()
+                if provider not in PROVIDERS_ORDER:
+                    raise ValueError('Provedor desconhecido.')
+                meta = PROVIDER_META[provider]
+                if meta['auth_type'] == 'cli':
+                    from Plugins.Connectors.agents.service import start_login
+                    action = str(data.get('action', 'verify') or 'verify')
+                    started = False
+                    command = meta.get('login_command', provider)
+                    if action == 'login':
+                        login_res = start_login(provider)
+                        started = bool(login_res.get('started'))
+                        command = login_res.get('command', command)
+                    record = build_provider_record(provider, tracker)
+                    return {'ok': True, 'started': started, 'command': command, 'provider': record}
+                if meta['auth_type'] == 'api_key':
+                    api_key = str(data.get('api_key', '') or '').strip()
+                    if not api_key:
+                        raise ValueError('Informe a chave da API.')
+                    ok, err = verify_api_key(provider, api_key)
+                    if not ok:
+                        raise ValueError(err)
+                    save_provider_key(provider, api_key)
+                    record = build_provider_record(provider, tracker, verify_live=False, refresh_quota=(provider == 'openrouter'))
+                    return {'ok': True, 'provider': record}
+                record = build_provider_record(provider, tracker, verify_live=True)
+                return {'ok': True, 'provider': record}
+            if sub == 'disconnect':
+                provider = str(data.get('provider', '') or '').strip().lower()
+                if provider not in PROVIDERS_ORDER:
+                    raise ValueError('Provedor desconhecido.')
+                if PROVIDER_META[provider]['auth_type'] == 'api_key':
+                    clear_provider_key(provider)
+                    if provider == 'openrouter':
+                        tracker.quota_cache.pop('openrouter', None)
+                record = build_provider_record(provider, tracker)
+                return {'ok': True, 'provider': record}
+            if sub == 'verify':
+                provider = str(data.get('provider', '') or '').strip().lower()
+                if provider not in PROVIDERS_ORDER:
+                    raise ValueError('Provedor desconhecido.')
+                record = build_provider_record(provider, tracker, verify_live=True, refresh_quota=(provider == 'openrouter'))
+                return {'ok': True, 'provider': record}
+            if sub == 'quota':
+                provider = str(data.get('provider', '') or '').strip().lower()
+                if provider not in PROVIDERS_ORDER:
+                    raise ValueError('Provedor desconhecido.')
+                quota = fetch_provider_quota(provider)
+                if provider == 'openrouter':
+                    tracker.set_quota('openrouter', quota)
+                record = build_provider_record(provider, tracker, verify_live=False, refresh_quota=False)
+                record['provider_quota'] = quota
+                return {'ok': True, 'provider': record, 'provider_quota': quota}
+            raise ValueError('Operação de modelos desconhecida.')
         if path.startswith('/integrations/'):
             _,_,plugin,action=path.split('/',3)
             if plugin == 'pia_server' and action == 'account':
@@ -491,6 +636,9 @@ class WorkspaceService:
             if plugin=='agents':
                 from Plugins.Connectors.agents.service import ask,status
                 if action=='status':return status()
+                if action=='reset-session':
+                    self._model_session().reset()
+                    return {'ok':True}
                 if action=='ask':
                     job=Job();self.jobs[job.id]=job
                     def external():

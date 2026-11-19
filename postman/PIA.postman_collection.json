@@ -2356,6 +2356,37 @@
           "response": []
         },
         {
+          "name": "POST /api/pia/chat/model",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/chat/model",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
           "name": "POST /api/pia/chat/new",
           "request": {
             "method": "POST",
