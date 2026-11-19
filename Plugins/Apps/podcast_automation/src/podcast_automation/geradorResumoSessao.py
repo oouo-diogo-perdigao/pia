@@ -1,5 +1,5 @@
 from .settings import get_config
-from .llm import PiaClient
+from .llm import PiaClient, sanitize_error_message
 import json
 import os
 import re
@@ -71,7 +71,27 @@ class GeradorResumoSessao:
         self.resumo_json_path = caminho_base + ".resumo.json"
         self.resumo_path = self.resumo_json_path
 
-        self.client = PiaClient()
+        self.llm_provider, self.llm_model = self._ler_modelo_configurado()
+        self.client = PiaClient(
+            llm_provider=self.llm_provider,
+            llm_model=self.llm_model,
+        )
+
+    @staticmethod
+    def _ler_modelo_configurado() -> tuple[str, str]:
+        try:
+            config = get_config()
+        except Exception:
+            return "", ""
+        integrations = config.get("integrations") if isinstance(config, dict) else None
+        if not isinstance(integrations, dict):
+            return "", ""
+        provider = integrations.get("llm_provider")
+        model = integrations.get("llm_model")
+        return (
+            provider.strip() if isinstance(provider, str) else "",
+            model.strip() if isinstance(model, str) else "",
+        )
 
     def carregar_nomes_sessoes_anteriores(self) -> list[str]:
         """
@@ -201,9 +221,15 @@ class GeradorResumoSessao:
     """
 
     def consultar_llm(self, prompt: str) -> dict[str, Any]:
-        return self.client.complete_json(
-            prompt, self.CAMPOS_OBRIGATORIOS, self.max_tentativas
-        )
+        try:
+            return self.client.complete_json(
+                prompt, self.CAMPOS_OBRIGATORIOS, self.max_tentativas
+            )
+        except RuntimeError as erro:
+            detalhe = sanitize_error_message(str(erro))
+            raise RuntimeError(
+                f"Resumo não gerado: {detalhe} Reconecte em Configurações > Inteligência artificial e processe de novo."
+            ) from erro
 
     def validar_dados(self, dados: dict[str, Any]) -> dict[str, str]:
         if not isinstance(dados, dict):

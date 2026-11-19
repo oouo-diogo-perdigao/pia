@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import secrets
+import sys
 import threading
 from src.pia.service import Job
 from src.resource_plugins import save_json
@@ -12,9 +13,27 @@ from . import power
 from .recording_queue import pending_files
 
 ROOT = Path(__file__).resolve().parent
+SUPPORTED_LLM_PROVIDERS = {
+    'codex',
+    'agy',
+    'openrouter',
+    'gemini',
+    'groq',
+    'cloudflare',
+    'local',
+    'free',
+    'paid',
+}
 _latest = None
 _tasks = {}
 _lock = threading.Lock()
+
+
+def _clear_config_cache():
+    settings_mod = sys.modules.get('podcast_automation.settings')
+    get_cfg = getattr(settings_mod, 'get_config', None) if settings_mod is not None else None
+    if hasattr(get_cfg, 'cache_clear'):
+        get_cfg.cache_clear()
 
 
 def handle(action, data, context):
@@ -71,7 +90,7 @@ def handle(action, data, context):
         outputs=data.get('outputs',{})
         if not isinstance(outputs,dict) or set(outputs)-{'mp3','resumo.json','srt','vtt','txt'} or any(not isinstance(v,bool) for v in outputs.values()):raise ValueError('Formatos de saída inválidos.')
         integrations=data.get('integrations',{})
-        allowed={'google_account','google_folder','google_folder_name','google_folder_path','storage_account','storage_bucket','announce','discord_notify','discord_channel','discord_channels','taverns_notify','taverns_channels'}
+        allowed={'google_account','google_folder','google_folder_name','google_folder_path','storage_account','storage_bucket','announce','discord_notify','discord_channel','discord_channels','taverns_notify','taverns_channels','llm_provider','llm_model'}
         if not isinstance(integrations,dict) or set(integrations)-allowed:raise ValueError('Integrações inválidas.')
         for key,value in integrations.items():
             if key=='discord_channels':
@@ -86,23 +105,39 @@ def handle(action, data, context):
                 continue
             if key in ('announce','discord_notify','taverns_notify'):
                 if not isinstance(value,bool):raise ValueError('Preferência inválida.')
+            elif key == 'llm_provider':
+                if not isinstance(value, str):
+                    raise ValueError('Provedor de modelo inválido.')
+                cleaned_provider = value.strip()
+                if cleaned_provider and cleaned_provider not in SUPPORTED_LLM_PROVIDERS:
+                    raise ValueError('Provedor de modelo inválido.')
+            elif key == 'llm_model':
+                if not isinstance(value, str):
+                    raise ValueError('Modelo inválido.')
             elif not isinstance(value,str):raise ValueError('Integração inválida.')
-        config['outputs']={**{name:True for name in ('resumo.json','srt','txt','vtt')},**outputs,'mp3':True}
-        config['integrations']={**config.get('integrations',{}),**integrations}
+        normalized_integrations = dict(integrations)
+        if 'llm_provider' in normalized_integrations:
+            normalized_integrations['llm_provider'] = normalized_integrations['llm_provider'].strip()
+        if 'llm_model' in normalized_integrations:
+            normalized_integrations['llm_model'] = normalized_integrations['llm_model'].strip()
+        config['outputs']={**{name:True for name in ('resumo.json','srt','txt','vtt')},**config.get('outputs',{}),**outputs,'mp3':True}
+        config['integrations']={**config.get('integrations',{}),**normalized_integrations}
         if config['integrations'].get('taverns_notify') and not config['integrations'].get('taverns_channels'):
             raise ValueError('Selecione pelo menos um canal da Tav.gg para publicar.')
         if 'discord_channels' in integrations:config['integrations'].pop('discord_channel',None)
         save_document('Apps/podcast_automation/campaigns',config)
+        _clear_config_cache()
         return {'ok':True}
     if action == 'save-config':
         value = data['value']
         if not isinstance(value, dict) or any(not isinstance(value.get(k), dict) for k in (
                 'nomes_reais', 'campaign_details', 'publication', 'audio', 'processing')):
             raise ValueError('Configuração de campanhas inválida.')
-        # Campaign editing must not overwrite newer account/folder selections.
+        # Campaign editing must not overwrite newer account/folder/model selections.
         existing=handle('config',{},context)
-        value={**value,**{key:existing[key] for key in ('integrations','outputs') if key in existing}}
+        value={**existing,**value,**{key:existing[key] for key in ('integrations','outputs') if key in existing}}
         save_document('Apps/podcast_automation/campaigns',value)
+        _clear_config_cache()
         return {'ok': True}
     if action == 'stop':
         with _lock:
