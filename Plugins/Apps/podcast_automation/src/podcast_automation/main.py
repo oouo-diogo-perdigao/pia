@@ -19,7 +19,13 @@ from .transcritorWhisper import TranscritorWhisper
 from .rssTranscriptionUpdate import RssTranscriptionUpdater
 
 
-from .settings import get_config, env_bool, project_path, output_formats
+from .settings import (
+    get_config,
+    env_bool,
+    local_timezone_info,
+    project_path,
+    output_formats,
+)
 from .notification import announce_publication
 
 
@@ -30,6 +36,7 @@ def configure():
         LIMITE_DIFERENCA_ZIP, \
         LIMITE_DIFERENCA_DATA, \
         PUBLICAR_DIRETO
+    get_config.cache_clear()
     config = get_config()
     NomesReais = config["nomes_reais"]
     CampaignDetails = config["campaign_details"]
@@ -444,8 +451,11 @@ def processar_sessao(
 
 
 def main() -> None:
+    tz_info = local_timezone_info()
+    local_now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
     print("========================================")
     print("Iniciando processamento Craig")
+    print(f"Horário local: {local_now} ({tz_info['label']})")
     print("========================================")
 
     configure()
@@ -534,6 +544,12 @@ def run() -> None:
         except Exception:
             emit("failed")
             traceback.print_exc()
+        try:
+            current_interval = int(option("POLL_INTERVAL_SECONDS", str(interval)))
+            if current_interval >= 1:
+                interval = current_interval
+        except (TypeError, ValueError):
+            pass
         emit("waiting", seconds=interval)
         print(f"Aguardando {interval} segundos")
         time.sleep(interval)
