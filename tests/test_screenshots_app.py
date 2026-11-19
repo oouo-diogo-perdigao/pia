@@ -306,4 +306,3 @@ def test_capture_editor_assets_and_accessibility_rules():
     assert 'active?.tagName === "BUTTON"' in capture_js
     assert "window.piaCapture" in capture_js
     assert "open: openCapture" in capture_js
-
