@@ -209,7 +209,7 @@ class LocalActions:
     @staticmethod
     def _image_to_png(image: Image.Image) -> bytes:
         buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
+        image.save(buffer, format="PNG", compress_level=1)
         return buffer.getvalue()
 
     # ------------------------------------------------------------------
