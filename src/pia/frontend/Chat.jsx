@@ -1,18 +1,23 @@
 import { MediaTrack } from "./MediaPlayer";
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
+  Alert,
+  ActionIcon,
+  Badge,
   Button,
   Group,
+  HoverCard,
+  Popover,
+  ScrollArea,
+  Stack,
   Text,
+  TextInput,
   Textarea,
+  Tooltip,
   Paper,
   Loader,
-  Select,
-  Popover,
-  Badge,
+  Checkbox,
   Modal,
-  ActionIcon,
-  Stack,
   Divider,
 } from "@mantine/core";
 import ReactMarkdown from "react-markdown";
@@ -26,28 +31,36 @@ import {
   RotateCcw,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   ArrowUp,
   Mic,
   Square,
   X,
   Check,
   Info,
+  Search,
+  Settings,
+  AlertTriangle,
   Download,
   FileText,
   Database,
-  Sparkles,
   ArrowUpRight,
 } from "lucide-react";
 import { api, watchJob, safe, report, copy } from "./api";
 import { notify } from "./toasts";
 import { Icon, usePia } from "./shared";
+import ProviderDrawer from "./ProviderDrawer";
+import {
+  buildSelectorOptions,
+  formatProviderQuota,
+  formatSessionUsage,
+  resolveSelectedModel,
+} from "./models";
 import MessageInfoPopover, {
   McpUsageBadge,
 } from "./features/chat/MessageInfoPopover";
 import SuggestionChips from "./features/chat/SuggestionChips";
 import {
-  CHAT_AUTO_MODEL_SENTINEL,
-  buildChatModelOptions,
   buildChatSendPayload,
   buildChatActionPayload,
   formatMessageInfo,
@@ -57,8 +70,6 @@ import {
   isAudioUrl,
   createChatSpeechController,
 } from "./chat-helpers";
-
-const CHAT_MODEL_STORAGE_KEY = "pia.chat.selectedModel";
 
 function buildMarkdownComponents(onPreviewImage) {
   return {
@@ -405,6 +416,11 @@ function Message({
     </article>
   );
 }
+function truncateSelectorText(text, max = 28) {
+  const s = String(text || "");
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
+}
+
 export default function Chat({ chat }) {
   const { state, refresh, navigate, t } = usePia(),
     [messages, setMessages] = useState([]),
@@ -413,19 +429,16 @@ export default function Chat({ chat }) {
     [running, setRunning] = useState(null),
     [sending, setSending] = useState(false),
     [dictating, setDictating] = useState(false),
-    [modelOptions, setModelOptions] = useState(
-      () => buildChatModelOptions(null, null).options,
-    ),
-    [selectedModel, setSelectedModel] = useState(() => {
-      try {
-        return (
-          localStorage.getItem(CHAT_MODEL_STORAGE_KEY) ||
-          CHAT_AUTO_MODEL_SENTINEL
-        );
-      } catch {
-        return CHAT_AUTO_MODEL_SENTINEL;
-      }
-    }),
+    [catalog, setCatalog] = useState(null),
+    [catalogLoading, setCatalogLoading] = useState(true),
+    [catalogError, setCatalogError] = useState(false),
+    [modelSelection, setModelSelection] = useState({ provider: "", model: "" }),
+    [setAsDefault, setSetAsDefault] = useState(false),
+    [popoverOpen, setPopoverOpen] = useState(false),
+    [searchQuery, setSearchQuery] = useState(""),
+    [drawerOpen, setDrawerOpen] = useState(false),
+    [drawerFocusProvider, setDrawerFocusProvider] = useState(null),
+    [sessionAnnouncement, setSessionAnnouncement] = useState(""),
     [speakingId, setSpeakingId] = useState(null),
     [previewImage, setPreviewImage] = useState(null);
   const scroll = useRef(),
@@ -435,37 +448,24 @@ export default function Chat({ chat }) {
     activeChat = useRef(chat),
     seenMessage = useRef(0),
     readTimer = useRef(),
+    selectorBtnRef = useRef(null),
     speechController = useRef(null);
   const streamingMarkdownComponents = useMemo(
     () => buildMarkdownComponents(setPreviewImage),
     [],
   );
 
-  useEffect(() => {
-    let active = true;
-    Promise.allSettled([api("/chat/models"), api("/settings")]).then(
-      ([modelsResult, settingsResult]) => {
-        if (!active) return;
-        const modelsData =
-          modelsResult.status === "fulfilled" ? modelsResult.value : null;
-        const settingsData =
-          settingsResult.status === "fulfilled"
-            ? settingsResult.value?.values || settingsResult.value
-            : null;
-        const { options } = buildChatModelOptions(modelsData, settingsData);
-        setModelOptions(options);
-        setSelectedModel((prev) =>
-          options.some((opt) => opt.value === prev && !opt.disabled)
-            ? prev
-            : CHAT_AUTO_MODEL_SENTINEL,
-        );
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [state.notifications?.profile_revision]);
-
+  async function loadCatalog() {
+    try {
+      const data = await api("/models/status");
+      setCatalog(data);
+      setCatalogError(false);
+    } catch {
+      setCatalogError(true);
+    } finally {
+      setCatalogLoading(false);
+    }
+  }
   useEffect(() => {
     const controller = createChatSpeechController({
       synthesize: async (record, speechText, { signal }) => {
@@ -571,13 +571,24 @@ export default function Chat({ chat }) {
   async function load(loadDraft = false) {
     if (!chat) {
       setMessages([]);
-      if (loadDraft) setDraft("");
+      if (loadDraft) {
+        setDraft("");
+        setModelSelection({ provider: "", model: "" });
+      }
       return;
     }
     const result = await api("/chat/messages?chat=" + chat);
     if (activeChat.current !== chat) return;
     setMessages(result.messages);
     if (loadDraft) setDraft(result.draft || "");
+    if (result.model_selection) {
+      setModelSelection({
+        provider: result.model_selection.provider || "",
+        model: result.model_selection.model || "",
+      });
+    } else if (loadDraft) {
+      setModelSelection({ provider: "", model: "" });
+    }
   }
   function watch(id) {
     source.current?.close();
@@ -642,9 +653,17 @@ export default function Chat({ chat }) {
           })
           .catch(report);
         refresh().catch(report);
+        loadCatalog().then(() => {
+          if (event.type === "done" && !event.cancelled) {
+            setSessionAnnouncement("Consumo na sessão atualizado.");
+          }
+        });
       }
     });
   }
+  useEffect(() => {
+    loadCatalog();
+  }, []);
   useEffect(() => {
     activeChat.current = chat;
     seenMessage.current = 0;
@@ -681,6 +700,30 @@ export default function Chat({ chat }) {
       window.removeEventListener("focus", visibility);
     };
   }, [messages, chat]);
+  const resolved = resolveSelectedModel(modelSelection, catalog);
+  const isBlocked =
+    !catalogLoading &&
+    !catalogError &&
+    resolved.mode === "provider" &&
+    !resolved.available;
+
+  async function selectModel(provider, model) {
+    const next = { provider: provider || "", model: model || "" };
+    setModelSelection(next);
+    setPopoverOpen(false);
+    setSearchQuery("");
+    selectorBtnRef.current?.focus();
+    if (chat) {
+      await api("/chat/model", {
+        chat,
+        provider: next.provider,
+        model: next.model,
+        set_default: setAsDefault,
+      });
+      if (setAsDefault) await loadCatalog();
+    }
+  }
+
   async function send(overrideText) {
     const isOverride = typeof overrideText === "string";
     if (running) {
@@ -688,6 +731,7 @@ export default function Chat({ chat }) {
       await api("/chat/cancel", { job: running });
       return;
     }
+    if (isBlocked) return;
     const text = (isOverride ? overrideText : draft).trim();
     if (!text || sending) return;
     setSending(true);
@@ -699,15 +743,19 @@ export default function Chat({ chat }) {
     try {
       if (!target) {
         target = (await api("/chat/new", {})).id;
-        await api(
-          "/chat/send",
-          buildChatSendPayload({
+        if (modelSelection.provider || modelSelection.model || setAsDefault) {
+          await api("/chat/model", {
             chat: target,
-            text,
-            request: crypto.randomUUID(),
-            model: selectedModel,
-          }),
-        );
+            provider: modelSelection.provider,
+            model: modelSelection.model,
+            set_default: setAsDefault,
+          });
+        }
+        await api("/chat/send", {
+          chat: target,
+          text,
+          request: crypto.randomUUID(),
+        });
         await refresh();
         navigate({ view: "chat", chat: target });
         return;
@@ -722,7 +770,6 @@ export default function Chat({ chat }) {
           chat: target,
           text,
           request: crypto.randomUUID(),
-          model: selectedModel,
         }),
       );
       if (target === activeChat.current) watch(result.job);
@@ -742,7 +789,6 @@ export default function Chat({ chat }) {
         id: record.id,
         action,
         text,
-        model: selectedModel,
       }),
     );
     if (result.chat) {
@@ -780,35 +826,8 @@ export default function Chat({ chat }) {
       } else setDictating(false);
     });
   }
-  function handleModelChange(value) {
-    const next = value || CHAT_AUTO_MODEL_SENTINEL;
-    setSelectedModel(next);
-    try {
-      localStorage.setItem(CHAT_MODEL_STORAGE_KEY, next);
-    } catch {}
-  }
-
   return (
     <section className="chat-page">
-      <div className="chat-topbar">
-        <Group gap="xs" wrap="nowrap">
-          <Sparkles size={15} />
-          <Text size="xs" c="dimmed">
-            {t("Modelo:")}
-          </Text>
-          <Select
-            className="chat-model-select"
-            size="xs"
-            searchable
-            allowDeselect={false}
-            aria-label={t("Modelo para a próxima resposta")}
-            placeholder={t("Automático (Padrão)")}
-            data={modelOptions}
-            value={selectedModel}
-            onChange={handleModelChange}
-          />
-        </Group>
-      </div>
       <div
         id="messages"
         ref={scroll}
@@ -859,14 +878,34 @@ export default function Chat({ chat }) {
                   {streaming}
                 </ReactMarkdown>
               ) : (
-                <Group>
-                  <Loader size="xs" />
-                  <Text>{t("Pensando…")}</Text>
-                </Group>
+                <Stack gap={2}>
+                  <Group>
+                    <Loader size="xs" />
+                    <Text>{t("Pensando…")}</Text>
+                  </Group>
+                  {resolved.provider?.auth_type === "cli" && (
+                    <Text size="xs" c="dimmed">
+                      {resolved.provider.name} envia a resposta completa ao
+                      terminar.
+                    </Text>
+                  )}
+                </Stack>
               )}
             </div>
           </article>
         )}
+      </div>
+      <div
+        aria-live="polite"
+        style={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          overflow: "hidden",
+          clip: "rect(0 0 0 0)",
+        }}
+      >
+        {sessionAnnouncement}
       </div>
       <Modal
         opened={Boolean(previewImage)}
@@ -892,64 +931,385 @@ export default function Chat({ chat }) {
         )}
       </Modal>
       <div className="composer-wrap">
-        <Paper withBorder className="composer" p="md">
-          <Textarea
-            id="prompt"
-            variant="unstyled"
-            aria-label={t("Mensagem")}
-            placeholder={t("Pergunte à PIA ou dê um comando…")}
-            autosize
-            minRows={1}
-            maxRows={7}
-            value={draft}
-            onChange={(event) => {
-              const text = event.target.value;
-              setDraft(text);
-              clearTimeout(draftTimer.current);
-              if (chat)
-                draftTimer.current = setTimeout(
-                  () => api("/chat/draft", { chat, text }).catch(report),
-                  350,
-                );
-            }}
-            onKeyDown={(event) => {
-              if (
-                event.key === "Enter" &&
-                !event.shiftKey &&
-                !event.nativeEvent.isComposing
-              ) {
-                event.preventDefault();
-                safe(send)();
-              }
-            }}
-          />
-          <Group justify="space-between">
-            <Group>
-              <Icon
-                icon={Mic}
-                label={t("Ditar no campo de mensagem")}
-                color={dictating ? "red" : "gray"}
-                onClick={dictate}
+        {(() => {
+          const selectorData = buildSelectorOptions(catalog);
+          const query = searchQuery.trim().toLowerCase();
+          const filteredGroups = selectorData.groups
+            .map((g) => ({
+              ...g,
+              models: query
+                ? g.models.filter(
+                    (m) =>
+                      m.label.toLowerCase().includes(query) ||
+                      m.model.toLowerCase().includes(query) ||
+                      g.name.toLowerCase().includes(query),
+                  )
+                : g.models,
+            }))
+            .filter(
+              (g) =>
+                !query ||
+                g.models.length > 0 ||
+                g.name.toLowerCase().includes(query),
+            );
+
+          const activeUsage = resolved.provider?.session_usage || {
+            requests: catalog?.total_requests || 0,
+            tokens_reported: false,
+          };
+          const usageCompact = formatSessionUsage(activeUsage, {
+            compact: true,
+          });
+          const usageFull = formatSessionUsage(activeUsage);
+          const quotaFull = formatProviderQuota(
+            resolved.provider?.provider_quota,
+            resolved.providerId,
+          );
+
+          const statusDotColor =
+            resolved.statusMeta?.color === "green"
+              ? "var(--mantine-color-green-6)"
+              : resolved.statusMeta?.color === "yellow"
+                ? "var(--mantine-color-yellow-6)"
+                : resolved.statusMeta?.color === "red"
+                  ? "var(--mantine-color-red-6)"
+                  : "var(--mantine-color-gray-6)";
+
+          const blockActionLabel =
+            resolved.provider?.status === "not_installed"
+              ? "Como instalar"
+              : resolved.provider?.status === "error"
+                ? "Reconectar"
+                : resolved.provider?.auth_type === "api_key"
+                  ? "Adicionar chave"
+                  : "Fazer login";
+
+          return (
+            <Paper withBorder className="composer" p="md">
+              {isBlocked && (
+                <Alert color="yellow" role="alert" mb="xs" p="xs">
+                  <Group justify="space-between" wrap="wrap" gap="xs">
+                    <Text size="xs">{resolved.blockingReason}</Text>
+                    <Group gap="xs">
+                      <Button
+                        size="compact-xs"
+                        variant="light"
+                        onClick={() => {
+                          setDrawerFocusProvider(resolved.providerId);
+                          setDrawerOpen(true);
+                        }}
+                      >
+                        {blockActionLabel}
+                      </Button>
+                      <Button
+                        size="compact-xs"
+                        variant="subtle"
+                        onClick={() => setPopoverOpen(true)}
+                      >
+                        Escolher outro modelo
+                      </Button>
+                    </Group>
+                  </Group>
+                </Alert>
+              )}
+              <Textarea
+                id="prompt"
+                variant="unstyled"
+                aria-label={t("Mensagem")}
+                title={t("Shift + Enter para uma nova linha")}
+                placeholder={t("Pergunte à PIA ou dê um comando…")}
+                autosize
+                minRows={1}
+                maxRows={7}
+                value={draft}
+                onChange={(event) => {
+                  const text = event.target.value;
+                  setDraft(text);
+                  clearTimeout(draftTimer.current);
+                  if (chat)
+                    draftTimer.current = setTimeout(
+                      () => api("/chat/draft", { chat, text }).catch(report),
+                      350,
+                    );
+                }}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault();
+                    safe(send)();
+                  }
+                }}
               />
-              <Text size="xs" c="dimmed">
-                {t("Shift + Enter para uma nova linha")}
-              </Text>
-            </Group>
-            <Icon
-              icon={running ? Square : ArrowUp}
-              label={running ? t("Interromper resposta") : t("Enviar mensagem")}
-              variant="filled"
-              color="violet"
-              radius="xl"
-              disabled={sending || (!running && !draft.trim())}
-              onClick={send}
-            />
-          </Group>
-        </Paper>
+              <Group justify="space-between" wrap="nowrap" gap="xs">
+                <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+                  <Icon
+                    icon={Mic}
+                    label={t("Ditar no campo de mensagem")}
+                    color={dictating ? "red" : "gray"}
+                    onClick={dictate}
+                  />
+                  <Popover
+                    opened={popoverOpen}
+                    onChange={setPopoverOpen}
+                    width={340}
+                    position="top-start"
+                    withinPortal
+                  >
+                    <Popover.Target>
+                      <Tooltip
+                        label={
+                          running || sending
+                            ? "Aguarde a resposta terminar para trocar o modelo."
+                            : catalogError
+                              ? "Não foi possível atualizar a lista de modelos."
+                              : resolved.modelLabel
+                        }
+                      >
+                        <Button
+                          ref={selectorBtnRef}
+                          variant="subtle"
+                          size="xs"
+                          color="gray"
+                          disabled={Boolean(
+                            running || sending || catalogLoading,
+                          )}
+                          aria-label={`Modelo da conversa: ${resolved.modelLabel}, ${resolved.statusMeta?.label || "Conectado"}. Alterar modelo`}
+                          onClick={() => setPopoverOpen((o) => !o)}
+                          leftSection={
+                            catalogLoading ? (
+                              <Loader size={10} />
+                            ) : catalogError ? (
+                              <AlertTriangle size={12} />
+                            ) : (
+                              <span
+                                style={{
+                                  width: 8,
+                                  height: 8,
+                                  borderRadius: "50%",
+                                  backgroundColor: statusDotColor,
+                                  display: "inline-block",
+                                }}
+                              />
+                            )
+                          }
+                          rightSection={<ChevronDown size={13} />}
+                        >
+                          {catalogLoading
+                            ? "Carregando modelos…"
+                            : catalogError
+                              ? `Modelo: ${truncateSelectorText(resolved.modelLabel, 20)}`
+                              : truncateSelectorText(resolved.modelLabel, 28)}
+                        </Button>
+                      </Tooltip>
+                    </Popover.Target>
+                    <Popover.Dropdown p="xs">
+                      <Stack gap="xs">
+                        <TextInput
+                          size="xs"
+                          placeholder="Buscar modelo"
+                          leftSection={<Search size={13} />}
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          autoFocus
+                        />
+                        <ScrollArea.Autosize mah={280}>
+                          <Stack gap={4}>
+                            <Text size="xs" fw={600} c="dimmed">
+                              Padrão
+                            </Text>
+                            <Button
+                              size="xs"
+                              variant={
+                                resolved.mode === "default" ? "light" : "subtle"
+                              }
+                              justify="flex-start"
+                              fullWidth
+                              onClick={safe(() => selectModel("", ""))}
+                            >
+                              {selectorData.defaultOption.label}
+                            </Button>
+
+                            <Text size="xs" fw={600} c="dimmed" mt={4}>
+                              Automático (pode alternar entre modelos)
+                            </Text>
+                            {selectorData.automaticOptions.map((opt) => (
+                              <Button
+                                key={opt.value}
+                                size="xs"
+                                variant={
+                                  resolved.mode === "automatic" &&
+                                  resolved.modelId === opt.value
+                                    ? "light"
+                                    : "subtle"
+                                }
+                                justify="flex-start"
+                                fullWidth
+                                onClick={safe(() =>
+                                  selectModel(opt.provider, opt.model),
+                                )}
+                              >
+                                {opt.label}
+                              </Button>
+                            ))}
+
+                            {filteredGroups.map((g) => (
+                              <Stack key={g.providerId} gap={2} mt={4}>
+                                <Group justify="space-between" wrap="nowrap">
+                                  <Text size="xs" fw={600} c="dimmed">
+                                    {g.name} · {g.statusMeta.label}
+                                  </Text>
+                                  {!g.connected && (
+                                    <Button
+                                      size="compact-xs"
+                                      variant="subtle"
+                                      onClick={() => {
+                                        setPopoverOpen(false);
+                                        setDrawerFocusProvider(g.providerId);
+                                        setDrawerOpen(true);
+                                      }}
+                                    >
+                                      Conectar
+                                    </Button>
+                                  )}
+                                </Group>
+                                {g.models.map((m) => (
+                                  <Button
+                                    key={m.value}
+                                    size="xs"
+                                    variant={
+                                      resolved.providerId === m.provider &&
+                                      resolved.modelId === m.model
+                                        ? "light"
+                                        : "subtle"
+                                    }
+                                    disabled={!g.connected}
+                                    justify="flex-start"
+                                    fullWidth
+                                    onClick={safe(() =>
+                                      selectModel(m.provider, m.model),
+                                    )}
+                                  >
+                                    {m.label}
+                                  </Button>
+                                ))}
+                              </Stack>
+                            ))}
+                          </Stack>
+                        </ScrollArea.Autosize>
+                        <Checkbox
+                          size="xs"
+                          label="Usar como padrão das novas conversas"
+                          checked={setAsDefault}
+                          onChange={(e) =>
+                            setSetAsDefault(e.currentTarget.checked)
+                          }
+                        />
+                        <Button
+                          size="xs"
+                          variant="subtle"
+                          justify="flex-start"
+                          leftSection={<Settings size={13} />}
+                          onClick={() => {
+                            setPopoverOpen(false);
+                            setDrawerFocusProvider(null);
+                            setDrawerOpen(true);
+                          }}
+                        >
+                          Gerenciar provedores
+                        </Button>
+                      </Stack>
+                    </Popover.Dropdown>
+                  </Popover>
+
+                  <Text size="xs" c="dimmed" visibleFrom="sm" truncate>
+                    {usageCompact.summary}
+                  </Text>
+
+                  <HoverCard width={280} withArrow shadow="md" withinPortal>
+                    <HoverCard.Target>
+                      <ActionIcon
+                        size="xs"
+                        variant="subtle"
+                        color="gray"
+                        aria-label="Detalhes de consumo e saldo"
+                      >
+                        <Info size={14} />
+                      </ActionIcon>
+                    </HoverCard.Target>
+                    <HoverCard.Dropdown>
+                      <Stack gap="xs">
+                        <Text size="xs" fw={600}>
+                          {resolved.modelLabel}
+                        </Text>
+                        <Paper withBorder p="xs">
+                          <Text size="xs" fw={600} c="dimmed">
+                            Consumo na sessão
+                          </Text>
+                          <Text size="xs" mt={2}>
+                            {usageFull.summary}
+                          </Text>
+                          {usageFull.detail && (
+                            <Text size="xs" c="dimmed">
+                              {usageFull.detail}
+                            </Text>
+                          )}
+                        </Paper>
+                        <Paper withBorder p="xs">
+                          <Text size="xs" fw={600} c="dimmed">
+                            Saldo do provedor
+                          </Text>
+                          <Text size="xs" mt={2}>
+                            {quotaFull.label}
+                          </Text>
+                          {quotaFull.checkedAtText && (
+                            <Text size="xs" c="dimmed">
+                              {quotaFull.checkedAtText}
+                            </Text>
+                          )}
+                        </Paper>
+                      </Stack>
+                    </HoverCard.Dropdown>
+                  </HoverCard>
+                </Group>
+
+                <Tooltip
+                  label={`Conecte ${resolved.provider?.name || "o provedor"} ou escolha outro modelo para enviar.`}
+                  disabled={!isBlocked}
+                >
+                  <Icon
+                    icon={running ? Square : ArrowUp}
+                    label={
+                      running ? t("Interromper resposta") : t("Enviar mensagem")
+                    }
+                    variant="filled"
+                    color="violet"
+                    radius="xl"
+                    disabled={
+                      sending || isBlocked || (!running && !draft.trim())
+                    }
+                    onClick={send}
+                  />
+                </Tooltip>
+              </Group>
+            </Paper>
+          );
+        })()}
         <Text ta="center" size="xs" c="dimmed" mt="xs">
           {t("A PIA pode cometer erros. Confira informações importantes.")}
         </Text>
       </div>
+      <ProviderDrawer
+        opened={drawerOpen}
+        focusProvider={drawerFocusProvider}
+        onClose={() => {
+          setDrawerOpen(false);
+          selectorBtnRef.current?.focus();
+        }}
+        onUpdated={() => loadCatalog()}
+      />
     </section>
   );
 }

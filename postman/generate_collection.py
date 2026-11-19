@@ -891,6 +891,7 @@ def build():
     readable = {
         "/state",
         "/chat/messages",
+        "/chat/models",
         "/settings",
         "/accounts",
         "/bots",
@@ -973,6 +974,17 @@ def build():
                             },
                         }
                     ]
+    for method, action in (
+        ("GET", "status"),
+        ("POST", "status"),
+        ("POST", "connect"),
+        ("POST", "disconnect"),
+        ("POST", "verify"),
+        ("POST", "quota"),
+        ("POST", "reset-session"),
+        ("POST", "default"),
+    ):
+        add("07 · Workspace e serviços", method, "/api/pia/models/" + action)
     for route in MUSIC_ROUTES:
         item = add(
             "07 · Workspace e serviços",
@@ -997,6 +1009,7 @@ def build():
     integrations = {
         "agents": {
             "status": {},
+            "reset-session": {},
             "ask": {"provider": "codex", "prompt": "Explique suas capacidades."},
         },
         "google": {

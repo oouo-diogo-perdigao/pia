@@ -1,18 +1,120 @@
 """Cliente de resumos pela API Chat Completions da PIA."""
 
 import json
-import os
 import re
 import time
 import requests
 from src.app_access import current, headers
 
+try:
+    from .settings import get_config
+except ImportError:
+    try:
+        from podcast_automation.settings import get_config
+    except ImportError:
+        get_config = None
+
+_SECRET_PATTERNS = (
+    re.compile(r"Bearer\s+[^\s,;\"']+", re.IGNORECASE),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bgsk_[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bAIza[A-Za-z0-9_-]{12,}\b"),
+    re.compile(r"(?:api[_-]?key|token|secret)\s*[:=]\s*[^\s,;\"']+", re.IGNORECASE),
+)
+
+_AUTH_503_HINTS = (
+    "login",
+    "autentic",
+    "chave",
+    "instalad",
+    "desconect",
+    "provedor",
+    "credencia",
+    "api_key",
+    "unauthorized",
+    "forbidden",
+    "expirad",
+    "recus",
+)
+
+
+def _load_model_selection() -> tuple[str, str]:
+    if get_config is None:
+        return "", ""
+    try:
+        config = get_config()
+    except Exception:
+        return "", ""
+    integrations = config.get("integrations") if isinstance(config, dict) else None
+    if not isinstance(integrations, dict):
+        return "", ""
+    provider = integrations.get("llm_provider")
+    model = integrations.get("llm_model")
+    return (
+        provider.strip() if isinstance(provider, str) else "",
+        model.strip() if isinstance(model, str) else "",
+    )
+
+
+def resolve_model(
+    default_model: str, llm_provider: str = "", llm_model: str = ""
+) -> str:
+    provider = str(llm_provider or "").strip()
+    model = str(llm_model or "").strip()
+    if not provider and not model:
+        return default_model
+    if provider in ("free", "paid") and not model:
+        return provider
+    if model:
+        if (
+            provider
+            and provider not in ("free", "paid")
+            and model != provider
+            and not model.startswith(provider + "/")
+        ):
+            return f"{provider}/{model}"
+        return model
+    return provider
+
+
+def sanitize_error_message(message: str, request_headers: dict | None = None) -> str:
+    sanitized = str(message)
+    if request_headers:
+        auth = request_headers.get("Authorization", "")
+        key = auth.removeprefix("Bearer ").strip() if isinstance(auth, str) else ""
+        if key:
+            sanitized = sanitized.replace(key, "[chave omitida]")
+        app_token = request_headers.get("X-PIA-App-Token", "")
+        if isinstance(app_token, str) and app_token.strip():
+            sanitized = sanitized.replace(app_token.strip(), "[token omitido]")
+    for pattern in _SECRET_PATTERNS:
+        sanitized = pattern.sub("[segredo omitido]", sanitized)
+    sanitized = re.sub(r"https?://[^\s]+", "[URL omitida]", sanitized)
+    return sanitized[:1000]
+
+
+def _should_retry_http(status_code: int, detail: str) -> bool:
+    if status_code not in (429, 500, 502, 503, 504):
+        return False
+    if status_code == 503:
+        lowered = detail.lower()
+        if any(hint in lowered for hint in _AUTH_503_HINTS):
+            return False
+    return True
+
 
 class PiaClient:
-    def __init__(self):
+    def __init__(self, llm_provider: str | None = None, llm_model: str | None = None):
         context = current()
         self.base_url = context["url"].rstrip("/") + "/v1"
-        self.model = context["model"]
+        if llm_provider is None and llm_model is None:
+            provider, model = _load_model_selection()
+        else:
+            provider = str(llm_provider or "").strip()
+            model = str(llm_model or "").strip()
+        self.llm_provider = provider
+        self.llm_model = model
+        self.model = resolve_model(context["model"], provider, model)
         self.headers = {"Content-Type": "application/json", **headers()}
         self.timeout = float(context.get("timeout", 3600))
 
@@ -31,6 +133,8 @@ class PiaClient:
             ],
         }
         for attempt in range(attempts):
+            response = None
+            detail = ""
             try:
                 response = requests.post(
                     self.base_url + "/chat/completions",
@@ -39,20 +143,10 @@ class PiaClient:
                     timeout=self.timeout,
                 )
                 if response.status_code >= 400:
-                    detail = ""
                     try:
                         message = response.json().get("error", {}).get("message")
-                        if isinstance(message, str):
-                            # Não imprime corpo completo; oculta a chave e URLs.
-                            key = self.headers.get("Authorization", "").removeprefix(
-                                "Bearer "
-                            )
-                            if key:
-                                message = message.replace(key, "[chave omitida]")
-                            message = re.sub(
-                                r"https?://[^\s]+", "[URL omitida]", message
-                            )
-                            detail = " " + message[:1000]
+                        if isinstance(message, str) and message.strip():
+                            detail = " " + sanitize_error_message(message, self.headers)
                     except (ValueError, AttributeError):
                         pass
                     raise RuntimeError(
@@ -81,7 +175,8 @@ class PiaClient:
                     ) from exc
             except RuntimeError:
                 if (
-                    response.status_code not in (429, 500, 502, 503, 504)
+                    response is None
+                    or not _should_retry_http(response.status_code, detail)
                     or attempt + 1 == attempts
                 ):
                     raise
