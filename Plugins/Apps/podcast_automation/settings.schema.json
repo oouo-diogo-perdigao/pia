@@ -1,12 +1,5 @@
 [
   {
-    "name": "TZ",
-    "type": "string",
-    "default": "America/Sao_Paulo",
-    "label": "Tz",
-    "link": "https://github.com/oouo-diogo-perdigao/pia#readme"
-  },
-  {
     "name": "POLL_INTERVAL_SECONDS",
     "type": "int",
     "default": "600",
