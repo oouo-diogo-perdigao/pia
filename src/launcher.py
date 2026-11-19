@@ -5,21 +5,70 @@ import argparse
 import os
 import subprocess
 import sys
+import threading
 import time
 
 from .config_paths import BASE_DIR
 from .profile_migration import initialize_profile
 from .instance import InstanceLock
 
+_hotkey_lock = threading.Lock()
+_hotkey_listener = None
+_hotkey_managed = False
+
+
+def start_hotkey_listener():
+    global _hotkey_listener
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    with _hotkey_lock:
+        _hotkey_listener = subprocess.Popen(
+            [sys.executable, "-m", "src.hotkeys"], cwd=BASE_DIR, creationflags=flags
+        )
+        return _hotkey_listener
+
+
+def stop_hotkey_listener():
+    global _hotkey_listener
+    with _hotkey_lock:
+        listener = _hotkey_listener
+        _hotkey_listener = None
+    if listener is not None and listener.poll() is None:
+        listener.terminate()
+        try:
+            listener.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            listener.kill()
+
+
+def reload_hotkey_listener() -> dict:
+    from . import hotkeys
+
+    if hotkeys.current_os() == "linux" and hotkeys.is_gnome():
+        try:
+            conflicts = hotkeys.install_gnome(hotkeys.load_config()) or []
+            return {"ok": True, "mode": "gnome", "conflicts": conflicts}
+        except Exception:
+            return {"ok": False, "mode": "gnome", "conflicts": []}
+    with _hotkey_lock:
+        managed = _hotkey_managed or _hotkey_listener is not None
+    if not managed:
+        return {"ok": True, "mode": "restart-required", "conflicts": []}
+    try:
+        stop_hotkey_listener()
+        start_hotkey_listener()
+        return {"ok": True, "mode": "hot-reload", "conflicts": []}
+    except Exception:
+        return {"ok": False, "mode": "restart-required", "conflicts": []}
+
 
 def run_desktop():
+    global _hotkey_managed
     if legacy_running():
         return
     lock = InstanceLock(user_path("pia.lock"))
     if not lock.acquire():
         print("A PIA já está em execução. Use o ícone na bandeja.")
         return
-    listener = None
     try:
         if (
             sys.platform != "win32"
@@ -31,20 +80,16 @@ def run_desktop():
         from .cache_paths import migrate
 
         migrate()
-        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        listener = subprocess.Popen(
-            [sys.executable, "-m", "src.hotkeys"], cwd=BASE_DIR, creationflags=flags
-        )
+        with _hotkey_lock:
+            _hotkey_managed = True
+        start_hotkey_listener()
         from .server import main as run_server
 
         run_server()
     finally:
-        if listener is not None and listener.poll() is None:
-            listener.terminate()
-            try:
-                listener.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                listener.kill()
+        stop_hotkey_listener()
+        with _hotkey_lock:
+            _hotkey_managed = False
         lock.close()
 
 
