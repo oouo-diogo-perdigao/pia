@@ -2526,7 +2526,7 @@
           "response": []
         },
         {
-          "name": "POST /api/pia/chat/models",
+          "name": "POST /api/pia/chat/model",
           "request": {
             "method": "POST",
             "header": [
@@ -2539,7 +2539,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{base_url}}/api/pia/chat/models",
+            "url": "{{base_url}}/api/pia/chat/model",
             "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
             "auth": {
               "type": "noauth"
@@ -2552,6 +2552,24 @@
                   "language": "json"
                 }
               }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/pia/chat/models",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/chat/models",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": []
@@ -3979,6 +3997,241 @@
           "response": []
         },
         {
+          "name": "GET /api/pia/models/status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/models/status",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/models/status",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/models/status",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/models/connect",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/models/connect",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/models/disconnect",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/models/disconnect",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/models/verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/models/verify",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/models/quota",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/models/quota",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/models/reset-session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/models/reset-session",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/models/default",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/models/default",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
           "name": "GET /api/pia/music/suno/status",
           "request": {
             "method": "GET",
@@ -4791,6 +5044,37 @@
               }
             ],
             "url": "{{base_url}}/api/pia/integrations/agents/status",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/integrations/agents/reset-session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/integrations/agents/reset-session",
             "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
             "auth": {
               "type": "noauth"

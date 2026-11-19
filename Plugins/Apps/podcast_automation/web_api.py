@@ -16,6 +16,17 @@ from . import power
 from .recording_queue import pending_files
 
 ROOT = Path(__file__).resolve().parent
+SUPPORTED_LLM_PROVIDERS = {
+    "codex",
+    "agy",
+    "openrouter",
+    "gemini",
+    "groq",
+    "cloudflare",
+    "local",
+    "free",
+    "paid",
+}
 _latest = None
 _tasks = {}
 _lock = threading.Lock()
@@ -192,6 +203,14 @@ def _validate_integrations(integrations: dict) -> dict:
             if not isinstance(value, bool):
                 raise ValueError("Preferência inválida.")
             cleaned[key] = value
+        elif key in ("llm_provider", "llm_model"):
+            label = "Provedor de modelo" if key == "llm_provider" else "Modelo"
+            if not isinstance(value, str):
+                raise ValueError(f"{label} inválido.")
+            selection = value.strip()
+            if key == "llm_provider" and selection and selection not in SUPPORTED_LLM_PROVIDERS:
+                raise ValueError("Provedor de modelo inválido.")
+            cleaned[key] = selection
         elif key in (
             "google_account",
             "google_folder",
@@ -200,8 +219,6 @@ def _validate_integrations(integrations: dict) -> dict:
             "storage_account",
             "storage_bucket",
             "discord_channel",
-            "llm_provider",
-            "llm_model",
         ):
             if not isinstance(value, str):
                 raise ValueError("Integração inválida.")

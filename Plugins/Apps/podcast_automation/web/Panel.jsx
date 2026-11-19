@@ -1,5 +1,6 @@
 import { fingerprint } from "../../../../src/pia/frontend/forms";
 import ResourcePicker from "../../../../src/pia/frontend/ResourcePicker";
+import ModelSettingsSlot from "./ModelSettingsSlot";
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Accordion,
@@ -140,10 +141,7 @@ function focusField(fieldId) {
 const id = "podcast_automation",
   call = (action, data = {}) => appApi(id, action, data);
 
-export default function Podcast({
-  sub = "principal",
-  ModelSettingsSlot = null,
-}) {
+export default function Podcast({ sub = "principal" }) {
   const { navigate, route, openServerConnector } = usePia(),
     [config, setConfig] = useState(null),
     [configLoading, setConfigLoading] = useState(true),
@@ -185,6 +183,7 @@ export default function Podcast({
     [removeCampaignModal, setRemoveCampaignModal] = useState(null),
     // Configurações (aba Settings)
     [settingsDraft, setSettingsDraft] = useState(null),
+    [modelDraft, setModelDraft] = useState(null),
     [savedSettingsFp, setSavedSettingsFp] = useState(""),
     [settingsErrors, setSettingsErrors] = useState({
       errors: [],
@@ -258,6 +257,7 @@ export default function Podcast({
     delete integrations.discord_channel;
     const normalized = { ...configuration, integrations };
     setConfig(normalized);
+    setModelDraft(null);
     setSavedOptions(
       fingerprint({ outputs: normalized.outputs || {}, integrations }),
     );
@@ -406,9 +406,12 @@ export default function Podcast({
     ? fingerprint({ outputs: config.outputs || {}, integrations: opts }) !==
       savedOptions
     : false;
+  const modelDirty =
+    modelDraft !== null &&
+    (modelDraft.llm_provider !== (opts.llm_provider || "") ||
+      modelDraft.llm_model !== (opts.llm_model || ""));
   const settingsDirty = settingsDraft
-    ? fingerprint(settingsDraft) !== savedSettingsFp ||
-      (!!ModelSettingsSlot && integrationsDirty)
+    ? fingerprint(settingsDraft) !== savedSettingsFp || modelDirty
     : false;
 
   const hasUnsavedInCurrentTab =
@@ -453,6 +456,7 @@ export default function Podcast({
     }
     if (sub === "settings" && config) {
       setSettingsDraft(buildSettingsDraft(config));
+      setModelDraft(null);
       setSettingsErrors({ errors: [], fieldErrors: {} });
     }
   }
@@ -545,9 +549,7 @@ export default function Podcast({
     setSavingSettings(true);
     try {
       const payload = { ...validated.payload };
-      if (ModelSettingsSlot && integrationsDirty) {
-        payload.integrations = opts;
-      }
+      if (modelDirty) payload.integrations = modelDraft;
       await call("save-settings", payload);
       const fresh = await call("config");
       syncFromConfig(fresh, channels);
@@ -2088,14 +2090,12 @@ export default function Podcast({
             id="ia"
             data-slot="podcast-model-settings"
             aria-labelledby="podcast-model-settings-title"
-            hidden={!ModelSettingsSlot}
           >
-            {ModelSettingsSlot &&
-              React.createElement(ModelSettingsSlot, {
-                config,
-                patchIntegrations: patch,
-                disabled: savingSettings,
-              })}
+            <ModelSettingsSlot
+              config={{ ...config, integrations: { ...opts, ...modelDraft } }}
+              patchIntegrations={setModelDraft}
+              disabled={savingSettings || running || shutdownPending}
+            />
           </section>
 
           {/* 3.1.7 Avançado */}
