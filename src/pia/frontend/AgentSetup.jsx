@@ -57,7 +57,6 @@ export default function AgentSetup({
         ? "Get-Command codex.cmd,codex.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source"
         : "(Get-Command agy.exe -ErrorAction Stop).Source"
       : "command -v " + command;
-  const executableFound = Boolean(status?.executable || status?.available);
 
   return (
     <Modal
@@ -103,24 +102,22 @@ export default function AgentSetup({
           configuração. Depois saia com /exit. A PIA usa essa sessão salva; não
           é preciso colar tokens na PIA.
         </Text>
-        {!executableFound && (
-          <>
-            <Text fw={600}>3. Obtenha o caminho do executável</Text>
-            <Command>{path}</Command>
+        <>
+          <Text fw={600}>3. Obtenha o caminho do executável</Text>
+          <Command>{path}</Command>
+          <Text size="sm">
+            Copie uma linha com o caminho completo, sem aspas, para{" "}
+            <Code>{variable}</Code> nas configurações avançadas deste painel. No
+            Windows use o agy.exe nativo; para Codex pode usar codex.cmd do npm
+            ou codex.exe.
+          </Text>
+          {!codex && platform === "windows" && (
             <Text size="sm">
-              Copie uma linha com o caminho completo, sem aspas, para{" "}
-              <Code>{variable}</Code> nas configurações avançadas deste painel.
-              No Windows use o agy.exe nativo; para Codex pode usar codex.cmd do
-              npm ou codex.exe.
+              Local padrão do instalador AGY:{" "}
+              <Code>%LOCALAPPDATA%\agy\bin\agy.exe</Code>.
             </Text>
-            {!codex && platform === "windows" && (
-              <Text size="sm">
-                Local padrão do instalador AGY:{" "}
-                <Code>%LOCALAPPDATA%\agy\bin\agy.exe</Code>.
-              </Text>
-            )}
-          </>
-        )}
+          )}
+        </>
         {status?.executable && (
           <>
             <Text size="sm">Executável detectado pela PIA:</Text>

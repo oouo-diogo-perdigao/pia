@@ -695,6 +695,7 @@ class HTTPServer(BaseHTTPRequestHandler):
         from src.model_session import (
             PROVIDERS_ORDER,
             check_explicit_provider_ready,
+            explicit_model_candidate,
             extract_usage_counts,
             get_active_tracker,
             infer_provider_from_selector,
@@ -716,8 +717,13 @@ class HTTPServer(BaseHTTPRequestHandler):
             if model is not None and not isinstance(model, str):
                 raise ValueError("model deve ser texto.")
             eff_provider, eff_model = infer_provider_from_selector(None, model)
-            if eff_provider not in ("codex", "agy") and not select_models(model):
-                raise ValueError("O seletor LLM não selecionou nenhum modelo configurado.")
+            if eff_provider not in ("codex", "agy"):
+                try:
+                    resolved_models = select_models(model)
+                except ValueError:
+                    resolved_models = ()
+                if not resolved_models and explicit_model_candidate(model) is None:
+                    raise ValueError("O seletor LLM não selecionou nenhum modelo configurado.")
             stream = data.get("stream", False)
             if not isinstance(stream, bool):
                 raise ValueError("stream deve ser booleano.")
@@ -831,9 +837,10 @@ class HTTPServer(BaseHTTPRequestHandler):
                     if used_provider in PROVIDERS_ORDER:
                         tracker.record_usage(used_provider, *extract_usage_counts(response))
                 self.send_json(200, response.model_dump(exclude_none=True))
-            except Exception:
+            except Exception as exc:
                 logging.exception("[LLM] Todos os candidatos falharam.")
-                self.send_openai_error(503, "Nenhum modelo LLM selecionado está disponível.", error_type="server_error")
+                detail = f"Nenhum modelo LLM selecionado está disponível: {sanitize_error(exc)}" if eff_provider in PROVIDERS_ORDER else "Nenhum modelo LLM selecionado está disponível."
+                self.send_openai_error(503, detail, error_type="server_error")
             return
 
         iterator = manager.complete_stream(messages, model=model, **options)

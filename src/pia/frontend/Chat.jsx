@@ -563,13 +563,20 @@ export default function Chat({ chat }) {
                   )
                 : g.models,
             }))
-            .filter((g) => !query || g.models.length > 0 || g.name.toLowerCase().includes(query));
+            .filter(
+              (g) =>
+                !query ||
+                g.models.length > 0 ||
+                g.name.toLowerCase().includes(query),
+            );
 
           const activeUsage = resolved.provider?.session_usage || {
             requests: catalog?.total_requests || 0,
             tokens_reported: false,
           };
-          const usageCompact = formatSessionUsage(activeUsage, { compact: true });
+          const usageCompact = formatSessionUsage(activeUsage, {
+            compact: true,
+          });
           const usageFull = formatSessionUsage(activeUsage);
           const quotaFull = formatProviderQuota(
             resolved.provider?.provider_quota,
@@ -683,7 +690,9 @@ export default function Chat({ chat }) {
                           variant="subtle"
                           size="xs"
                           color="gray"
-                          disabled={Boolean(running || sending || catalogLoading)}
+                          disabled={Boolean(
+                            running || sending || catalogLoading,
+                          )}
                           aria-label={`Modelo da conversa: ${resolved.modelLabel}, ${resolved.statusMeta?.label || "Conectado"}. Alterar modelo`}
                           onClick={() => setPopoverOpen((o) => !o)}
                           leftSection={

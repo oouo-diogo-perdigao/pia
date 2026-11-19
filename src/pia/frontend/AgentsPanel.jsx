@@ -50,7 +50,11 @@ import {
 function statusIcon(status, authType) {
   if (status === "connected") return <CircleCheck size={14} />;
   if (status === "login_required") {
-    return authType === "api_key" ? <KeyRound size={14} /> : <LogIn size={14} />;
+    return authType === "api_key" ? (
+      <KeyRound size={14} />
+    ) : (
+      <LogIn size={14} />
+    );
   }
   if (status === "error") return <CircleAlert size={14} />;
   return <Download size={14} />;
@@ -453,7 +457,10 @@ export default function AgentsPanel({
           ))}
         </SimpleGrid>
       ) : loadError ? (
-        <Alert color="red" title="Não foi possível verificar os provedores agora.">
+        <Alert
+          color="red"
+          title="Não foi possível verificar os provedores agora."
+        >
           <Button
             size="xs"
             variant="light"
@@ -469,8 +476,8 @@ export default function AgentsPanel({
           <Paper withBorder p="sm">
             <Group justify="space-between" wrap="wrap" gap="xs">
               <Text size="sm">
-                Sessão atual desde {sessionStartHHMM} · {totalRequests} req nesta
-                sessão
+                Sessão atual desde {sessionStartHHMM} · {totalRequests} req
+                nesta sessão
               </Text>
               <Button
                 size="xs"
@@ -495,8 +502,8 @@ export default function AgentsPanel({
 
           {!anyConnected && (
             <Alert color="blue" variant="light">
-              Nenhum provedor conectado. O Chat continua usando o padrão da
-              PIA. Conecte um provedor abaixo para escolher outros modelos.
+              Nenhum provedor conectado. O Chat continua usando o padrão da PIA.
+              Conecte um provedor abaixo para escolher outros modelos.
             </Alert>
           )}
 
@@ -911,9 +918,7 @@ export default function AgentsPanel({
         opened={Boolean(cliLoginModal)}
         onClose={() => setCliLoginModal(null)}
         title={
-          cliLoginModal
-            ? `Fazer login no ${cliLoginModal.name}`
-            : "Fazer login"
+          cliLoginModal ? `Fazer login no ${cliLoginModal.name}` : "Fazer login"
         }
       >
         {cliLoginModal && (

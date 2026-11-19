@@ -110,7 +110,18 @@ class PodcastModelPersistenceTests(unittest.TestCase):
         fixture = canonical_t2_fixture()
         save_document("Apps/podcast_automation/campaigns", copy.deepcopy(fixture))
 
-        for provider in ("", "codex", "agy", "openrouter", "gemini", "groq", "cloudflare", "local", "free", "paid"):
+        for provider in (
+            "",
+            "codex",
+            "agy",
+            "openrouter",
+            "gemini",
+            "groq",
+            "cloudflare",
+            "local",
+            "free",
+            "paid",
+        ):
             with self.subTest(provider=provider):
                 res = web_api.handle(
                     "save-options",
@@ -166,13 +177,17 @@ class PodcastModelExecutionTests(unittest.TestCase):
         self.assertEqual(llm.resolve_model("pia-default", "", ""), "pia-default")
         self.assertEqual(llm.resolve_model("pia-default", "codex", ""), "codex")
         self.assertEqual(llm.resolve_model("pia-default", "codex", "codex"), "codex")
-        self.assertEqual(llm.resolve_model("pia-default", "codex", "gpt-5"), "codex/gpt-5")
+        self.assertEqual(
+            llm.resolve_model("pia-default", "codex", "gpt-5"), "codex/gpt-5"
+        )
         self.assertEqual(
             llm.resolve_model("pia-default", "openrouter", "openai/gpt-4o-mini"),
             "openrouter/openai/gpt-4o-mini",
         )
         self.assertEqual(
-            llm.resolve_model("pia-default", "openrouter", "openrouter/openai/gpt-4o-mini"),
+            llm.resolve_model(
+                "pia-default", "openrouter", "openrouter/openai/gpt-4o-mini"
+            ),
             "openrouter/openai/gpt-4o-mini",
         )
         self.assertEqual(llm.resolve_model("pia-default", "free", ""), "free")
@@ -192,9 +207,10 @@ class PodcastModelExecutionTests(unittest.TestCase):
                 )
             }
         }
-        with patch.object(llm, "get_config", return_value=config), patch.object(
-            llm.requests, "post", return_value=response
-        ) as post:
+        with (
+            patch.object(llm, "get_config", return_value=config),
+            patch.object(llm.requests, "post", return_value=response) as post,
+        ):
             client = llm.PiaClient()
             self.assertEqual(client.model, "codex")
             with self.assertRaises(RuntimeError) as ctx:
@@ -225,22 +241,24 @@ class PodcastModelExecutionTests(unittest.TestCase):
         }
         response = Mock(status_code=200)
         response.json.return_value = {
-            "choices": [{"message": {"content": json.dumps(resumo_payload, ensure_ascii=False)}}]
+            "choices": [
+                {"message": {"content": json.dumps(resumo_payload, ensure_ascii=False)}}
+            ]
         }
 
         with TemporaryDirectory() as tmpdir:
             roteiro = Path(tmpdir) / "sessao01.txt"
-            roteiro.write_text("Transcrição completa da sessão de teste.", encoding="utf-8")
+            roteiro.write_text(
+                "Transcrição completa da sessão de teste.", encoding="utf-8"
+            )
             storage = Mock()
             storage.getObjectIfExists.return_value = None
 
-            with patch.object(
-                geradorResumoSessao, "get_config", return_value=config
-            ), patch.object(
-                llm, "get_config", return_value=config
-            ), patch.object(
-                llm.requests, "post", return_value=response
-            ) as post:
+            with (
+                patch.object(geradorResumoSessao, "get_config", return_value=config),
+                patch.object(llm, "get_config", return_value=config),
+                patch.object(llm.requests, "post", return_value=response) as post,
+            ):
                 gerador = geradorResumoSessao.GeradorResumoSessao(
                     campanha="Crônicas de Teste",
                     narrador="Ana",
@@ -280,7 +298,9 @@ class PodcastModelExecutionTests(unittest.TestCase):
         }
         response = Mock(status_code=200)
         response.json.return_value = {
-            "choices": [{"message": {"content": json.dumps(resumo_payload, ensure_ascii=False)}}]
+            "choices": [
+                {"message": {"content": json.dumps(resumo_payload, ensure_ascii=False)}}
+            ]
         }
 
         with TemporaryDirectory() as tmpdir:
@@ -289,13 +309,11 @@ class PodcastModelExecutionTests(unittest.TestCase):
             storage = Mock()
             storage.getObjectIfExists.return_value = None
 
-            with patch.object(
-                geradorResumoSessao, "get_config", return_value=config
-            ), patch.object(
-                llm, "get_config", return_value=config
-            ), patch.object(
-                llm.requests, "post", return_value=response
-            ) as post:
+            with (
+                patch.object(geradorResumoSessao, "get_config", return_value=config),
+                patch.object(llm, "get_config", return_value=config),
+                patch.object(llm.requests, "post", return_value=response) as post,
+            ):
                 gerador = geradorResumoSessao.GeradorResumoSessao(
                     campanha="Crônicas de Teste",
                     narrador="Ana",
@@ -328,13 +346,11 @@ class PodcastModelExecutionTests(unittest.TestCase):
             storage = Mock()
             storage.getObjectIfExists.return_value = None
 
-            with patch.object(
-                geradorResumoSessao, "get_config", return_value=config
-            ), patch.object(
-                llm, "get_config", return_value=config
-            ), patch.object(
-                llm.requests, "post", return_value=response
-            ) as post:
+            with (
+                patch.object(geradorResumoSessao, "get_config", return_value=config),
+                patch.object(llm, "get_config", return_value=config),
+                patch.object(llm.requests, "post", return_value=response) as post,
+            ):
                 gerador = geradorResumoSessao.GeradorResumoSessao(
                     campanha="Crônicas de Teste",
                     narrador="Ana",
@@ -356,7 +372,9 @@ class PodcastModelExecutionTests(unittest.TestCase):
 class PodcastSlotContractTests(unittest.TestCase):
     def test_panel_renders_model_settings_slot_container(self):
         panel_text = (PODCAST_ROOT / "web" / "Panel.jsx").read_text(encoding="utf-8")
-        self.assertIn('import ModelSettingsSlot from "./ModelSettingsSlot";', panel_text)
+        self.assertIn(
+            'import ModelSettingsSlot from "./ModelSettingsSlot";', panel_text
+        )
         self.assertIn('data-slot="podcast-model-settings"', panel_text)
         self.assertIn("<ModelSettingsSlot", panel_text)
 

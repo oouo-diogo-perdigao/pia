@@ -1,4 +1,5 @@
 """Unified external model provider status, official quota, session usage, and routing helpers."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -11,7 +12,15 @@ import requests
 
 from src.settings_store import get as setting, get_store
 
-PROVIDERS_ORDER = ("codex", "agy", "openrouter", "gemini", "groq", "cloudflare", "local")
+PROVIDERS_ORDER = (
+    "codex",
+    "agy",
+    "openrouter",
+    "gemini",
+    "groq",
+    "cloudflare",
+    "local",
+)
 
 STATUS_LABELS = {
     "connected": "Conectado",
@@ -176,9 +185,27 @@ class ModelSessionTracker:
         with self._lock:
             entry = self.usage_by_provider[provider]
             entry["requests"] += 1
-            p_int = int(prompt_tokens) if isinstance(prompt_tokens, (int, float)) and not isinstance(prompt_tokens, bool) and prompt_tokens >= 0 else None
-            c_int = int(completion_tokens) if isinstance(completion_tokens, (int, float)) and not isinstance(completion_tokens, bool) and completion_tokens >= 0 else None
-            t_int = int(total_tokens) if isinstance(total_tokens, (int, float)) and not isinstance(total_tokens, bool) and total_tokens >= 0 else None
+            p_int = (
+                int(prompt_tokens)
+                if isinstance(prompt_tokens, (int, float))
+                and not isinstance(prompt_tokens, bool)
+                and prompt_tokens >= 0
+                else None
+            )
+            c_int = (
+                int(completion_tokens)
+                if isinstance(completion_tokens, (int, float))
+                and not isinstance(completion_tokens, bool)
+                and completion_tokens >= 0
+                else None
+            )
+            t_int = (
+                int(total_tokens)
+                if isinstance(total_tokens, (int, float))
+                and not isinstance(total_tokens, bool)
+                and total_tokens >= 0
+                else None
+            )
             if p_int is not None or c_int is not None or t_int is not None:
                 entry["tokens_reported"] = True
                 p_val = p_int or 0
@@ -223,7 +250,12 @@ def _read_provider_key(provider: str) -> str:
 
 def _local_host() -> str:
     from src import config
-    return (str(setting("LLM_LOCAL_API_BASE", "") or "").strip() or config.LLM_LOCAL_API_BASE or "http://localhost:11434").rstrip("/")
+
+    return (
+        str(setting("LLM_LOCAL_API_BASE", "") or "").strip()
+        or config.LLM_LOCAL_API_BASE
+        or "http://localhost:11434"
+    ).rstrip("/")
 
 
 def default_quota_for(provider: str) -> dict:
@@ -270,14 +302,18 @@ def fetch_provider_quota(provider: str, api_key: str | None = None) -> dict:
     checked_at = utc_now_iso()
     headers = {"Authorization": f"Bearer {key}"}
     try:
-        resp = requests.get("https://openrouter.ai/api/v1/credits", headers=headers, timeout=8)
+        resp = requests.get(
+            "https://openrouter.ai/api/v1/credits", headers=headers, timeout=8
+        )
         if resp.status_code == 200:
             payload = resp.json() or {}
             data = payload.get("data") if isinstance(payload, dict) else None
             if isinstance(data, dict):
                 total_credits = data.get("total_credits")
                 total_usage = data.get("total_usage")
-                if isinstance(total_credits, (int, float)) and isinstance(total_usage, (int, float)):
+                if isinstance(total_credits, (int, float)) and isinstance(
+                    total_usage, (int, float)
+                ):
                     remaining = max(0.0, float(total_credits) - float(total_usage))
                     return {
                         "quota_available": True,
@@ -301,11 +337,15 @@ def fetch_provider_quota(provider: str, api_key: str | None = None) -> dict:
                         "quota_checked_at": checked_at,
                     }
         # Fallback to /api/v1/key if /credits didn't return balance fields
-        key_resp = requests.get("https://openrouter.ai/api/v1/key", headers=headers, timeout=8)
+        key_resp = requests.get(
+            "https://openrouter.ai/api/v1/key", headers=headers, timeout=8
+        )
         if key_resp.status_code == 200:
             payload = key_resp.json() or {}
             data = payload.get("data") if isinstance(payload, dict) else None
-            if isinstance(data, dict) and isinstance(data.get("limit_remaining"), (int, float)):
+            if isinstance(data, dict) and isinstance(
+                data.get("limit_remaining"), (int, float)
+            ):
                 remaining = max(0.0, float(data["limit_remaining"]))
                 return {
                     "quota_available": True,
@@ -392,10 +432,15 @@ def verify_api_key(provider: str, api_key: str) -> tuple[bool, str]:
                 if not isinstance(body, dict) or body.get("success", True) is not False:
                     return True, ""
         if resp.status_code in (400, 401, 403):
-            return False, f"A chave foi recusada pelo {pname}. Confira se copiou a chave inteira e tente de novo."
+            return (
+                False,
+                f"A chave foi recusada pelo {pname}. Confira se copiou a chave inteira e tente de novo.",
+            )
         return False, f"{pname} retornou erro temporário (HTTP {resp.status_code})."
     except Exception as exc:
-        return False, sanitize_error(f"Não foi possível verificar a chave no {pname}: {exc}", (key,))
+        return False, sanitize_error(
+            f"Não foi possível verificar a chave no {pname}: {exc}", (key,)
+        )
 
 
 def verify_ollama(host: str | None = None) -> tuple[str, str, list[str]]:
@@ -404,32 +449,91 @@ def verify_ollama(host: str | None = None) -> tuple[str, str, list[str]]:
     try:
         resp = requests.get(f"{base}/api/tags", timeout=3)
         if resp.status_code != 200:
-            return "not_installed", f"O Ollama não respondeu em {base}. Abra o Ollama ou instale pelo site oficial.", []
+            return (
+                "not_installed",
+                f"O Ollama não respondeu em {base}. Abra o Ollama ou instale pelo site oficial.",
+                [],
+            )
         data = resp.json() if resp.content else {}
         models = []
         if isinstance(data, dict):
             for item in data.get("models", []) or []:
-                if isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"].strip():
+                if (
+                    isinstance(item, dict)
+                    and isinstance(item.get("name"), str)
+                    and item["name"].strip()
+                ):
                     models.append(item["name"].strip())
         return "connected", "", models
     except Exception:
-        return "not_installed", f"O Ollama não respondeu em {base}. Abra o Ollama ou instale pelo site oficial.", []
+        return (
+            "not_installed",
+            f"O Ollama não respondeu em {base}. Abra o Ollama ou instale pelo site oficial.",
+            [],
+        )
 
 
-def _models_for_provider(provider: str, local_models: list[str] | None = None) -> list[dict]:
+DEFAULT_PROVIDER_MODELS = {
+    "openrouter": (
+        {
+            "id": "openrouter/openrouter/auto",
+            "label": "Auto (OpenRouter)",
+            "tier": "paid",
+        },
+        {
+            "id": "openrouter/openai/gpt-4o-mini",
+            "label": "openai/gpt-4o-mini",
+            "tier": "paid",
+        },
+        {
+            "id": "openrouter/anthropic/claude-3.5-sonnet",
+            "label": "anthropic/claude-3.5-sonnet",
+            "tier": "paid",
+        },
+        {
+            "id": "openrouter/google/gemini-2.5-flash",
+            "label": "google/gemini-2.5-flash",
+            "tier": "paid",
+        },
+    ),
+    "cloudflare": (
+        {
+            "id": "cloudflare/@cf/meta/llama-3.1-8b-instruct",
+            "label": "@cf/meta/llama-3.1-8b-instruct",
+            "tier": "free",
+        },
+    ),
+    "groq": (
+        {
+            "id": "groq/openai/gpt-oss-120b",
+            "label": "openai/gpt-oss-120b",
+            "tier": "free",
+        },
+    ),
+    "local": ({"id": "ollama/qwen3:8b", "label": "qwen3:8b", "tier": "local"},),
+}
+
+
+def _models_for_provider(
+    provider: str, local_models: list[str] | None = None
+) -> list[dict]:
     if provider == "codex":
         return [{"id": "codex", "label": "Padrão da conta (Codex CLI)"}]
     if provider == "agy":
         return [{"id": "agy", "label": "Padrão da conta (Google Antigravity)"}]
 
-    from src.llm_routing import catalog
+    from src.llm_routing import GEMINI_FREE_MODELS, catalog
 
     items = []
     seen = set()
     for entry in catalog():
         if entry.provider == provider and entry.model not in seen:
             seen.add(entry.model)
-            label = entry.model.split("/", 1)[1] if entry.model.startswith(provider + "/") else entry.model
+            label = (
+                entry.model.split("/", 1)[1]
+                if entry.model.startswith(provider + "/")
+                else entry.model
+            )
             items.append({"id": entry.model, "label": label, "tier": entry.tier})
     if provider == "local" and local_models:
         for name in local_models:
@@ -437,6 +541,14 @@ def _models_for_provider(provider: str, local_models: list[str] | None = None) -
             if qualified not in seen and name not in seen:
                 seen.add(qualified)
                 items.append({"id": qualified, "label": name, "tier": "local"})
+    if not items:
+        if provider == "gemini":
+            items = [
+                {"id": f"gemini/{name}", "label": name, "tier": "free"}
+                for name in GEMINI_FREE_MODELS
+            ]
+        else:
+            items = [dict(item) for item in DEFAULT_PROVIDER_MODELS.get(provider, ())]
     return items
 
 
@@ -462,7 +574,9 @@ def build_provider_record(
 
         cli_info = agents_service.login_status(provider)
         status = cli_info.get("status", "not_installed")
-        status_detail = sanitize_error(cli_info.get("detail", "")) if cli_info.get("detail") else ""
+        status_detail = (
+            sanitize_error(cli_info.get("detail", "")) if cli_info.get("detail") else ""
+        )
         executable = cli_info.get("executable")
         configured = status == "connected"
     elif auth_type == "api_key":
@@ -512,7 +626,9 @@ def build_provider_record(
         "executable": executable,
         "login_command": meta.get("login_command"),
         "docs_url": meta["docs_url"],
-        "models": _models_for_provider(provider, local_models or tracker.local_models_cache),
+        "models": _models_for_provider(
+            provider, local_models or tracker.local_models_cache
+        ),
         "session_usage": tracker.snapshot_usage(provider),
         "provider_quota": quota,
     }
@@ -533,10 +649,14 @@ def build_status_payload(
         default_sel = {}
     default_provider = str(default_sel.get("provider", "") or "")
     default_model = str(default_sel.get("model", "") or "")
-    effective_default_label = default_model or default_provider or str(config.LLM_MODEL or "free")
+    effective_default_label = (
+        default_model or default_provider or str(config.LLM_MODEL or "free")
+    )
 
     providers = [
-        build_provider_record(pid, tracker, verify_live=verify_live, refresh_quota=refresh_quota)
+        build_provider_record(
+            pid, tracker, verify_live=verify_live, refresh_quota=refresh_quota
+        )
         for pid in PROVIDERS_ORDER
     ]
     return {
@@ -569,12 +689,17 @@ def clear_provider_key(provider: str) -> None:
     get_store().save("general", updates)
 
 
-def infer_provider_from_selector(provider: str | None, model: str | None) -> tuple[str, str]:
+def infer_provider_from_selector(
+    provider: str | None, model: str | None
+) -> tuple[str, str]:
     """Normalize (provider, model) and detect if an explicit provider was requested."""
     prov = (provider or "").strip().lower()
     mod = (model or "").strip()
 
-    if prov in ("", "default", "free", "paid", "all", "my-agent", "gemini-local") and not mod:
+    if (
+        prov in ("", "default", "free", "paid", "all", "my-agent", "gemini-local")
+        and not mod
+    ):
         return "", ""
     if not prov and mod in ("free", "paid", "all", "my-agent", "gemini-local"):
         return "", mod
@@ -584,7 +709,9 @@ def infer_provider_from_selector(provider: str | None, model: str | None) -> tup
         lowered = mod.lower()
         for pid in ("codex", "agy"):
             if lowered == pid or lowered.startswith(pid + "/"):
-                return pid, "" if lowered in (pid, f"{pid}/default") else mod.split("/", 1)[1]
+                return pid, "" if lowered in (pid, f"{pid}/default") else mod.split(
+                    "/", 1
+                )[1]
         for pid in ("openrouter", "gemini", "groq", "cloudflare"):
             if lowered == pid or lowered.startswith(pid + "/"):
                 return pid, mod
@@ -593,7 +720,9 @@ def infer_provider_from_selector(provider: str | None, model: str | None) -> tup
     return prov, mod
 
 
-def check_explicit_provider_ready(provider: str, tracker: ModelSessionTracker | None = None) -> dict:
+def check_explicit_provider_ready(
+    provider: str, tracker: ModelSessionTracker | None = None
+) -> dict:
     """Validate that an explicit provider is connected; raise RuntimeError with pt-BR message if not."""
     if provider not in PROVIDERS_ORDER:
         raise ValueError(f"Provedor desconhecido: {provider}")
@@ -604,21 +733,37 @@ def check_explicit_provider_ready(provider: str, tracker: ModelSessionTracker | 
     if status == "connected":
         return record
     if status == "not_installed":
-        detail = record.get("status_detail") or f"O {name} não está instalado neste computador."
+        detail = (
+            record.get("status_detail")
+            or f"O {name} não está instalado neste computador."
+        )
         raise RuntimeError(detail)
     if status == "login_required":
         if record["auth_type"] == "cli":
-            raise RuntimeError(f"O {name} precisa de login para responder. Conecte em Provedores de modelos.")
-        raise RuntimeError(f"O {name} precisa de uma chave configurada no Cofre da PIA para responder.")
-    detail = record.get("status_detail") or f"O {name} está com erro de autenticação. Reconecte em Provedores de modelos."
+            raise RuntimeError(
+                f"O {name} precisa de login para responder. Conecte em Provedores de modelos."
+            )
+        raise RuntimeError(
+            f"O {name} precisa de uma chave configurada no Cofre da PIA para responder."
+        )
+    detail = (
+        record.get("status_detail")
+        or f"O {name} está com erro de autenticação. Reconecte em Provedores de modelos."
+    )
     raise RuntimeError(detail)
 
 
-def extract_usage_counts(response_or_chunk) -> tuple[int | None, int | None, int | None]:
+def extract_usage_counts(
+    response_or_chunk,
+) -> tuple[int | None, int | None, int | None]:
     """Extract (prompt_tokens, completion_tokens, total_tokens) from a LiteLLM response/chunk or dict."""
     if response_or_chunk is None:
         return None, None, None
-    usage = response_or_chunk.get("usage") if isinstance(response_or_chunk, dict) else getattr(response_or_chunk, "usage", None)
+    usage = (
+        response_or_chunk.get("usage")
+        if isinstance(response_or_chunk, dict)
+        else getattr(response_or_chunk, "usage", None)
+    )
     if usage is None:
         return None, None, None
     if isinstance(usage, dict):
@@ -630,3 +775,36 @@ def extract_usage_counts(response_or_chunk) -> tuple[int | None, int | None, int
         c = getattr(usage, "completion_tokens", getattr(usage, "output_tokens", None))
         t = getattr(usage, "total_tokens", None)
     return p, c, t
+
+
+def explicit_model_candidate(expression: str | None):
+    """Build a Model candidate when an explicit supported provider/model is requested outside LLM_PROVIDERS."""
+    if not isinstance(expression, str) or not expression.strip():
+        return None
+    prov, mod = infer_provider_from_selector(None, expression)
+    if prov not in ("openrouter", "gemini", "groq", "cloudflare", "local"):
+        return None
+    from src.llm_routing import Model
+
+    if not mod or mod.lower() == prov:
+        defaults = _models_for_provider(prov)
+        if not defaults:
+            return None
+        qualified = defaults[0]["id"]
+    elif prov == "local":
+        qualified = mod if mod.startswith("ollama/") else f"ollama/{mod}"
+    else:
+        qualified = mod if mod.startswith(f"{prov}/") else f"{prov}/{mod}"
+
+    api_key_env = ""
+    meta = PROVIDER_META.get(prov, {})
+    if meta.get("auth_type") == "api_key":
+        primary = meta.get("key_name", "")
+        if primary and not str(setting(primary, "") or "").strip():
+            for fb in meta.get("fallback_keys", ()):
+                if str(setting(fb, "") or "").strip():
+                    api_key_env = fb
+                    break
+    return Model(
+        prov, qualified, "local" if prov == "local" else "paid", api_key_env=api_key_env
+    )

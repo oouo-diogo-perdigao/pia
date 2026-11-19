@@ -21,7 +21,19 @@ class GenericAgent:
         self._lock = threading.Lock()
 
     def _candidates(self, model):
-        candidates = select_models(model)
+        from ..model_session import explicit_model_candidate
+
+        try:
+            candidates = select_models(model)
+        except ValueError:
+            explicit = explicit_model_candidate(model)
+            if explicit is None:
+                raise
+            candidates = (explicit,)
+        if not candidates:
+            explicit = explicit_model_candidate(model)
+            if explicit is not None:
+                candidates = (explicit,)
         if not candidates:
             raise ValueError("O seletor LLM não selecionou nenhum modelo configurado.")
         for candidate in candidates:

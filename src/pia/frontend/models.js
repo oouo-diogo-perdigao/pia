@@ -242,7 +242,12 @@ export function resolveSelectedModel(selection, catalog) {
     ? models.find((m) => m.id === rawModel)
     : models[0] || null;
 
-  if (rawModel && models.length > 0 && !matchedModel && rawModel !== provider.id) {
+  if (
+    rawModel &&
+    models.length > 0 &&
+    !matchedModel &&
+    rawModel !== provider.id
+  ) {
     return {
       mode: "provider",
       providerId: provider.id,

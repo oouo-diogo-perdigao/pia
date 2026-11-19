@@ -1,4 +1,5 @@
 """Unit and integration tests for Demand 0002-C1 (100% mocked, no real credentials or paid calls)."""
+
 from __future__ import annotations
 
 import json
@@ -41,7 +42,9 @@ class ModelSessionAndRoutingTests(unittest.TestCase):
         backend = DesktopBackend.__new__(DesktopBackend)
         backend.notify = lambda *a, **kw: None
         backend.store = store
-        backend.resources = SimpleNamespace(manifests=lambda: [], accounts=lambda *a: [])
+        backend.resources = SimpleNamespace(
+            manifests=lambda: [], accounts=lambda *a: []
+        )
         backend.secretary = SimpleNamespace(config=lambda: {}, poll=lambda: None)
         backend.chat_lock = threading.Lock()
         backend.voice_stop = threading.Event()
@@ -50,21 +53,48 @@ class ModelSessionAndRoutingTests(unittest.TestCase):
         return svc, store, backend
 
     def test_status_lists_7_providers_in_order_and_never_leaks_secrets(self):
-        fake_vault = _FakeVaultStore({"OPENROUTER_API_KEY": "sk-or-v1-supersecret-key-9999"})
+        fake_vault = _FakeVaultStore(
+            {"OPENROUTER_API_KEY": "sk-or-v1-supersecret-key-9999"}
+        )
         with (
             TemporaryDirectory() as td,
             patch.object(model_session, "get_store", return_value=fake_vault),
-            patch.object(model_session, "setting", side_effect=lambda k, d="": fake_vault.data.get(k, d)),
-            patch.object(agents_service, "login_status", return_value={"status": "login_required", "executable": None, "detail": ""}),
-            patch.object(model_session, "verify_ollama", return_value=("not_installed", "O Ollama não respondeu em http://localhost:11434. Abra o Ollama ou instale pelo site oficial.", [])),
+            patch.object(
+                model_session,
+                "setting",
+                side_effect=lambda k, d="": fake_vault.data.get(k, d),
+            ),
+            patch.object(
+                agents_service,
+                "login_status",
+                return_value={
+                    "status": "login_required",
+                    "executable": None,
+                    "detail": "",
+                },
+            ),
+            patch.object(
+                model_session,
+                "verify_ollama",
+                return_value=(
+                    "not_installed",
+                    "O Ollama não respondeu em http://localhost:11434. Abra o Ollama ou instale pelo site oficial.",
+                    [],
+                ),
+            ),
         ):
             svc, _, _ = self._make_service(Path(td))
             payload = svc._dispatch("GET", "/models/status", {}, {})
             ids = [p["id"] for p in payload["providers"]]
-            self.assertEqual(ids, ["codex", "agy", "openrouter", "gemini", "groq", "cloudflare", "local"])
+            self.assertEqual(
+                ids,
+                ["codex", "agy", "openrouter", "gemini", "groq", "cloudflare", "local"],
+            )
             serialized = json.dumps(payload, ensure_ascii=False)
             self.assertNotIn("sk-or-v1-supersecret-key-9999", serialized)
-            openrouter = next(p for p in payload["providers"] if p["id"] == "openrouter")
+            openrouter = next(
+                p for p in payload["providers"] if p["id"] == "openrouter"
+            )
             self.assertTrue(openrouter["configured"])
             self.assertEqual(openrouter["status"], "connected")
             local = next(p for p in payload["providers"] if p["id"] == "local")
@@ -78,7 +108,9 @@ class ModelSessionAndRoutingTests(unittest.TestCase):
             resp = MagicMock()
             resp.status_code = 200
             if url.endswith("/credits"):
-                resp.json.return_value = {"data": {"total_credits": 20.0, "total_usage": 7.651}}
+                resp.json.return_value = {
+                    "data": {"total_credits": 20.0, "total_usage": 7.651}
+                }
             else:
                 resp.json.return_value = {"data": {}}
             return resp
@@ -86,10 +118,26 @@ class ModelSessionAndRoutingTests(unittest.TestCase):
         with (
             TemporaryDirectory() as td,
             patch.object(model_session, "get_store", return_value=fake_vault),
-            patch.object(model_session, "setting", side_effect=lambda k, d="": fake_vault.data.get(k, d)),
+            patch.object(
+                model_session,
+                "setting",
+                side_effect=lambda k, d="": fake_vault.data.get(k, d),
+            ),
             patch.object(model_session.requests, "get", side_effect=fake_get),
-            patch.object(agents_service, "login_status", return_value={"status": "not_installed", "executable": None, "detail": ""}),
-            patch.object(model_session, "verify_ollama", return_value=("not_installed", "offline", [])),
+            patch.object(
+                agents_service,
+                "login_status",
+                return_value={
+                    "status": "not_installed",
+                    "executable": None,
+                    "detail": "",
+                },
+            ),
+            patch.object(
+                model_session,
+                "verify_ollama",
+                return_value=("not_installed", "offline", []),
+            ),
         ):
             svc, _, _ = self._make_service(Path(td))
             res = svc._dispatch("POST", "/models/quota", {"provider": "openrouter"}, {})
@@ -99,7 +147,9 @@ class ModelSessionAndRoutingTests(unittest.TestCase):
             self.assertAlmostEqual(quota["quota_remaining"], 12.349, places=3)
             # Truncated to 2 decimals without rounding up: 12.349 -> 12,34
             self.assertEqual(quota["quota_label"], "US$ 12,34 disponíveis")
-            self.assertRegex(quota["quota_checked_at"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+            self.assertRegex(
+                quota["quota_checked_at"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
+            )
 
             # Other providers must never invent quota
             for pid in ("codex", "agy", "gemini", "groq", "cloudflare", "local"):
@@ -107,19 +157,31 @@ class ModelSessionAndRoutingTests(unittest.TestCase):
                 self.assertFalse(q["quota_available"])
                 self.assertEqual(q["quota_status"], "unavailable")
                 self.assertIsNone(q["quota_checked_at"])
-                self.assertTrue(q["quota_label"].startswith("Saldo não informado pelo provedor"))
+                self.assertTrue(
+                    q["quota_label"].startswith("Saldo não informado pelo provedor")
+                )
 
     def test_openrouter_quota_error_returns_literal_unavailable_label(self):
         fake_vault = _FakeVaultStore({"OPENROUTER_API_KEY": "sk-or-test-123456"})
         with (
-            patch.object(model_session, "setting", side_effect=lambda k, d="": fake_vault.data.get(k, d)),
-            patch.object(model_session.requests, "get", side_effect=requests.RequestException("network down")),
+            patch.object(
+                model_session,
+                "setting",
+                side_effect=lambda k, d="": fake_vault.data.get(k, d),
+            ),
+            patch.object(
+                model_session.requests,
+                "get",
+                side_effect=requests.RequestException("network down"),
+            ),
         ):
             q = model_session.fetch_provider_quota("openrouter")
             self.assertFalse(q["quota_available"])
             self.assertEqual(q["quota_status"], "error")
             self.assertEqual(q["quota_label"], "Saldo não informado pelo provedor")
-            self.assertRegex(q["quota_checked_at"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+            self.assertRegex(
+                q["quota_checked_at"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
+            )
 
     def test_connect_and_disconnect_api_key_lightweight_ux04(self):
         fake_vault = _FakeVaultStore()
@@ -135,18 +197,44 @@ class ModelSessionAndRoutingTests(unittest.TestCase):
         with (
             TemporaryDirectory() as td,
             patch.object(model_session, "get_store", return_value=fake_vault),
-            patch.object(model_session, "setting", side_effect=lambda k, d="": fake_vault.data.get(k, d)),
+            patch.object(
+                model_session,
+                "setting",
+                side_effect=lambda k, d="": fake_vault.data.get(k, d),
+            ),
             patch.object(model_session.requests, "get", side_effect=fake_get),
-            patch.object(agents_service, "login_status", return_value={"status": "not_installed", "executable": None, "detail": ""}),
-            patch.object(model_session, "verify_ollama", return_value=("not_installed", "offline", [])),
+            patch.object(
+                agents_service,
+                "login_status",
+                return_value={
+                    "status": "not_installed",
+                    "executable": None,
+                    "detail": "",
+                },
+            ),
+            patch.object(
+                model_session,
+                "verify_ollama",
+                return_value=("not_installed", "offline", []),
+            ),
         ):
             svc, _, _ = self._make_service(Path(td))
             with self.assertRaises(ValueError) as bad:
-                svc._dispatch("POST", "/models/connect", {"provider": "groq", "api_key": "gsk_wrong_secret"}, {})
+                svc._dispatch(
+                    "POST",
+                    "/models/connect",
+                    {"provider": "groq", "api_key": "gsk_wrong_secret"},
+                    {},
+                )
             self.assertNotIn("gsk_wrong_secret", str(bad.exception))
             self.assertNotIn("GROQ_API_KEY", fake_vault.data)
 
-            ok = svc._dispatch("POST", "/models/connect", {"provider": "groq", "api_key": "gsk_valid_key"}, {})
+            ok = svc._dispatch(
+                "POST",
+                "/models/connect",
+                {"provider": "groq", "api_key": "gsk_valid_key"},
+                {},
+            )
             self.assertTrue(ok["ok"])
             self.assertEqual(ok["provider"]["status"], "connected")
             self.assertEqual(fake_vault.data["GROQ_API_KEY"], "gsk_valid_key")
@@ -158,8 +246,20 @@ class ModelSessionAndRoutingTests(unittest.TestCase):
     def test_session_usage_reset_t4_preserves_sqlite_history(self):
         with (
             TemporaryDirectory() as td,
-            patch.object(agents_service, "login_status", return_value={"status": "not_installed", "executable": None, "detail": ""}),
-            patch.object(model_session, "verify_ollama", return_value=("not_installed", "offline", [])),
+            patch.object(
+                agents_service,
+                "login_status",
+                return_value={
+                    "status": "not_installed",
+                    "executable": None,
+                    "detail": "",
+                },
+            ),
+            patch.object(
+                model_session,
+                "verify_ollama",
+                return_value=("not_installed", "offline", []),
+            ),
         ):
             svc, store, _ = self._make_service(Path(td))
             chat_id = store.new_chat()
@@ -209,8 +309,16 @@ class ModelSessionAndRoutingTests(unittest.TestCase):
                 if job.status == "running":
                     job.changed.wait(2)
             self.assertEqual(job.status, "done")
-            self.assertTrue(any(e.get("type") == "done" and e.get("cancelled") is True for e in job.events))
-            self.assertEqual(store.messages(chat_id), [{"role": "user", "content": "Primeira pergunta"}])
+            self.assertTrue(
+                any(
+                    e.get("type") == "done" and e.get("cancelled") is True
+                    for e in job.events
+                )
+            )
+            self.assertEqual(
+                store.messages(chat_id),
+                [{"role": "user", "content": "Primeira pergunta"}],
+            )
 
             # Case 2: cancel after partial delta -> single assistant with partial text
             partial_sent = threading.Event()
@@ -231,7 +339,12 @@ class ModelSessionAndRoutingTests(unittest.TestCase):
                 if job2.status == "running":
                     job2.changed.wait(2)
             self.assertEqual(job2.status, "done")
-            self.assertTrue(any(e.get("type") == "done" and e.get("cancelled") is True for e in job2.events))
+            self.assertTrue(
+                any(
+                    e.get("type") == "done" and e.get("cancelled") is True
+                    for e in job2.events
+                )
+            )
             msgs = store.messages(chat_id)
             self.assertEqual(
                 msgs,
@@ -246,14 +359,29 @@ class ModelSessionAndRoutingTests(unittest.TestCase):
     def test_explicit_provider_no_silent_fallback_rn0002_08(self):
         with (
             TemporaryDirectory() as td,
-            patch.object(agents_service, "login_status", return_value={"status": "login_required", "executable": "codex.exe", "detail": ""}),
+            patch.object(
+                agents_service,
+                "login_status",
+                return_value={
+                    "status": "login_required",
+                    "executable": "codex.exe",
+                    "detail": "",
+                },
+            ),
             patch.object(agents_service, "ask") as mock_ask,
         ):
             svc, store, backend = self._make_service(Path(td))
             chat_id = store.new_chat()
-            svc._dispatch("POST", "/chat/model", {"chat": chat_id, "provider": "codex", "model": "codex"}, {})
+            svc._dispatch(
+                "POST",
+                "/chat/model",
+                {"chat": chat_id, "provider": "codex", "model": "codex"},
+                {},
+            )
             msgs_res = svc._dispatch("GET", "/chat/messages", {}, {"chat": [chat_id]})
-            self.assertEqual(msgs_res["model_selection"], {"provider": "codex", "model": "codex"})
+            self.assertEqual(
+                msgs_res["model_selection"], {"provider": "codex", "model": "codex"}
+            )
 
             with self.assertRaisesRegex(RuntimeError, "login"):
                 backend.reply(chat_id, "Olá")
@@ -279,7 +407,9 @@ class ModelSessionAndRoutingTests(unittest.TestCase):
         ):
             threading.Thread(target=set_cancel_soon, daemon=True).start()
             with self.assertRaises(InterruptedError):
-                agents_service.ask("codex", "Teste cancelamento", cancel_event=cancel_ev)
+                agents_service.ask(
+                    "codex", "Teste cancelamento", cancel_event=cancel_ev
+                )
             term_mock.assert_called_once_with(fake_proc)
 
     def test_retrocompatibility_integrations_agents_status(self):
@@ -291,6 +421,70 @@ class ModelSessionAndRoutingTests(unittest.TestCase):
             res = svc._dispatch("GET", "/integrations/agents/status", {}, {})
             self.assertEqual(set(res.keys()), {"codex", "agy"})
             self.assertTrue(res["codex"]["available"])
+
+    def test_default_models_and_explicit_candidate_outside_llm_providers(self):
+        fake_vault = _FakeVaultStore(
+            {
+                "OPENROUTER_API_KEY": "sk-or-test-explicit",
+                "CLOUDFLARE_API_TOKEN": "cf-test-token",
+            }
+        )
+        with (
+            TemporaryDirectory() as td,
+            patch.object(model_session, "get_store", return_value=fake_vault),
+            patch.object(
+                model_session,
+                "setting",
+                side_effect=lambda k, d="": fake_vault.data.get(k, d),
+            ),
+            patch(
+                "src.llm_routing.setting",
+                side_effect=lambda k, d="": fake_vault.data.get(k, d),
+            ),
+            patch.object(
+                agents_service,
+                "login_status",
+                return_value={
+                    "status": "not_installed",
+                    "executable": None,
+                    "detail": "",
+                },
+            ),
+            patch.object(
+                model_session,
+                "verify_ollama",
+                return_value=("not_installed", "offline", []),
+            ),
+        ):
+            svc, _, _ = self._make_service(Path(td))
+            payload = svc._dispatch("GET", "/models/status", {}, {})
+            openrouter = next(
+                p for p in payload["providers"] if p["id"] == "openrouter"
+            )
+            cloudflare = next(
+                p for p in payload["providers"] if p["id"] == "cloudflare"
+            )
+            self.assertGreater(len(openrouter["models"]), 0)
+            self.assertGreater(len(cloudflare["models"]), 0)
+
+            candidate = model_session.explicit_model_candidate(
+                "openrouter/openai/gpt-4o-mini"
+            )
+            self.assertIsNotNone(candidate)
+            self.assertEqual(candidate.provider, "openrouter")
+            self.assertEqual(candidate.model, "openrouter/openai/gpt-4o-mini")
+            self.assertEqual(
+                candidate.params(),
+                {
+                    "model": "openrouter/openai/gpt-4o-mini",
+                    "api_key": "sk-or-test-explicit",
+                },
+            )
+
+            cf_candidate = model_session.explicit_model_candidate("cloudflare")
+            self.assertIsNotNone(cf_candidate)
+            self.assertEqual(cf_candidate.provider, "cloudflare")
+            self.assertEqual(cf_candidate.params()["api_key"], "cf-test-token")
 
 
 if __name__ == "__main__":

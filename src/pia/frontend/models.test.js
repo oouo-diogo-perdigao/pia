@@ -103,8 +103,10 @@ test("formatSessionUsage formats pt-BR counts, thousands, zero and un-reported t
   });
   assert.equal(noTokens.summary, "2 req · tokens não informados pelo provedor");
   assert.equal(
-    formatSessionUsage({ requests: 2, tokens_reported: false }, { compact: true })
-      .summary,
+    formatSessionUsage(
+      { requests: 2, tokens_reported: false },
+      { compact: true },
+    ).summary,
     "Sessão: 2 req (tokens não informados pelo provedor)",
   );
 });
@@ -141,7 +143,10 @@ test("resolveSelectedModel and buildSelectorOptions handle Chat, Podcast, automa
   assert.equal(def.available, true);
   assert.equal(def.modelLabel, "Padrão da PIA (gemini-2.5-flash)");
 
-  const auto = resolveSelectedModel({ llm_provider: "free", llm_model: "" }, catalog);
+  const auto = resolveSelectedModel(
+    { llm_provider: "free", llm_model: "" },
+    catalog,
+  );
   assert.equal(auto.mode, "automatic");
   assert.equal(auto.available, true);
   assert.equal(auto.modelLabel, "Gratuito (free)");

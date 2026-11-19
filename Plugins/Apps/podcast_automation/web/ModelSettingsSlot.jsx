@@ -53,7 +53,9 @@ function statusActionLabel(status, provider) {
 
 function statusBlockingPhrase(status, provider) {
   if (status === "login_required") {
-    return provider?.auth_type === "cli" ? "sem login" : "sem chave configurada";
+    return provider?.auth_type === "cli"
+      ? "sem login"
+      : "sem chave configurada";
   }
   if (status === "not_installed") {
     return "não instalado";
@@ -239,18 +241,14 @@ export default function ModelSettingsSlot({
   }, [loadCatalog]);
 
   const resolved = catalog
-    ? resolveSelectedModel(
-        { provider: llmProvider, model: llmModel },
-        catalog,
-      )
+    ? resolveSelectedModel({ provider: llmProvider, model: llmModel }, catalog)
     : null;
 
-  const { data: selectData, valueMap, currentKey } = buildSelectData(
-    catalog,
-    llmProvider,
-    llmModel,
-    resolved,
-  );
+  const {
+    data: selectData,
+    valueMap,
+    currentKey,
+  } = buildSelectData(catalog, llmProvider, llmModel, resolved);
 
   const isDefaultSelection = !llmProvider && !llmModel;
   const effectiveProvider = resolved?.provider || null;
@@ -272,9 +270,7 @@ export default function ModelSettingsSlot({
   const isUnavailableModel =
     !!catalog && !isDefaultSelection && resolved?.available === false;
   const isProviderNotReady =
-    !!effectiveProvider &&
-    effectiveStatus &&
-    effectiveStatus !== "connected";
+    !!effectiveProvider && effectiveStatus && effectiveStatus !== "connected";
 
   function openDrawer(providerId = null, event = null) {
     if (event?.currentTarget) {
@@ -389,7 +385,8 @@ export default function ModelSettingsSlot({
                 <Group justify="space-between" align="center" wrap="wrap">
                   <Text size="sm">
                     O resumo não será gerado enquanto {effectiveProvider.name}{" "}
-                    estiver {statusBlockingPhrase(effectiveStatus, effectiveProvider)}.
+                    estiver{" "}
+                    {statusBlockingPhrase(effectiveStatus, effectiveProvider)}.
                   </Text>
                   <Button
                     size="xs"
@@ -462,7 +459,9 @@ export default function ModelSettingsSlot({
             size="xs"
             variant="subtle"
             leftSection={<Settings size={14} />}
-            onClick={(event) => openDrawer(effectiveProvider?.id || null, event)}
+            onClick={(event) =>
+              openDrawer(effectiveProvider?.id || null, event)
+            }
           >
             Gerenciar provedores
           </Button>
