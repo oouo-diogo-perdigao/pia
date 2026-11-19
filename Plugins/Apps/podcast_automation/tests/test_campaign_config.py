@@ -474,7 +474,9 @@ class TimezoneAndDecisionD1Tests(unittest.TestCase):
         updater = RssTranscriptionUpdater(store)
         episode = updater.build_episode(
             {"Key": "campaigns/mesa/2026-04-05 - Sessao 1.mp3", "Size": 1024},
-            {"author": "Autor", "explicit": False},
+            image_map={},
+            cover=None,
+            details={"author": "Autor", "explicit": False},
         )
         self.assertEqual(
             episode["date"],
