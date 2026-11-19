@@ -1095,6 +1095,11 @@ export default function Workspace({ standalone = null }) {
                       ...(route.app === "podcast_automation"
                         ? [["campaigns", "Campanhas"]]
                         : []),
+                      ...(["podcast_automation", "screenshots"].includes(
+                        route.app,
+                      )
+                        ? [["settings", "Configurações"]]
+                        : []),
                       ["about", "Sobre"],
                     ].map(([sub, label]) => (
                       <Nav
@@ -1174,10 +1179,10 @@ export default function Workspace({ standalone = null }) {
                     icon={Settings}
                     label={t("Configurações do aplicativo")}
                     onClick={() =>
-                      ["podcast_automation", "music"].includes(route.app)
+                      route.app === "music"
                         ? navigate({
                             view: "settings",
-                            section: "Apps/" + route.app,
+                            section: "Apps/music",
                           })
                         : route.app === "object_storage"
                           ? openServerConnector("object_storage")
