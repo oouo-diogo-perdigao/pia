@@ -209,6 +209,27 @@ class PodcastModelExecutionTests(unittest.TestCase):
         self.assertEqual(llm.resolve_model("pia-default", "free", ""), "free")
         self.assertEqual(llm.resolve_model("pia-default", "paid", ""), "paid")
 
+    def test_pia_client_sends_explicit_ollama_selector(self):
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            "choices": [{"message": {"content": '{"resumo": "Resumo fictício."}'}}]
+        }
+        for model in ("ollama/qwen3:8b", "qwen3:8b", "local/ollama/qwen3:8b"):
+            with self.subTest(model=model):
+                config = canonical_t2_fixture()
+                config["integrations"].update(llm_provider="local", llm_model=model)
+                with (
+                    patch.object(llm, "get_config", return_value=config),
+                    patch.object(llm.requests, "post", return_value=response) as post,
+                ):
+                    result = llm.PiaClient().complete_json(
+                        "Transcrição fictícia", ("resumo",)
+                    )
+                self.assertEqual(result, {"resumo": "Resumo fictício."})
+                self.assertEqual(
+                    post.call_args.kwargs["json"]["model"], "ollama/qwen3:8b"
+                )
+
     def test_pia_client_uses_configured_provider_and_sanitizes_errors(self):
         config = canonical_t2_fixture()
         config["integrations"]["llm_provider"] = "codex"
