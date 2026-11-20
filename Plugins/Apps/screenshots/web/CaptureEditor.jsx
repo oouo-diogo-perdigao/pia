@@ -5,22 +5,27 @@ import { report } from "../../../../src/pia/frontend/api";
 // pixel operations imperative, without routing back into the conversation UI.
 export default function CaptureEditor() {
   useEffect(() => {
-    const style = document.createElement("link");
-    style.rel = "stylesheet";
-    style.href = "/apps/screenshots/capture.css";
-    const loaded = new Promise((resolve, reject) => {
-      style.onload = resolve;
-      style.onerror = () =>
-        reject(Error("Não foi possível carregar o editor de captura."));
-    });
-    document.head.append(style);
+    let addedStyle = null;
+    if (!document.querySelector('link[href="/apps/screenshots/capture.css"]')) {
+      const style = document.createElement("link");
+      style.rel = "stylesheet";
+      style.href = "/apps/screenshots/capture.css";
+      document.head.append(style);
+      addedStyle = style;
+    }
     const engine = "/apps/screenshots/capture.js";
-    loaded.then(() => import(/* @vite-ignore */ engine)).catch(report);
-    return () => style.remove();
+    import(/* @vite-ignore */ engine).catch(report);
+    return () => {
+      if (addedStyle) addedStyle.remove();
+    };
   }, []);
   return (
     <>
-      <aside id="toolbar">
+      <aside
+        id="toolbar"
+        role="toolbar"
+        aria-label="Ferramentas da captura"
+      >
         <Group gap="xs">
           <Button id="free" size="xs">
             Mão livre
@@ -33,6 +38,7 @@ export default function CaptureEditor() {
             id="ink"
             defaultValue="#ff4278"
             title="Cor da anotação"
+            aria-label="Cor da anotação"
           />
           <Text id="ink-size" size="xs">
             3 px
@@ -48,12 +54,18 @@ export default function CaptureEditor() {
           </Button>
         </Group>
       </aside>
+      <div className="capture-vignette" aria-hidden="true" />
+      <div className="capture-frame" aria-hidden="true" />
       <div id="capture-sparkles" aria-hidden="true" />
       <div className="capture-mode-badge" aria-hidden="true">
-        ✦ Captura PIA · Esc para sair
+        ❄ Captura congelada · Arraste para recortar · Esc para cancelar
       </div>
       <div id="stage">
-        <canvas id="canvas" />
+        <canvas
+          id="canvas"
+          tabIndex={-1}
+          aria-label="Captura congelada da tela. Use o mouse para recortar ou anotar."
+        />
         <aside id="reminder">
           Esquerdo: selecionar · Ctrl: retângulo
           <br />
@@ -62,6 +74,23 @@ export default function CaptureEditor() {
           Enter / Espaço: tela inteira · Esc: cancelar
         </aside>
       </div>
+      <div id="capture-error" hidden>
+        <div className="capture-error-card" role="alert">
+          <p id="capture-error-text">
+            Não foi possível abrir a captura. Feche e tente de novo.
+          </p>
+          <Button id="capture-error-close" size="xs">
+            Fechar · Esc
+          </Button>
+        </div>
+      </div>
+      <div
+        id="capture-status"
+        role="status"
+        aria-live="polite"
+        className="sr-only"
+      />
+      <div id="capture-alert" role="alert" className="sr-only" />
       <div hidden>
         <input id="title" />
         <input id="comment" />
@@ -74,7 +103,9 @@ export default function CaptureEditor() {
       </div>
       <footer>
         <div id="readout" />
-        <span id="notice">Carregando captura…</span>
+        <span id="notice" hidden>
+          Carregando captura…
+        </span>
         <label>
           <input type="checkbox" id="bgr" />
           Copiar cor em BBGGRR

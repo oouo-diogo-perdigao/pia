@@ -1,13 +1,15 @@
 """Podcast's web API. The PIA host only discovers and dispatches app actions."""
 
+import copy
 import json
+import math
 from pathlib import Path
+import re
 import secrets
-import sys
 import threading
 from src.pia.service import Job
 from src.resource_plugins import save_json
-from src.settings_store import document, save_document, values
+from src.settings_store import document, get_store, save_document, values
 from src.user_paths import user_path
 from .pipeline import initial, apply
 from . import power
@@ -29,14 +31,465 @@ _latest = None
 _tasks = {}
 _lock = threading.Lock()
 
+_APP_SETTINGS_DEFAULTS = {
+    "POLL_INTERVAL_SECONDS": 600,
+    "DRIVE_PROCESS": True,
+    "LOCAL_DRIVE_FOLDER": "data/local-drive",
+    "PUBLICAR_DIRETO": False,
+    "OWNER_EMAIL": "",
+    "TRANSCRIPTS_FILE": "transcripts.html",
+    "SKIP_CLOSED": True,
+    "FEED_CACHE_DIR": "data/cache/feeds",
+    "FEED_FORCE_REBUILD": False,
+}
+_COMPUTED_CONFIG_KEYS = ("app_settings", "app_defaults", "timezone")
+_MERGE_OBJECT_KEYS = ("publication", "processing", "audio", "integrations", "outputs")
+_REPLACE_OBJECT_KEYS = ("nomes_reais", "discord_users", "campaign_details")
+_PROCESSING_INT_KEYS = (
+    "minimum_session_seconds",
+    "duplicate_max_bytes",
+    "duplicate_max_seconds",
+)
+_AUDIO_NUMERIC_KEYS = (
+    "silence_threshold_db",
+    "minimum_silence_seconds",
+    "keep_silence_seconds",
+    "fade_seconds",
+    "compressor_threshold_db",
+    "compressor_ratio",
+    "compressor_attack_ms",
+    "compressor_release_ms",
+    "loudness_lufs",
+    "loudness_range",
+    "true_peak_db",
+)
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_LANG_RE = re.compile(r"^[a-z]{2}(?:-[A-Z]{2})?$")
+_URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 
-def _clear_config_cache():
-    settings_mod = sys.modules.get("podcast_automation.settings")
-    get_cfg = (
-        getattr(settings_mod, "get_config", None) if settings_mod is not None else None
-    )
-    if hasattr(get_cfg, "cache_clear"):
-        get_cfg.cache_clear()
+
+def _settings_module():
+    import sys
+
+    if "podcast_automation.settings" in sys.modules:
+        return sys.modules["podcast_automation.settings"]
+    try:
+        from podcast_automation import settings as mod
+
+        return mod
+    except ImportError:
+        from .src.podcast_automation import settings as mod
+
+        return mod
+
+
+def _load_example_config() -> dict:
+    candidate = ROOT / "docs/examples/config.example.json"
+    if not candidate.is_file():
+        candidate = Path(__file__).resolve().parent / "docs/examples/config.example.json"
+    return json.loads(candidate.read_text(encoding="utf-8"))
+
+
+def _load_campaign_document() -> dict:
+    value = document("Apps/podcast_automation/campaigns")
+    if value is not None:
+        return copy.deepcopy(value)
+    return _load_example_config()
+
+
+def _typed_app_settings() -> dict:
+    raw = values("Apps/podcast_automation")
+    result = {}
+    for key, default in _APP_SETTINGS_DEFAULTS.items():
+        val = raw.get(key)
+        if isinstance(default, bool):
+            result[key] = (
+                default
+                if val is None or val == ""
+                else str(val).strip().lower() in ("true", "1")
+            )
+        elif isinstance(default, int):
+            try:
+                result[key] = int(val) if val not in (None, "") else default
+            except (TypeError, ValueError):
+                result[key] = default
+        else:
+            result[key] = str(val) if val is not None else default
+    return result
+
+
+def _app_defaults() -> dict:
+    example = _load_example_config()
+    return {
+        **_APP_SETTINGS_DEFAULTS,
+        "audio": copy.deepcopy(example.get("audio", {})),
+        "processing": copy.deepcopy(example.get("processing", {})),
+        "publication": copy.deepcopy(example.get("publication", {})),
+    }
+
+
+def _ensure_json_safe(value, label: str = "Valor"):
+    try:
+        json.dumps(value, allow_nan=False)
+    except (TypeError, ValueError):
+        raise ValueError(f"{label} contém tipo não suportado.") from None
+
+
+def _parse_bool(value, message: str = "Preferência inválida.") -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in ("true", "1"):
+            return True
+        if lowered in ("false", "0"):
+            return False
+    raise ValueError(message)
+
+
+def _parse_int(value, message: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(message)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if re.fullmatch(r"-?\d+", text):
+            return int(text)
+    raise ValueError(message)
+
+
+def _parse_number(value, message: str) -> float | int:
+    if isinstance(value, bool):
+        raise ValueError(message)
+    if isinstance(value, (int, float)):
+        if not math.isfinite(value):
+            raise ValueError(message)
+        return value
+    if isinstance(value, str):
+        text = value.strip().replace(",", ".")
+        if not text:
+            raise ValueError(message)
+        try:
+            parsed = float(text)
+        except ValueError:
+            raise ValueError(message) from None
+        if not math.isfinite(parsed):
+            raise ValueError(message)
+        return parsed
+    raise ValueError(message)
+
+
+def _validate_integrations(integrations: dict) -> dict:
+    if not isinstance(integrations, dict):
+        raise ValueError("Integrações inválidas.")
+    cleaned = {}
+    for key, value in integrations.items():
+        if key == "discord_channels":
+            if not isinstance(value, list) or any(
+                not isinstance(v, str) or not v.isdigit() for v in value
+            ):
+                raise ValueError("Canais Discord inválidos.")
+            cleaned[key] = list(value)
+        elif key == "taverns_channels":
+            from Plugins.Connectors.taverns.service import destination_ids
+
+            if not isinstance(value, list):
+                raise ValueError("Canais Tav.gg inválidos.")
+            for destination in value:
+                destination_ids(destination)
+            cleaned[key] = list(value)
+        elif key in ("announce", "discord_notify", "taverns_notify"):
+            if not isinstance(value, bool):
+                raise ValueError("Preferência inválida.")
+            cleaned[key] = value
+        elif key in ("llm_provider", "llm_model"):
+            label = "Provedor de modelo" if key == "llm_provider" else "Modelo"
+            if not isinstance(value, str):
+                raise ValueError(f"{label} inválido.")
+            selection = value.strip()
+            if key == "llm_provider" and selection and selection not in SUPPORTED_LLM_PROVIDERS:
+                raise ValueError("Provedor de modelo inválido.")
+            cleaned[key] = selection
+        elif key in (
+            "google_account",
+            "google_folder",
+            "google_folder_name",
+            "google_folder_path",
+            "storage_account",
+            "storage_bucket",
+            "discord_channel",
+        ):
+            if not isinstance(value, str):
+                raise ValueError("Integração inválida.")
+            cleaned[key] = value
+        else:
+            _ensure_json_safe(value, f"Integração {key}")
+            cleaned[key] = copy.deepcopy(value)
+    return cleaned
+
+
+def _validate_outputs(outputs: dict) -> dict:
+    if (
+        not isinstance(outputs, dict)
+        or set(outputs) - {"mp3", "resumo.json", "srt", "vtt", "txt"}
+        or any(not isinstance(v, bool) for v in outputs.values())
+    ):
+        raise ValueError("Formatos de saída inválidos.")
+    return dict(outputs)
+
+
+def _validate_app_settings(app_settings: dict) -> dict:
+    if not isinstance(app_settings, dict):
+        raise ValueError("Configurações do aplicativo inválidas.")
+    serialized = {}
+    for key, value in app_settings.items():
+        if key == "TZ":
+            continue
+        if key not in _APP_SETTINGS_DEFAULTS:
+            raise ValueError(f"Configuração desconhecida: {key}.")
+        default = _APP_SETTINGS_DEFAULTS[key]
+        if key == "POLL_INTERVAL_SECONDS":
+            num = _parse_int(
+                value, "Informe um número inteiro de segundos, a partir de 1."
+            )
+            if num < 1:
+                raise ValueError(
+                    "Informe um número inteiro de segundos, a partir de 1."
+                )
+            serialized[key] = str(num)
+        elif key in ("LOCAL_DRIVE_FOLDER", "FEED_CACHE_DIR"):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError("Informe uma pasta.")
+            serialized[key] = value.strip()
+        elif key == "OWNER_EMAIL":
+            if not isinstance(value, str):
+                raise ValueError(
+                    "Informe um e-mail válido, como nome@dominio.com, ou deixe em branco."
+                )
+            text = value.strip()
+            if text and not _EMAIL_RE.fullmatch(text):
+                raise ValueError(
+                    "Informe um e-mail válido, como nome@dominio.com, ou deixe em branco."
+                )
+            serialized[key] = text
+        elif key == "TRANSCRIPTS_FILE":
+            if not isinstance(value, str):
+                raise ValueError(
+                    "Informe o nome de um arquivo .html, como transcripts.html."
+                )
+            text = value.strip()
+            if not text or not text.lower().endswith(".html") or len(text) <= 5:
+                raise ValueError(
+                    "Informe o nome de um arquivo .html, como transcripts.html."
+                )
+            serialized[key] = text
+        elif isinstance(default, bool):
+            flag = _parse_bool(value, f"{key} deve ser verdadeiro ou falso.")
+            serialized[key] = "true" if flag else "false"
+    return serialized
+
+
+def _validate_publication(publication: dict) -> dict:
+    if not isinstance(publication, dict):
+        raise ValueError("Configuração de publicação inválida.")
+    cleaned = {}
+    for key, value in publication.items():
+        if key == "website":
+            if not isinstance(value, str):
+                raise ValueError(
+                    "Informe um endereço que comece com https:// ou http://."
+                )
+            text = value.strip()
+            if text and not _URL_RE.match(text):
+                raise ValueError(
+                    "Informe um endereço que comece com https:// ou http://."
+                )
+            cleaned[key] = text
+        elif key == "language":
+            if not isinstance(value, str) or not _LANG_RE.fullmatch(value.strip()):
+                raise ValueError("Use um código de idioma, como pt-BR.")
+            cleaned[key] = value.strip()
+        else:
+            _ensure_json_safe(value, f"publication.{key}")
+            cleaned[key] = copy.deepcopy(value)
+    return cleaned
+
+
+def _validate_processing(processing: dict) -> dict:
+    if not isinstance(processing, dict):
+        raise ValueError("Configuração de processamento inválida.")
+    cleaned = {}
+    for key, value in processing.items():
+        if key in _PROCESSING_INT_KEYS:
+            num = _parse_int(
+                value, "Informe um número inteiro igual ou maior que zero."
+            )
+            if num < 0:
+                raise ValueError(
+                    "Informe um número inteiro igual ou maior que zero."
+                )
+            cleaned[key] = num
+        else:
+            _ensure_json_safe(value, f"processing.{key}")
+            cleaned[key] = copy.deepcopy(value)
+    return cleaned
+
+
+def _validate_audio(audio: dict) -> dict:
+    if not isinstance(audio, dict):
+        raise ValueError("Configuração de áudio inválida.")
+    cleaned = {}
+    for key, value in audio.items():
+        if key == "remove_silence":
+            cleaned[key] = _parse_bool(
+                value, "remove_silence deve ser verdadeiro ou falso."
+            )
+        elif key in _AUDIO_NUMERIC_KEYS:
+            num = _parse_number(
+                value, "Informe um número. Use vírgula ou ponto para decimais."
+            )
+            if key == "compressor_ratio" and num < 1:
+                raise ValueError("A razão do compressor deve ser 1 ou maior.")
+            if key in ("compressor_attack_ms", "compressor_release_ms") and num <= 0:
+                raise ValueError("Informe um tempo maior que zero.")
+            cleaned[key] = num
+        else:
+            _ensure_json_safe(value, f"audio.{key}")
+            cleaned[key] = copy.deepcopy(value)
+    return cleaned
+
+
+def _validate_nomes_reais(nomes_reais: dict) -> dict:
+    if not isinstance(nomes_reais, dict):
+        raise ValueError("Configuração de participantes inválida.")
+    cleaned = {}
+    for discord_user, real_name in nomes_reais.items():
+        if not isinstance(discord_user, str) or not discord_user.strip():
+            raise ValueError("Informe o usuário do Discord.")
+        if not isinstance(real_name, str) or not real_name.strip():
+            raise ValueError("Informe o nome real.")
+        cleaned[discord_user] = real_name
+    return cleaned
+
+
+def _validate_discord_users(discord_users: dict) -> dict:
+    if not isinstance(discord_users, dict):
+        raise ValueError("Configuração de IDs do Discord inválida.")
+    cleaned = {}
+    for real_name, discord_id in discord_users.items():
+        if not isinstance(real_name, str) or not real_name.strip():
+            raise ValueError("Informe o nome real.")
+        if not isinstance(discord_id, str):
+            raise ValueError(
+                "O ID do Discord tem só números. Deixe em branco se não quiser menções."
+            )
+        text = discord_id.strip()
+        if text and not text.isdigit():
+            raise ValueError(
+                "O ID do Discord tem só números. Deixe em branco se não quiser menções."
+            )
+        cleaned[real_name] = text
+    return cleaned
+
+
+def _validate_campaign_details(campaign_details: dict) -> dict:
+    if not isinstance(campaign_details, dict) or not campaign_details:
+        raise ValueError("Configure pelo menos uma mesa em campaign_details.")
+    folders = set()
+    cleaned = {}
+    for narrator, table in campaign_details.items():
+        if not isinstance(narrator, str) or not narrator.strip():
+            raise ValueError("Escolha o narrador.")
+        if not isinstance(table, dict):
+            raise ValueError(f"Mesa de {narrator} inválida.")
+        campanha = table.get("Campanha")
+        if not isinstance(campanha, str) or not campanha.strip():
+            raise ValueError("Informe o nome da campanha.")
+        rss_key = table.get("rss_key")
+        if not isinstance(rss_key, str) or not rss_key.endswith("/rss.xml"):
+            raise ValueError("O caminho do feed precisa terminar em /rss.xml.")
+        if any(part in ("", ".", "..") for part in rss_key.split("/")):
+            raise ValueError(
+                "O caminho do feed não pode conter barras extras ou caminhos relativos."
+            )
+        folder = rss_key.rsplit("/", 1)[0]
+        if folder in folders:
+            raise ValueError(f'Outra campanha já usa a pasta "{folder}".')
+        folders.add(folder)
+        players = table.get("players")
+        if not isinstance(players, dict) or not players:
+            raise ValueError("Adicione pelo menos um jogador e o personagem dele.")
+        for player, character in players.items():
+            if not isinstance(player, str) or not player.strip():
+                raise ValueError("Adicione pelo menos um jogador e o personagem dele.")
+            if not isinstance(character, str) or not character.strip():
+                raise ValueError(f"Informe o personagem de {player}.")
+        if "closed" in table and not isinstance(table["closed"], bool):
+            raise ValueError(f"Mesa de {narrator}: closed deve ser true ou false.")
+        if "explicit" in table and not isinstance(table["explicit"], bool):
+            raise ValueError(f"Mesa de {narrator}: explicit deve ser true ou false.")
+        if "link" in table and table["link"] not in (None, ""):
+            if not isinstance(table["link"], str) or not _URL_RE.match(
+                table["link"].strip()
+            ):
+                raise ValueError(
+                    "Informe um endereço que comece com https:// ou http://."
+                )
+        _ensure_json_safe(table, f"Campanha {narrator}")
+        cleaned[narrator] = copy.deepcopy(table)
+    return cleaned
+
+
+def _merge_campaign_document(existing: dict, patch: dict) -> dict:
+    merged = copy.deepcopy(existing)
+    for computed in _COMPUTED_CONFIG_KEYS:
+        merged.pop(computed, None)
+
+    for key, val in patch.items():
+        if key in _COMPUTED_CONFIG_KEYS:
+            continue
+        if key in _MERGE_OBJECT_KEYS:
+            base = merged.get(key)
+            base_dict = dict(base) if isinstance(base, dict) else {}
+            if key == "outputs":
+                merged[key] = {
+                    **{name: True for name in ("resumo.json", "srt", "txt", "vtt")},
+                    **base_dict,
+                    **val,
+                    "mp3": True,
+                }
+            else:
+                merged[key] = {**base_dict, **val}
+        elif key in _REPLACE_OBJECT_KEYS:
+            merged[key] = copy.deepcopy(val)
+        else:
+            _ensure_json_safe(val, key)
+            merged[key] = copy.deepcopy(val)
+    return merged
+
+
+def _validate_campaign_patch(payload: dict) -> dict:
+    validators = {
+        "nomes_reais": _validate_nomes_reais,
+        "discord_users": _validate_discord_users,
+        "campaign_details": _validate_campaign_details,
+        "publication": _validate_publication,
+        "processing": _validate_processing,
+        "audio": _validate_audio,
+        "integrations": _validate_integrations,
+        "outputs": _validate_outputs,
+    }
+    validated = {}
+    for key, val in payload.items():
+        if key in _COMPUTED_CONFIG_KEYS or key == "app_settings":
+            continue
+        if key in validators:
+            validated[key] = validators[key](val)
+        else:
+            _ensure_json_safe(val, key)
+            validated[key] = copy.deepcopy(val)
+    return validated
 
 
 def handle(action, data, context):
@@ -124,101 +577,45 @@ def handle(action, data, context):
         task = _tasks.get(_latest)
         return task["pipeline"] if task else initial()
     if action == "config":
-        value = document("Apps/podcast_automation/campaigns")
-        return (
-            value
-            if value is not None
-            else json.loads(
-                (ROOT / "docs/examples/config.example.json").read_text(encoding="utf-8")
-            )
-        )
+        doc = _load_campaign_document()
+        return {
+            **doc,
+            "discord_users": copy.deepcopy(doc.get("discord_users", {})),
+            "app_settings": _typed_app_settings(),
+            "app_defaults": _app_defaults(),
+            "timezone": _settings_module().local_timezone_info(),
+        }
     if action == "save-options":
-        config = handle("config", {}, context)
-        outputs = data.get("outputs", {})
-        if (
-            not isinstance(outputs, dict)
-            or set(outputs) - {"mp3", "resumo.json", "srt", "vtt", "txt"}
-            or any(not isinstance(v, bool) for v in outputs.values())
-        ):
-            raise ValueError("Formatos de saída inválidos.")
-        integrations = data.get("integrations", {})
-        allowed = {
-            "google_account",
-            "google_folder",
-            "google_folder_name",
-            "google_folder_path",
-            "storage_account",
-            "storage_bucket",
-            "announce",
-            "discord_notify",
-            "discord_channel",
-            "discord_channels",
-            "taverns_notify",
-            "taverns_channels",
-            "llm_provider",
-            "llm_model",
-        }
-        if not isinstance(integrations, dict) or set(integrations) - allowed:
-            raise ValueError("Integrações inválidas.")
-        for key, value in integrations.items():
-            if key == "discord_channels":
-                if not isinstance(value, list) or any(
-                    not isinstance(v, str) or not v.isdigit() for v in value
-                ):
-                    raise ValueError("Canais Discord inválidos.")
-                continue
-            if key == "taverns_channels":
-                from Plugins.Connectors.taverns.service import destination_ids
-
-                if not isinstance(value, list):
-                    raise ValueError("Canais Tav.gg inválidos.")
-                for destination in value:
-                    destination_ids(destination)
-                continue
-            if key in ("announce", "discord_notify", "taverns_notify"):
-                if not isinstance(value, bool):
-                    raise ValueError("Preferência inválida.")
-            elif key == "llm_provider":
-                if not isinstance(value, str):
-                    raise ValueError("Provedor de modelo inválido.")
-                cleaned_provider = value.strip()
-                if cleaned_provider and cleaned_provider not in SUPPORTED_LLM_PROVIDERS:
-                    raise ValueError("Provedor de modelo inválido.")
-            elif key == "llm_model":
-                if not isinstance(value, str):
-                    raise ValueError("Modelo inválido.")
-            elif not isinstance(value, str):
-                raise ValueError("Integração inválida.")
-        normalized_integrations = dict(integrations)
-        if "llm_provider" in normalized_integrations:
-            normalized_integrations["llm_provider"] = normalized_integrations[
-                "llm_provider"
-            ].strip()
-        if "llm_model" in normalized_integrations:
-            normalized_integrations["llm_model"] = normalized_integrations[
-                "llm_model"
-            ].strip()
-        config["outputs"] = {
-            **{name: True for name in ("resumo.json", "srt", "txt", "vtt")},
-            **config.get("outputs", {}),
-            **outputs,
-            "mp3": True,
-        }
-        config["integrations"] = {
-            **config.get("integrations", {}),
-            **normalized_integrations,
-        }
-        if config["integrations"].get("taverns_notify") and not config[
-            "integrations"
-        ].get("taverns_channels"):
-            raise ValueError("Selecione pelo menos um canal da Tav.gg para publicar.")
-        if "discord_channels" in integrations:
-            config["integrations"].pop("discord_channel", None)
-        save_document("Apps/podcast_automation/campaigns", config)
-        _clear_config_cache()
+        doc = _load_campaign_document()
+        patch = {}
+        if "outputs" in data:
+            patch["outputs"] = _validate_outputs(data["outputs"])
+        if "integrations" in data:
+            integrations = _validate_integrations(data["integrations"])
+            merged_integrations = {**doc.get("integrations", {}), **integrations}
+            if "discord_channels" in integrations:
+                merged_integrations.pop("discord_channel", None)
+            if merged_integrations.get("taverns_notify") and not merged_integrations.get(
+                "taverns_channels"
+            ):
+                raise ValueError(
+                    "Selecione pelo menos um canal da Tav.gg para publicar."
+                )
+            doc["integrations"] = merged_integrations
+        if "outputs" in patch:
+            doc["outputs"] = {
+                **{name: True for name in ("resumo.json", "srt", "txt", "vtt")},
+                **doc.get("outputs", {}),
+                **patch["outputs"],
+                "mp3": True,
+            }
+        for computed in _COMPUTED_CONFIG_KEYS:
+            doc.pop(computed, None)
+        save_document("Apps/podcast_automation/campaigns", doc)
+        _settings_module().get_config.cache_clear()
         return {"ok": True}
     if action == "save-config":
-        value = data["value"]
+        value = data.get("value")
         if not isinstance(value, dict) or any(
             not isinstance(value.get(k), dict)
             for k in (
@@ -230,19 +627,47 @@ def handle(action, data, context):
             )
         ):
             raise ValueError("Configuração de campanhas inválida.")
-        # Campaign editing must not overwrite newer account/folder/model selections.
-        existing = handle("config", {}, context)
-        value = {
-            **existing,
-            **value,
-            **{
-                key: existing[key]
-                for key in ("integrations", "outputs")
-                if key in existing
-            },
+        existing = _load_campaign_document()
+        clean_input = {
+            k: v for k, v in value.items() if k not in _COMPUTED_CONFIG_KEYS
         }
-        save_document("Apps/podcast_automation/campaigns", value)
-        _clear_config_cache()
+        validated = _validate_campaign_patch(clean_input)
+        # Preserva seleções mais recentes de integrações/outputs quando save-config é chamado pelo editor legado.
+        for preserved_key in ("integrations", "outputs"):
+            if preserved_key in existing:
+                validated[preserved_key] = {
+                    **validated.get(preserved_key, {}),
+                    **existing[preserved_key],
+                }
+        merged = _merge_campaign_document(existing, validated)
+        save_document("Apps/podcast_automation/campaigns", merged)
+        _settings_module().get_config.cache_clear()
+        return {"ok": True}
+    if action == "save-settings":
+        if not isinstance(data, dict):
+            raise ValueError("Payload de configurações inválido.")
+        app_settings = data.get("app_settings")
+        serialized_app_settings = (
+            _validate_app_settings(app_settings) if app_settings is not None else None
+        )
+        campaign_patch = _validate_campaign_patch(data)
+        if campaign_patch:
+            existing = _load_campaign_document()
+            merged = _merge_campaign_document(existing, campaign_patch)
+            if merged.get("integrations", {}).get("taverns_notify") and not merged.get(
+                "integrations", {}
+            ).get("taverns_channels"):
+                raise ValueError(
+                    "Selecione pelo menos um canal da Tav.gg para publicar."
+                )
+            save_document("Apps/podcast_automation/campaigns", merged)
+        if serialized_app_settings:
+            get_store().save(
+                "Apps/podcast_automation",
+                serialized_app_settings,
+                kinds={"LOCAL_DRIVE_FOLDER": "string", "FEED_CACHE_DIR": "string"},
+            )
+        _settings_module().get_config.cache_clear()
         return {"ok": True}
     if action == "stop":
         with _lock:

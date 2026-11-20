@@ -227,3 +227,148 @@ class WorkspaceOptionsTests(unittest.TestCase):
         )
         self.assertIn("Mesa &lt;A&gt;", page)
         self.assertNotIn("javascript:", page)
+
+    def test_settings_schema_removes_tz_and_keeps_nine_operational_keys(self):
+        schema_path = (
+            Path(__file__).resolve().parents[1] / "settings.schema.json"
+        )
+        names = [item["name"] for item in json.loads(schema_path.read_text(encoding="utf-8"))]
+        self.assertNotIn("TZ", names)
+        self.assertEqual(
+            names,
+            [
+                "POLL_INTERVAL_SECONDS",
+                "DRIVE_PROCESS",
+                "LOCAL_DRIVE_FOLDER",
+                "PUBLICAR_DIRETO",
+                "OWNER_EMAIL",
+                "TRANSCRIPTS_FILE",
+                "SKIP_CLOSED",
+                "FEED_CACHE_DIR",
+                "FEED_FORCE_REBUILD",
+            ],
+        )
+
+    def test_config_exposes_app_settings_defaults_timezone_and_discord_users(self):
+        save_document("Apps/podcast_automation/campaigns", copy.deepcopy(EXAMPLE))
+        loaded = web_api.handle("config", {}, None)
+        self.assertIn("discord_users", loaded)
+        self.assertIsInstance(loaded["discord_users"], dict)
+        self.assertIn("app_settings", loaded)
+        self.assertEqual(len(loaded["app_settings"]), 9)
+        self.assertIsInstance(loaded["app_settings"]["POLL_INTERVAL_SECONDS"], int)
+        self.assertIsInstance(loaded["app_settings"]["DRIVE_PROCESS"], bool)
+        self.assertIn("app_defaults", loaded)
+        self.assertIn("audio", loaded["app_defaults"])
+        self.assertIn("processing", loaded["app_defaults"])
+        self.assertIn("publication", loaded["app_defaults"])
+        self.assertIn("timezone", loaded)
+        self.assertIn("iana", loaded["timezone"])
+        self.assertIn("utc_offset", loaded["timezone"])
+
+    def test_save_options_and_save_settings_preserve_unknown_and_llm_keys_without_polluting_doc(self):
+        initial_doc = copy.deepcopy(EXAMPLE)
+        initial_doc["discord_users"] = {"Dota": "123456"}
+        initial_doc["custom_root"] = {"keep": True}
+        initial_doc["integrations"] = {
+            "llm_provider": "openai",
+            "llm_model": "gpt-4o-mini",
+            "future_0002_flag": True,
+        }
+        initial_doc["processing"]["extra_flag"] = "keep-me"
+        save_document("Apps/podcast_automation/campaigns", initial_doc)
+
+        web_api.handle(
+            "save-options",
+            {
+                "outputs": {"txt": False},
+                "integrations": {"google_account": "work", "extra_int": 42},
+            },
+            None,
+        )
+        web_api.handle(
+            "save-settings",
+            {
+                "app_settings": {
+                    "POLL_INTERVAL_SECONDS": 300,
+                    "DRIVE_PROCESS": False,
+                    "LOCAL_DRIVE_FOLDER": "data/custom-drive",
+                    "OWNER_EMAIL": "owner@example.com",
+                    "TRANSCRIPTS_FILE": "sessoes.html",
+                },
+                "audio": {"fade_seconds": "0,005", "compressor_ratio": 2.5},
+                "publication": {"website": "https://rpg.example.com", "language": "pt-BR"},
+                "processing": {"minimum_session_seconds": 900},
+            },
+            None,
+        )
+
+        raw_doc = document("Apps/podcast_automation/campaigns")
+        self.assertNotIn("app_settings", raw_doc)
+        self.assertNotIn("app_defaults", raw_doc)
+        self.assertNotIn("timezone", raw_doc)
+        self.assertEqual(raw_doc["discord_users"], {"Dota": "123456"})
+        self.assertEqual(raw_doc["custom_root"], {"keep": True})
+        self.assertEqual(raw_doc["integrations"]["llm_provider"], "openai")
+        self.assertEqual(raw_doc["integrations"]["llm_model"], "gpt-4o-mini")
+        self.assertTrue(raw_doc["integrations"]["future_0002_flag"])
+        self.assertEqual(raw_doc["integrations"]["extra_int"], 42)
+        self.assertEqual(raw_doc["processing"]["extra_flag"], "keep-me")
+        self.assertEqual(raw_doc["processing"]["minimum_session_seconds"], 900)
+        self.assertEqual(raw_doc["audio"]["fade_seconds"], 0.005)
+        self.assertEqual(raw_doc["audio"]["compressor_ratio"], 2.5)
+
+        reloaded = web_api.handle("config", {}, None)
+        self.assertEqual(reloaded["app_settings"]["POLL_INTERVAL_SECONDS"], 300)
+        self.assertFalse(reloaded["app_settings"]["DRIVE_PROCESS"])
+        self.assertEqual(
+            reloaded["app_settings"]["LOCAL_DRIVE_FOLDER"], "data/custom-drive"
+        )
+        self.assertEqual(reloaded["app_settings"]["OWNER_EMAIL"], "owner@example.com")
+        self.assertEqual(reloaded["app_settings"]["TRANSCRIPTS_FILE"], "sessoes.html")
+
+    def test_save_settings_validates_fields_with_pt_br_messages(self):
+        save_document("Apps/podcast_automation/campaigns", copy.deepcopy(EXAMPLE))
+        invalid_cases = [
+            (
+                {"app_settings": {"POLL_INTERVAL_SECONDS": 0}},
+                "Informe um número inteiro de segundos, a partir de 1.",
+            ),
+            (
+                {"app_settings": {"OWNER_EMAIL": "invalido"}},
+                "Informe um e-mail válido, como nome@dominio.com, ou deixe em branco.",
+            ),
+            (
+                {"app_settings": {"TRANSCRIPTS_FILE": "transcripts.txt"}},
+                "Informe o nome de um arquivo .html, como transcripts.html.",
+            ),
+            (
+                {"publication": {"website": "ftp://site.com"}},
+                "Informe um endereço que comece com https:// ou http://.",
+            ),
+            (
+                {"publication": {"language": "portugues"}},
+                "Use um código de idioma, como pt-BR.",
+            ),
+            (
+                {"processing": {"minimum_session_seconds": -1}},
+                "Informe um número inteiro igual ou maior que zero.",
+            ),
+            (
+                {"audio": {"compressor_ratio": 0.5}},
+                "A razão do compressor deve ser 1 ou maior.",
+            ),
+            (
+                {"audio": {"compressor_attack_ms": 0}},
+                "Informe um tempo maior que zero.",
+            ),
+            (
+                {"discord_users": {"Dota": "abc"}},
+                "O ID do Discord tem só números. Deixe em branco se não quiser menções.",
+            ),
+        ]
+        for payload, expected_msg in invalid_cases:
+            with self.subTest(payload=payload):
+                with self.assertRaises(ValueError) as ctx:
+                    web_api.handle("save-settings", payload, None)
+                self.assertEqual(str(ctx.exception), expected_msg)

@@ -66,6 +66,9 @@ def resolve_model(
     if provider in ("free", "paid") and not model:
         return provider
     if model:
+        if provider == "local" and model != "local":
+            model = model.removeprefix("local/")
+            return model if model.startswith("ollama/") else f"ollama/{model}"
         if (
             provider
             and provider not in ("free", "paid")
