@@ -135,9 +135,7 @@ class PiaTranscription:
             print(f"Áudio longo: enviando FLAC original à PIA: {path.name}", flush=True)
             yield path
             return
-        from src.config_paths import BASE_DIR
-
-        cache = BASE_DIR / "cache/Apps/podcast_automation/transcription"
+        cache = CHECKPOINT_ROOT.with_name("transcription")
         cache.mkdir(parents=True, exist_ok=True)
         emit(
             "progress",

@@ -23,9 +23,11 @@ from typing import Any, Callable
 from . import (
     audioManager as audio_manager_mod,
     geradorResumoSessao as summary_mod,
+    feedCache as feed_cache_mod,
     main as main_mod,
     notification as notification_mod,
     objectStorageManager as storage_mod,
+    piaTranscription as transcription_mod,
     rssTranscriptionUpdate as rss_mod,
     settings as settings_mod,
     transcritorWhisper as whisper_mod,
@@ -222,14 +224,19 @@ def validate_account_payload(account: Any) -> tuple[dict[str, Any], dict[str, An
 
 
 @contextlib.contextmanager
-def scoped_podcast_config(config: dict[str, Any]):
+def scoped_podcast_config(config: dict[str, Any], work_dir: Path):
     """Isola get_config() e output_formats() para a conta em execucao sem tocar no perfil local."""
     outputs = {
         **{name: True for name in ("resumo.json", "srt", "txt", "vtt")},
         **(config.get("outputs") or {}),
         "mp3": True,
     }
-    patched: list[tuple[Any, str, Any]] = []
+    patched: list[tuple[Any, str, Any]] = [
+        (transcription_mod, "CHECKPOINT_ROOT", transcription_mod.CHECKPOINT_ROOT),
+        (feed_cache_mod, "BASE_DIR", feed_cache_mod.BASE_DIR),
+    ]
+    transcription_mod.CHECKPOINT_ROOT = work_dir / "cache/Apps/podcast_automation/transcription-responses"
+    feed_cache_mod.BASE_DIR = work_dir
     targets = (
         settings_mod,
         main_mod,
@@ -625,7 +632,7 @@ def prepare_session(
     recording_metadata = dict(payload.get("recordingMetadata") or {})
     suggestion_count = max(1, int(payload.get("suggestionCount") or 3))
 
-    with scoped_podcast_config(config):
+    with scoped_podcast_config(config, work_dir):
         _emit_stage(emit, "prepare", recording_id, 1)
         extracted_dir = _safe_extract_zip(archive, work_dir / "extracted")
         state["extractedDir"] = str(extracted_dir)
@@ -875,7 +882,7 @@ def publish_session(
         brand=str(config["publication"].get("brand") or "PIA"),
     )
 
-    with scoped_podcast_config(config):
+    with scoped_podcast_config(config, state_path.parent):
         _emit_stage(emit, "publish", recording_id, 7)
         if state.get("renamedForTitle") != winner_title:
             _rename_artifacts_for_winner(state, winner_title, update_audio_tag=update_audio_tag)
@@ -1013,6 +1020,9 @@ def run_cli(stdin=None, stdout=None, stderr=None) -> int:
         if not isinstance(payload, dict):
             raise WorkerError("invalid_input", "Entrada JSON inválida no stdin.")
         secrets = _extract_secrets(payload)
+        app_context = os.environ.get("PIA_APP_CONTEXT")
+        if app_context:
+            secrets += _extract_secrets(json.loads(app_context))
         action = str(payload.get("action") or "").strip()
         recording_id = str(payload.get("recordingId") or "").strip()
 
