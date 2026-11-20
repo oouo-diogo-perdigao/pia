@@ -9,7 +9,7 @@ import {
   Group,
   Button,
 } from "@mantine/core";
-import { Copy, ExternalLink } from "lucide-react";
+import { Copy } from "lucide-react";
 import { Icon } from "./shared";
 import { copy } from "./api";
 
@@ -28,7 +28,14 @@ function Command({ children }) {
     </Group>
   );
 }
-export default function AgentSetup({ provider, opened, onClose, status }) {
+
+export default function AgentSetup({
+  provider,
+  opened,
+  onClose,
+  status,
+  onVerify,
+}) {
   const [platform, setPlatform] = useState(
     /Win/i.test(navigator.platform) ? "windows" : "linux",
   );
@@ -50,6 +57,7 @@ export default function AgentSetup({ provider, opened, onClose, status }) {
         ? "Get-Command codex.cmd,codex.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source"
         : "(Get-Command agy.exe -ErrorAction Stop).Source"
       : "command -v " + command;
+
   return (
     <Modal
       opened={opened}
@@ -94,42 +102,49 @@ export default function AgentSetup({ provider, opened, onClose, status }) {
           configuração. Depois saia com /exit. A PIA usa essa sessão salva; não
           é preciso colar tokens na PIA.
         </Text>
-        <Text fw={600}>3. Obtenha o caminho do executável</Text>
-        <Command>{path}</Command>
-        <Text size="sm">
-          Copie uma linha com o caminho completo, sem aspas, para{" "}
-          <Code>{variable}</Code> nas configurações deste conector, logo abaixo
-          do painel de consulta. No Windows use o agy.exe nativo; para Codex
-          pode usar codex.cmd do npm ou codex.exe.
-        </Text>
-        {!codex && platform === "windows" && (
+        <>
+          <Text fw={600}>3. Obtenha o caminho do executável</Text>
+          <Command>{path}</Command>
           <Text size="sm">
-            Local padrão do instalador AGY:{" "}
-            <Code>%LOCALAPPDATA%\agy\bin\agy.exe</Code>.
+            Copie uma linha com o caminho completo, sem aspas, para{" "}
+            <Code>{variable}</Code> nas configurações avançadas deste painel. No
+            Windows use o agy.exe nativo; para Codex pode usar codex.cmd do npm
+            ou codex.exe.
           </Text>
-        )}
+          {!codex && platform === "windows" && (
+            <Text size="sm">
+              Local padrão do instalador AGY:{" "}
+              <Code>%LOCALAPPDATA%\agy\bin\agy.exe</Code>.
+            </Text>
+          )}
+        </>
         {status?.executable && (
           <>
             <Text size="sm">Executável detectado pela PIA:</Text>
             <Command>{status.executable}</Command>
           </>
         )}
-        <Text fw={600}>4. Salve, reinicie e teste</Text>
-        <Text size="sm">
-          Ao salvar configurações, a PIA solicita o reinício. Se instalou o CLI
-          depois de abrir a PIA, reinicie pelo menu da bandeja. Selecione o
-          agente e envie uma pergunta curta, por exemplo “Responda apenas:
-          conexão funcionando”. A consulta usa sua conta e está sujeita aos
-          limites dela.
-        </Text>
         <Text size="sm" c="dimmed">
           PIA Windows precisa do CLI Windows; instalação pelo WSL é Linux. O
           conector usa diretório separado, Codex read-only e AGY plan; não
           compartilha este projeto ou histórico automaticamente.
         </Text>
-        <Button variant="light" onClick={onClose}>
-          Entendi
-        </Button>
+        <Group justify="flex-end">
+          {onVerify && (
+            <Button
+              variant="filled"
+              onClick={async () => {
+                await onVerify(provider);
+                onClose();
+              }}
+            >
+              Instalei, verificar
+            </Button>
+          )}
+          <Button variant="light" onClick={onClose}>
+            Entendi
+          </Button>
+        </Group>
       </Stack>
     </Modal>
   );

@@ -238,6 +238,8 @@ def route(handler):
                 "/tts/selection",
                 "/music/providers",
                 "/chat/models",
+                "/models/status",
+                "/integrations/agents/status",
                 "/mcp/servers",
                 "/plugins",
                 "/skills",

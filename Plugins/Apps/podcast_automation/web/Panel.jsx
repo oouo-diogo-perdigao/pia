@@ -1,5 +1,6 @@
 import { fingerprint } from "../../../../src/pia/frontend/forms";
 import ResourcePicker from "../../../../src/pia/frontend/ResourcePicker";
+import ModelSettingsSlot from "./ModelSettingsSlot";
 import React, { useState, useEffect, useRef } from "react";
 import {
   Button,
@@ -598,6 +599,18 @@ export default function Podcast({ sub = "principal" }) {
                   onClick={() => settings("taverns")}
                 />
               </Group>
+            </div>
+            <div data-slot="podcast-model-settings" style={{ marginTop: 20 }}>
+              <ModelSettingsSlot
+                config={config}
+                patchIntegrations={(updates) =>
+                  setConfig((old) => ({
+                    ...old,
+                    integrations: { ...old.integrations, ...updates },
+                  }))
+                }
+                disabled={running || shutdownPending}
+              />
             </div>
             <Button
               mt="lg"

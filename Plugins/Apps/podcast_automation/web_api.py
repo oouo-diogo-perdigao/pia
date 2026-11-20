@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 import secrets
+import sys
 import threading
 from src.pia.service import Job
 from src.resource_plugins import save_json
@@ -13,9 +14,29 @@ from . import power
 from .recording_queue import pending_files
 
 ROOT = Path(__file__).resolve().parent
+SUPPORTED_LLM_PROVIDERS = {
+    "codex",
+    "agy",
+    "openrouter",
+    "gemini",
+    "groq",
+    "cloudflare",
+    "local",
+    "free",
+    "paid",
+}
 _latest = None
 _tasks = {}
 _lock = threading.Lock()
+
+
+def _clear_config_cache():
+    settings_mod = sys.modules.get("podcast_automation.settings")
+    get_cfg = (
+        getattr(settings_mod, "get_config", None) if settings_mod is not None else None
+    )
+    if hasattr(get_cfg, "cache_clear"):
+        get_cfg.cache_clear()
 
 
 def handle(action, data, context):
@@ -134,6 +155,8 @@ def handle(action, data, context):
             "discord_channels",
             "taverns_notify",
             "taverns_channels",
+            "llm_provider",
+            "llm_model",
         }
         if not isinstance(integrations, dict) or set(integrations) - allowed:
             raise ValueError("Integrações inválidas.")
@@ -155,14 +178,36 @@ def handle(action, data, context):
             if key in ("announce", "discord_notify", "taverns_notify"):
                 if not isinstance(value, bool):
                     raise ValueError("Preferência inválida.")
+            elif key == "llm_provider":
+                if not isinstance(value, str):
+                    raise ValueError("Provedor de modelo inválido.")
+                cleaned_provider = value.strip()
+                if cleaned_provider and cleaned_provider not in SUPPORTED_LLM_PROVIDERS:
+                    raise ValueError("Provedor de modelo inválido.")
+            elif key == "llm_model":
+                if not isinstance(value, str):
+                    raise ValueError("Modelo inválido.")
             elif not isinstance(value, str):
                 raise ValueError("Integração inválida.")
+        normalized_integrations = dict(integrations)
+        if "llm_provider" in normalized_integrations:
+            normalized_integrations["llm_provider"] = normalized_integrations[
+                "llm_provider"
+            ].strip()
+        if "llm_model" in normalized_integrations:
+            normalized_integrations["llm_model"] = normalized_integrations[
+                "llm_model"
+            ].strip()
         config["outputs"] = {
             **{name: True for name in ("resumo.json", "srt", "txt", "vtt")},
+            **config.get("outputs", {}),
             **outputs,
             "mp3": True,
         }
-        config["integrations"] = {**config.get("integrations", {}), **integrations}
+        config["integrations"] = {
+            **config.get("integrations", {}),
+            **normalized_integrations,
+        }
         if config["integrations"].get("taverns_notify") and not config[
             "integrations"
         ].get("taverns_channels"):
@@ -170,6 +215,7 @@ def handle(action, data, context):
         if "discord_channels" in integrations:
             config["integrations"].pop("discord_channel", None)
         save_document("Apps/podcast_automation/campaigns", config)
+        _clear_config_cache()
         return {"ok": True}
     if action == "save-config":
         value = data["value"]
@@ -184,9 +230,10 @@ def handle(action, data, context):
             )
         ):
             raise ValueError("Configuração de campanhas inválida.")
-        # Campaign editing must not overwrite newer account/folder selections.
+        # Campaign editing must not overwrite newer account/folder/model selections.
         existing = handle("config", {}, context)
         value = {
+            **existing,
             **value,
             **{
                 key: existing[key]
@@ -195,6 +242,7 @@ def handle(action, data, context):
             },
         }
         save_document("Apps/podcast_automation/campaigns", value)
+        _clear_config_cache()
         return {"ok": True}
     if action == "stop":
         with _lock:
