@@ -1,10 +1,11 @@
 """Configuração privada; caminhos relativos à raiz e ambiente com precedência."""
 
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from functools import lru_cache
 from pathlib import Path
-from src.settings_store import values, document
+from src.settings_store import document, get_store, values
 from src.user_paths import user_path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -99,3 +100,57 @@ def output_formats():
         **value,
         "mp3": True,
     }
+
+
+def _read_legacy_tz() -> str:
+    try:
+        for group, name, raw_value, _kind, _ref in get_store().rows("settings"):
+            if group == "Apps/podcast_automation" and name == "TZ":
+                if raw_value is None:
+                    return ""
+                try:
+                    decoded = json.loads(raw_value)
+                except (TypeError, ValueError):
+                    decoded = raw_value
+                return str(decoded or "").strip()
+    except Exception:
+        return ""
+    return ""
+
+
+def local_timezone_info() -> dict:
+    """Detecta o fuso horário local do sistema operacional e eventual TZ legado."""
+    legacy_raw = _read_legacy_tz()
+    try:
+        local_now = datetime.now().astimezone()
+        tzinfo = local_now.tzinfo
+        iana = (
+            getattr(tzinfo, "key", None)
+            or local_now.tzname()
+            or "UTC"
+        )
+        offset = local_now.utcoffset()
+        if offset is None:
+            offset = timedelta(0)
+        total_minutes = int(offset.total_seconds() // 60)
+        sign = "+" if total_minutes >= 0 else "-"
+        hours, minutes = divmod(abs(total_minutes), 60)
+        utc_offset = f"UTC{sign}{hours:02d}:{minutes:02d}"
+        label = f"{iana} ({utc_offset})"
+        legacy_tz = legacy_raw if legacy_raw and legacy_raw != iana else ""
+        return {
+            "iana": iana,
+            "utc_offset": utc_offset,
+            "label": label,
+            "detected": True,
+            "legacy_tz": legacy_tz,
+        }
+    except Exception:
+        legacy_tz = legacy_raw if legacy_raw and legacy_raw != "UTC" else ""
+        return {
+            "iana": "UTC",
+            "utc_offset": "UTC+00:00",
+            "label": "UTC (UTC+00:00)",
+            "detected": False,
+            "legacy_tz": legacy_tz,
+        }

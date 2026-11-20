@@ -6890,6 +6890,37 @@
           "response": []
         },
         {
+          "name": "POST /api/pia/apps/podcast_automation/save-settings",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/apps/podcast_automation/save-settings",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
           "name": "POST /api/pia/apps/podcast_automation/start",
           "request": {
             "method": "POST",
@@ -7546,6 +7577,37 @@
           "response": []
         },
         {
+          "name": "POST /api/pia/apps/screenshots/save-shortcuts",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/apps/screenshots/save-shortcuts",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
           "name": "POST /api/pia/apps/screenshots/saved-image",
           "request": {
             "method": "POST",
@@ -7567,6 +7629,37 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"{{capture_name}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/pia/apps/screenshots/shortcuts",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{base_url}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/pia/apps/screenshots/shortcuts",
+            "description": "API da interface: sessão local obrigatória. Consulte postman/README.md.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
               "options": {
                 "raw": {
                   "language": "json"

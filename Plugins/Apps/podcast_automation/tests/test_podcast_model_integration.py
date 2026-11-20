@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 
 from Plugins.Apps.podcast_automation import web_api
 from podcast_automation import geradorResumoSessao, llm
-from src.settings_store import save_document
+from src.settings_store import document, save_document
 
 PODCAST_ROOT = Path(__file__).resolve().parents[1]
 
@@ -79,7 +79,23 @@ class PodcastModelPersistenceTests(unittest.TestCase):
         expected["integrations"]["llm_provider"] = "codex"
         expected["integrations"]["llm_model"] = ""
 
-        self.assertEqual(saved, expected)
+        self.assertEqual(document("Apps/podcast_automation/campaigns"), expected)
+        self.assertEqual({key: saved[key] for key in expected}, expected)
+        self.assertTrue({"app_settings", "app_defaults", "timezone"} <= saved.keys())
+
+    def test_save_settings_updates_model_without_touching_other_integrations(self):
+        fixture = canonical_t2_fixture()
+        save_document("Apps/podcast_automation/campaigns", fixture)
+
+        web_api.handle(
+            "save-settings",
+            {"integrations": {"llm_provider": " codex ", "llm_model": " "}},
+            None,
+        )
+
+        expected = copy.deepcopy(fixture)
+        expected["integrations"].update(llm_provider="codex", llm_model="")
+        self.assertEqual(document("Apps/podcast_automation/campaigns"), expected)
 
     def test_t2_save_config_non_destructive_merge_preserves_model_and_all_keys(self):
         fixture = canonical_t2_fixture()

@@ -427,5 +427,62 @@ class StorageFailureTests(unittest.TestCase):
                 manager.putObject("configured/rss.xml", b"<rss/>")
 
 
+class TimezoneAndDecisionD1Tests(unittest.TestCase):
+    def test_local_timezone_info_detects_system_and_reports_legacy_tz(self):
+        fake_store = MagicMock()
+        fake_store.rows.return_value = [
+            ("Apps/podcast_automation", "TZ", json.dumps("Europe/Lisbon"), "string", None)
+        ]
+        with patch("podcast_automation.settings.get_store", return_value=fake_store):
+            info = settings.local_timezone_info()
+        self.assertTrue(info["detected"])
+        self.assertTrue(info["iana"])
+        self.assertRegex(info["utc_offset"], r"^UTC[+-]\d{2}:\d{2}$")
+        self.assertEqual(info["label"], f"{info['iana']} ({info['utc_offset']})")
+        if info["iana"] != "Europe/Lisbon":
+            self.assertEqual(info["legacy_tz"], "Europe/Lisbon")
+
+    def test_local_timezone_info_hides_legacy_tz_when_equal_or_absent(self):
+        current = settings.local_timezone_info()["iana"]
+        fake_store = MagicMock()
+        fake_store.rows.return_value = [
+            ("Apps/podcast_automation", "TZ", json.dumps(current), "string", None)
+        ]
+        with patch("podcast_automation.settings.get_store", return_value=fake_store):
+            info = settings.local_timezone_info()
+        self.assertEqual(info["legacy_tz"], "")
+
+    def test_local_timezone_info_falls_back_to_utc_on_error(self):
+        fake_store = MagicMock()
+        fake_store.rows.return_value = []
+        with (
+            patch("podcast_automation.settings.get_store", return_value=fake_store),
+            patch("podcast_automation.settings.datetime") as mock_dt,
+        ):
+            mock_dt.now.side_effect = RuntimeError("clock unavailable")
+            info = settings.local_timezone_info()
+        self.assertFalse(info["detected"])
+        self.assertEqual(info["iana"], "UTC")
+        self.assertEqual(info["utc_offset"], "UTC+00:00")
+
+    def test_build_episode_keeps_23_00_utc_for_prefixed_date_d1a(self):
+        from datetime import datetime, timezone
+
+        store = MagicMock()
+        store.getObjectIfExists.return_value = None
+        store.public_url.side_effect = lambda key: f"https://example.invalid/{key}"
+        updater = RssTranscriptionUpdater(store)
+        episode = updater.build_episode(
+            {"Key": "campaigns/mesa/2026-04-05 - Sessao 1.mp3", "Size": 1024},
+            image_map={},
+            cover=None,
+            details={"author": "Autor", "explicit": False},
+        )
+        self.assertEqual(
+            episode["date"],
+            datetime(2026, 4, 5, 23, 0, 0, tzinfo=timezone.utc),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,17 @@
 # PIA Changelog
 
+## [0001 - Configurações do Podcast Automation e Capturas] - 2026-11-19
+
+### Changed
+- Podcast Automation concentra configurações operacionais, campanhas e participantes no próprio app, detecta o fuso do computador e carrega as mudanças na próxima execução.
+- O seletor de modelos da 0002 fica em Configurações → Inteligência artificial. Salvar campanhas, opções e o modelo preserva as demais preferências.
+- Capturas reúne pasta de destino, qualidade, atalhos e padrões do editor nas configurações do app. Atalhos atualizados são recarregados imediatamente.
+- O editor de captura reaproveita a janela e recebe o quadro em memória. Um indicador de captura congelada respeita a preferência por movimento reduzido e deixa o primeiro gesto disponível.
+
+### Fixed
+- A pasta de destino das capturas é preservada entre execuções, com fallback quando indisponível.
+- Enter e Espaço acionam os botões do editor de captura quando estão em foco.
+
 ## [0002 - Integração com Modelos Externos Estilo OpenBot] - 2026-11-18
 
 ### Added

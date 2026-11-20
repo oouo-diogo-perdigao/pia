@@ -43,6 +43,22 @@ class ShortcutFormatTests(unittest.TestCase):
             hotkeys.normalize_server("127.0.0.1:8762"), "http://127.0.0.1:8762"
         )
 
+    def test_split_shortcut_rejects_modifier_only(self):
+        with self.assertRaises(ValueError):
+            hotkeys.split_shortcut("ctrl")
+        with self.assertRaises(ValueError):
+            hotkeys.split_shortcut("ctrl+alt")
+
+    def test_normalize_shortcut_canonicalizes_aliases_and_order(self):
+        self.assertEqual(
+            hotkeys.normalize_shortcut("alt+control+p"),
+            hotkeys.normalize_shortcut("ctrl+alt+p"),
+        )
+        self.assertEqual(
+            hotkeys.normalize_shortcut("win+shift+s"),
+            hotkeys.normalize_shortcut("super+shift+s"),
+        )
+
 
 class GnomeRegistrationTests(unittest.TestCase):
     def test_merge_keeps_user_shortcuts_and_replaces_pia(self):

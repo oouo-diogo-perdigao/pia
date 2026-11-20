@@ -420,6 +420,10 @@ class DesktopUI(QObject):
             if "enabled" in payload:
                 autostart.set_enabled(bool(payload["enabled"]))
             return {"enabled": autostart.is_enabled()}
+        elif action == "reload-hotkeys":
+            from .launcher import reload_hotkey_listener
+
+            return reload_hotkey_listener()
         else:
             raise ValueError("Ação nativa desconhecida.")
         return {"ok": True}
