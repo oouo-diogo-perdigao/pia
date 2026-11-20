@@ -47,8 +47,12 @@ def _make_synthetic_frame(width: int = 1920, height: int = 1080) -> Image.Image:
         x0 = 40 + (i * 97) % (width - 360)
         y0 = 40 + (i * 71) % (height - 220)
         color = ((60 + i * 29) % 240, (90 + i * 43) % 240, (140 + i * 19) % 240)
-        draw.rectangle([x0, y0, x0 + 300, y0 + 160], fill=color, outline=(220, 220, 235))
-        draw.line([(x0 + 10, y0 + 24), (x0 + 280, y0 + 24)], fill=(245, 245, 250), width=2)
+        draw.rectangle(
+            [x0, y0, x0 + 300, y0 + 160], fill=color, outline=(220, 220, 235)
+        )
+        draw.line(
+            [(x0 + 10, y0 + 24), (x0 + 280, y0 + 24)], fill=(245, 245, 250), width=2
+        )
     return img
 
 
@@ -268,7 +272,9 @@ def run_benchmark(runs_per_mode: int = 10, label: str = "current") -> dict:
             patch.object(
                 native_mod.QGuiApplication,
                 "screens",
-                return_value=[SimpleNamespace(geometry=lambda: QRect(0, 0, 1920, 1080))],
+                return_value=[
+                    SimpleNamespace(geometry=lambda: QRect(0, 0, 1920, 1080))
+                ],
             ),
             patch.object(
                 native_mod.QApplication,
@@ -370,7 +376,6 @@ def run_benchmark(runs_per_mode: int = 10, label: str = "current") -> dict:
                                 )
 
                             # Use internal native t1 if available (more exact before disk write)
-                            rec = native_app.records.get(identity) or {}
                             native_timings = (
                                 getattr(native_app, "last_timings", None) or {}
                             )

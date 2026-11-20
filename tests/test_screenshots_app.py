@@ -98,7 +98,9 @@ def test_save_config_validations(isolated_store, tmp_path):
         web_api.handle("save-config", {"value": {"default_width": 100}}, ctx)
 
     with pytest.raises(ValueError, match="Esta pasta não pode ser usada"):
-        web_api.handle("save-config", {"value": {"output_folder": "relative/path"}}, ctx)
+        web_api.handle(
+            "save-config", {"value": {"output_folder": "relative/path"}}, ctx
+        )
 
     blocking_file = tmp_path / "not-a-dir.txt"
     blocking_file.write_text("x", encoding="utf-8")
@@ -216,7 +218,8 @@ def test_native_output_directory_fallback_and_memory_cache(isolated_store, tmp_p
         blocking_file = tmp_path / "blocked"
         blocking_file.write_text("x", encoding="utf-8")
         settings_store.save_document(
-            "Apps/screenshots", {**web_api.DEFAULTS, "output_folder": str(blocking_file)}
+            "Apps/screenshots",
+            {**web_api.DEFAULTS, "output_folder": str(blocking_file)},
         )
         fallback_dir = app.output_directory()
         assert fallback_dir == user_paths.user_path("screenshots")
@@ -287,7 +290,7 @@ def test_capture_editor_assets_and_accessibility_rules():
     )
 
     # CSS preloaded directly in capture.html without JS waterfall
-    assert '/apps/screenshots/capture.css' in capture_html
+    assert "/apps/screenshots/capture.css" in capture_html
     assert "style.onload" not in capture_jsx
 
     # Accessible visual effect (Section 4 of ux-especificacao.md)
@@ -295,12 +298,17 @@ def test_capture_editor_assets_and_accessibility_rules():
     assert ".capture-vignette" in capture_css
     assert ".capture-frame" in capture_css
     assert ".capture-flash" in capture_css
-    assert "prefers-reduced-motion:reduce" in capture_css or "prefers-reduced-motion: reduce" in capture_css
-    assert "❄ Captura congelada · Arraste para recortar · Esc para cancelar" in capture_jsx
+    assert (
+        "prefers-reduced-motion:reduce" in capture_css
+        or "prefers-reduced-motion: reduce" in capture_css
+    )
+    assert (
+        "❄ Captura congelada · Arraste para recortar · Esc para cancelar" in capture_jsx
+    )
     assert 'role="toolbar"' in capture_jsx
     assert 'role="status"' in capture_jsx
     assert 'aria-live="polite"' in capture_jsx
-    assert 'tabIndex={-1}' in capture_jsx
+    assert "tabIndex={-1}" in capture_jsx
 
     # Keyboard fix: Enter/Space on BUTTON does not trigger fullScreen()
     assert 'active?.tagName === "BUTTON"' in capture_js
