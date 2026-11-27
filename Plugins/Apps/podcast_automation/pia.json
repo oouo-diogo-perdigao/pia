@@ -3,6 +3,7 @@
   "app_id": "podcast_automation",
   "info": "Das gravações às legendas e à publicação.",
   "type": "app",
+  "settings_in_app": true,
   "lang": "lang/pt-BR.json",
   "home": "index.html",
   "about": "about.html"
