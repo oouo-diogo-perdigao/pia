@@ -367,6 +367,8 @@ export default function Podcast({ sub = "principal" }) {
     !!config,
     opts.google_account,
     opts.google_folder,
+    config?.app_settings?.DRIVE_PROCESS,
+    config?.app_settings?.LOCAL_DRIVE_FOLDER,
     previewVersion,
     running,
   ]);
@@ -2379,6 +2381,9 @@ export default function Podcast({ sub = "principal" }) {
             ) : (
               <>
                 <Text size="sm" c="dimmed" mt="sm">
+                  {preview.folder_path}
+                </Text>
+                <Text size="sm" c="dimmed">
                   {preview.processed} já processadas · {preview.pending.length}{" "}
                   sessões ZIP a processar
                 </Text>

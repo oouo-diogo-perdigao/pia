@@ -147,7 +147,6 @@ export default function SettingsPanel({ section = "general" }) {
     selected.id === "Apps/music";
   const isSimplifiedGeneralTab =
     selected.id === "general" && !isCustomTtsTab && !isCustomMusicTab;
-  const isPodcastAppSettings = selected.id === "Apps/podcast_automation";
   async function save() {
     const result = await api("/settings/save", {
       section: selected.id,
@@ -253,27 +252,6 @@ export default function SettingsPanel({ section = "general" }) {
                 </Group>
               )}
               {notice && <Text size="sm">{notice}</Text>}
-            </>
-          ) : isPodcastAppSettings ? (
-            <>
-              <Text>
-                {t(
-                  "As configurações do Podcast Automation agora ficam dentro do app.",
-                )}
-              </Text>
-              <Group>
-                <Button
-                  onClick={() =>
-                    navigate({
-                      view: "app",
-                      app: "podcast_automation",
-                      sub: "settings",
-                    })
-                  }
-                >
-                  {t("Abrir configurações do app")}
-                </Button>
-              </Group>
             </>
           ) : (
             <>

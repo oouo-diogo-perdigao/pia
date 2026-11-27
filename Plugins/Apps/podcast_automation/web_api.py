@@ -86,7 +86,9 @@ def _settings_module():
 def _load_example_config() -> dict:
     candidate = ROOT / "docs/examples/config.example.json"
     if not candidate.is_file():
-        candidate = Path(__file__).resolve().parent / "docs/examples/config.example.json"
+        candidate = (
+            Path(__file__).resolve().parent / "docs/examples/config.example.json"
+        )
     return json.loads(candidate.read_text(encoding="utf-8"))
 
 
@@ -208,7 +210,11 @@ def _validate_integrations(integrations: dict) -> dict:
             if not isinstance(value, str):
                 raise ValueError(f"{label} inválido.")
             selection = value.strip()
-            if key == "llm_provider" and selection and selection not in SUPPORTED_LLM_PROVIDERS:
+            if (
+                key == "llm_provider"
+                and selection
+                and selection not in SUPPORTED_LLM_PROVIDERS
+            ):
                 raise ValueError("Provedor de modelo inválido.")
             cleaned[key] = selection
         elif key in (
@@ -326,9 +332,7 @@ def _validate_processing(processing: dict) -> dict:
                 value, "Informe um número inteiro igual ou maior que zero."
             )
             if num < 0:
-                raise ValueError(
-                    "Informe um número inteiro igual ou maior que zero."
-                )
+                raise ValueError("Informe um número inteiro igual ou maior que zero.")
             cleaned[key] = num
         else:
             _ensure_json_safe(value, f"processing.{key}")
@@ -506,7 +510,9 @@ def handle(action, data, context):
         }
         env = values("Apps/podcast_automation")
         if str(env.get("DRIVE_PROCESS", "true")).lower() in ("false", "0"):
-            folder = Path(env.get("LOCAL_DRIVE_FOLDER") or "data/local-drive")
+            folder = Path(
+                env.get("LOCAL_DRIVE_FOLDER") or "data/local-drive"
+            ).expanduser()
             if not folder.is_absolute():
                 folder = user_path("apps/podcast_automation") / folder
             files = [
@@ -595,9 +601,9 @@ def handle(action, data, context):
             merged_integrations = {**doc.get("integrations", {}), **integrations}
             if "discord_channels" in integrations:
                 merged_integrations.pop("discord_channel", None)
-            if merged_integrations.get("taverns_notify") and not merged_integrations.get(
-                "taverns_channels"
-            ):
+            if merged_integrations.get(
+                "taverns_notify"
+            ) and not merged_integrations.get("taverns_channels"):
                 raise ValueError(
                     "Selecione pelo menos um canal da Tav.gg para publicar."
                 )
@@ -628,9 +634,7 @@ def handle(action, data, context):
         ):
             raise ValueError("Configuração de campanhas inválida.")
         existing = _load_campaign_document()
-        clean_input = {
-            k: v for k, v in value.items() if k not in _COMPUTED_CONFIG_KEYS
-        }
+        clean_input = {k: v for k, v in value.items() if k not in _COMPUTED_CONFIG_KEYS}
         validated = _validate_campaign_patch(clean_input)
         # Preserva seleções mais recentes de integrações/outputs quando save-config é chamado pelo editor legado.
         for preserved_key in ("integrations", "outputs"):

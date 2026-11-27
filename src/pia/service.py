@@ -357,6 +357,14 @@ class WorkspaceService:
         for identity, folder in [("general", CONFIG_DIR), *self.plugin_folders()]:
             if identity in SECTIONS:
                 continue
+            manifest = folder / "pia.json"
+            meta = (
+                json.loads(manifest.read_text(encoding="utf-8"))
+                if manifest.exists()
+                else {}
+            )
+            if meta.get("settings_in_app") is True:
+                continue
             definitions = schema(identity)
             known = {item["name"] for item in definitions}
             definitions = definitions + [
@@ -389,12 +397,6 @@ class WorkspaceService:
                 )
                 for item in definitions
             ]
-            manifest = folder / "pia.json"
-            meta = (
-                json.loads(manifest.read_text(encoding="utf-8"))
-                if manifest.exists()
-                else {}
-            )
             sections.append(
                 dict(
                     id=identity,

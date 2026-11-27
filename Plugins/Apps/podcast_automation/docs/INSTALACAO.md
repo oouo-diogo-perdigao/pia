@@ -10,20 +10,22 @@ instalação próprios do podcast.
 
 ## Configuração
 
-No desktop, clique no botão do Podcast à esquerda e depois em Configurações.
-Edite `.env` e `config/config.json` do próprio app. Os exemplos distribuídos ficam
-em `docs/examples/.env.example` e `docs/examples/config.example.json`.
+Abra o **Podcast Automation** e vá a **Configurações**. Em **Origem das
+gravações**, escolha **Google Drive** e selecione a conta e a pasta, ou escolha
+**Pasta local** e informe o caminho. Caminhos locais relativos partem de
+`Documentos/pia/apps/podcast_automation`. A prévia informa o caminho consultado.
 
-Configure nomes, campanhas, participantes e chaves RSS por campanha. Preserve os
-objetos `nomes_reais`, `campaign_details`, `publication`, `audio` e `processing`.
-Os caminhos relativos são resolvidos a partir desta pasta do app; dados de
-trabalho e caches ficam em `data/`.
+Na mesma tela, configure os formatos de saída, o destino, os anúncios, o
+monitoramento e as opções de publicação. Use **Salvar opções** para aplicar as
+mudanças ao processamento. As preferências ficam no SQLite do perfil. As
+credenciais e contas são gerenciadas nos respectivos conectores.
 
-Para origem local, use `DRIVE_PROCESS=false` e configure `LOCAL_DRIVE_FOLDER`.
-Para origem Google Drive, configure a credencial e pasta indicadas no exemplo.
-Publicação S3/R2 exige endpoint, bucket, chaves e URL pública. Os links para obter
-credenciais aparecem na tela de configuração. A transcrição usa a API da PIA por
-padrão; `TRANSCRIPTION_PROVIDER=whisper` seleciona o fallback local do processador.
+A hora local usa o relógio e o fuso do sistema. Metadados de origem preservam seu
+horário e as datas do RSS são serializadas em UTC.
+
+No editor de campanhas, configure nomes, participantes e chaves RSS por campanha.
+Preserve os objetos `nomes_reais`, `campaign_details`, `publication`, `audio` e
+`processing`. O arquivo `docs/examples/config.example.json` contém um exemplo.
 
 ## Painel
 
