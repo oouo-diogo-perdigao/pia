@@ -56,6 +56,14 @@ ACTION_LABELS = {
     "speak": "PIA: ler área de transferência",
     "storytelling": "PIA: ler em modo história",
 }
+ACTION_FRIENDLY_NAMES = {
+    "voice": "Voz",
+    "dictation": "Ditado",
+    "speak": "Falar",
+    "storytelling": "Narração",
+    "screenshot": "Capturar região",
+    "screenshot_window": "Capturar janela ativa",
+}
 
 DEFAULT_SHORTCUTS = {
     "screenshot": {"windows": "print_screen", "linux": "print_screen"},
@@ -185,7 +193,15 @@ def split_shortcut(shortcut: str) -> tuple[list[str], str]:
     unknown = [item for item in modifiers if item not in GNOME_MODIFIERS]
     if unknown:
         raise ValueError(f"Modificador desconhecido '{unknown[0]}' em '{shortcut}'.")
+    if key in GNOME_MODIFIERS:
+        raise ValueError("Inclua uma tecla além de Ctrl, Alt, Shift ou Win.")
     return modifiers, key
+
+
+def normalize_shortcut(shortcut: str) -> tuple[frozenset[str], str]:
+    modifiers, key = split_shortcut(shortcut)
+    aliases = {"control": "ctrl", "win": "super", "meta": "super"}
+    return frozenset(aliases.get(item, item) for item in modifiers), key
 
 
 def to_gnome(shortcut: str) -> str:
@@ -265,7 +281,7 @@ def _gsettings_set(schema: str, key: str, value: str, path: str | None = None) -
     subprocess.run(["gsettings", "set", target, key, value], check=True)
 
 
-def install_gnome(config: dict) -> None:
+def install_gnome(config: dict) -> list[str]:
     if not shutil.which("gsettings"):
         raise RuntimeError(
             "gsettings não está disponível; não dá para registrar atalhos no GNOME."
@@ -288,6 +304,7 @@ def install_gnome(config: dict) -> None:
 
     enabled_paths = []
     registered = []
+    all_conflicts = []
     for action in ACTIONS:
         shortcut = config["shortcuts"][action]["linux"].strip()
         path = gnome_path(action)
@@ -298,6 +315,7 @@ def install_gnome(config: dict) -> None:
         binding = to_gnome(shortcut)
         conflicts = binding_conflicts(binding, desktop_bindings)
         if conflicts:
+            all_conflicts.extend(conflicts)
             notify(
                 f"{shortcut} ({ACTION_LABELS[action]}) já é usado pelo sistema "
                 f"({', '.join(conflicts)}). Troque 'linux' em shortcuts.yaml."
@@ -313,6 +331,7 @@ def install_gnome(config: dict) -> None:
     rendered = "[" + ", ".join(f"'{path}'" for path in merged) + "]"
     _gsettings_set(GNOME_SCHEMA, "custom-keybindings", rendered)
     log("Atalhos do GNOME atualizados: " + "; ".join(registered))
+    return all_conflicts
 
 
 def read_clipboard() -> str:

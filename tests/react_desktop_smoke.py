@@ -643,6 +643,18 @@ with tempfile.TemporaryDirectory() as directory:
         js(shell, "document.querySelector('[aria-label=\"Bots\"]').click()")
         wait(lambda: js(shell, "!!document.querySelector('.bot-card')"))
         js(shell, "document.querySelector('.bot-card button').click()")
+        secretary_settings_tab = (
+            "[...document.querySelectorAll('[role=tab]')]"
+            ".find(tab => tab.textContent.trim() === 'Configurações e Voz')"
+        )
+        wait(lambda: js(shell, f"!!({secretary_settings_tab})"))
+        js(shell, f"({secretary_settings_tab}).click()")
+        wait(
+            lambda: js(
+                shell,
+                f"({secretary_settings_tab})?.getAttribute('aria-selected') === 'true'",
+            )
+        )
         wait(
             lambda: js(
                 shell,
@@ -655,7 +667,7 @@ with tempfile.TemporaryDirectory() as directory:
         )
         assert js(
             shell,
-            "(()=>{const boxes=['Principal','Destaque','Olhos'].map(name=>[...document.querySelectorAll('label')].find(label=>label.textContent===name).control.getBoundingClientRect());return boxes.every(box=>Math.abs(box.top-boxes[0].top)<2) && boxes[0].left<boxes[1].left && boxes[1].left<boxes[2].left;})()",
+            "(()=>{const boxes=['Principal','Destaque','Olhos'].map(name=>[...document.querySelectorAll('label')].find(label=>label.textContent===name).control.getBoundingClientRect());return boxes.every(box=>box.width>0 && box.height>0 && Math.abs(box.top-boxes[0].top)<2) && boxes[0].left<boxes[1].left && boxes[1].left<boxes[2].left;})()",
         )
         toggle = "[...document.querySelectorAll('label')].find(label=>label.textContent==='Ativar secretária').control.click()"
         js(shell, toggle)
@@ -706,7 +718,7 @@ with tempfile.TemporaryDirectory() as directory:
         wait(lambda: js(shell, "!!document.querySelector('.settings-tree-children')"))
         assert js(
             shell,
-            "[...document.querySelectorAll('.settings-tree-children button')].map(b=>b.textContent).join(',')==='PIA Server,Agentes externos'",
+            "[...document.querySelectorAll('.settings-tree-children button')].map(b=>b.textContent).join(',')==='PIA Server,Agentes externos,Conectores MCP'",
         )
         js(
             shell,

@@ -35,6 +35,8 @@ As contas ficam em **Configurações → [conector]**, não no aplicativo que as
 
 Declare `settings.schema.json` no plugin com campos `name`, `type`, `default`, `label` e `link`. Tipos: bool, int, float, path, file, secret e string. Todos aceitam vazio. Não há `.env` nem configuração por ambiente. Valores ficam no SQLite; credenciais no cofre, com referências no banco. Use `src.settings_store` para ler/salvar e `src.user_paths.user_path` para os dados pessoais.
 
+Apps com formulário próprio podem declarar `"settings_in_app": true` em `pia.json` para ocultar sua seção nas configurações gerais. O schema e os valores do perfil continuam disponíveis para o runtime.
+
 Arquivos de configuração comuns ficam em Documentos/pia/files; arquivos de credenciais são guardados em bytes no cofre. Pastas de saída padrão são resolvidas pelo sistema e não têm overrides por app. Apps oferecem configuração pela interface compartilhada; contas continuam nos conectores. O editor de documentos nativos mantém atalhos, catálogo e palavras de ativação no SQLite.
 
 Veja [Perfil e migração](PROFILE_MIGRATION.md) para exemplos de API, backup criptografado e importação entre Windows/Linux. As regras antigas de sufixos e dotenv existem somente para a migração inicial de instalações anteriores.

@@ -1,5 +1,30 @@
 # PIA Changelog
 
+## [0003 - Worker Python de Podcast em Duas Fases (Plano Pro / Enquete)] - 2026-11-19
+
+### Added
+- Módulo `Plugins/Apps/podcast_automation/src/podcast_automation/server_worker.py` (`python -m podcast_automation.server_worker`): worker Python por sessão em duas fases (`prepare` e `publish`) com transporte JSON via `stdin` e eventos NDJSON (`stage`, `checkpoint`, `result`, `error`) no `stdout` (logs internos redirecionados para `stderr`), sem alterar o fluxo local do desktop.
+- Fase `prepare`: valida bucket e campanha por conta antes de iniciar (`code: "missing_config"` com `missingConfig`), isola configuração (`scoped_podcast_config`) e artefatos em `workDir` exclusivo por conta/gravação, gera áudio/transcrição/resumo/sugestões e persiste `artifactId` + checkpoints (`extracted`, `audio_built`, `transcribed`, `summarized`, `prepared`) em `state.json` sem nunca publicar no RSS nem enviar anúncios.
+- Fase `publish`: valida `recordingId` + `artifactId`, persiste `winnerTitle` antes do envio remoto, aplica o título vencedor nos artefatos (MP3/ID3, SRT, VTT, TXT e `.resumo.json`), faz upload no Object Storage, atualiza `rss.xml` e `transcripts.html` via `RssTranscriptionUpdater` e devolve `announcement` (`text`, `parts`, `mentions`) reutilizando `notification.publication_text` e `notification.message_parts` (idempotente com `alreadyPublished: true` e preservação do vencedor em falhas de RSS).
+
+### Security
+- Credenciais de `account.storage` permanecem apenas em memória durante a execução (nunca persistidas em `state.json`) e são sanitizadas em mensagens de erro; proteção contra Zip Slip na extração de arquivos ZIP.
+
+### Tests
+- Suíte offline com fixtures `Plugins/Apps/podcast_automation/tests/test_server_worker.py` cobrindo retenção antes da enquete, aplicação do título vencedor, formato idêntico de anúncio (`notification.py`), idempotência, falha/retry de RSS, validação de bucket/campanha, Zip Slip e protocolo CLI via subprocesso.
+
+## [0001 - Configurações do Podcast Automation e Capturas] - 2026-11-19
+
+### Changed
+- Podcast Automation concentra configurações operacionais, campanhas e participantes no próprio app, detecta o fuso do computador e carrega as mudanças na próxima execução.
+- O seletor de modelos da 0002 fica em Configurações → Inteligência artificial. Salvar campanhas, opções e o modelo preserva as demais preferências.
+- Capturas reúne pasta de destino, qualidade, atalhos e padrões do editor nas configurações do app. Atalhos atualizados são recarregados imediatamente.
+- O editor de captura reaproveita a janela e recebe o quadro em memória. Um indicador de captura congelada respeita a preferência por movimento reduzido e deixa o primeiro gesto disponível.
+
+### Fixed
+- A pasta de destino das capturas é preservada entre execuções, com fallback quando indisponível.
+- Enter e Espaço acionam os botões do editor de captura quando estão em foco.
+
 ## [0002 - Integração com Modelos Externos Estilo OpenBot] - 2026-11-18
 
 ### Added
